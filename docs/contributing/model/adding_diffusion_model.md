@@ -19,11 +19,12 @@ When add a new diffusion model into vLLM-Omni, additional adaptation work is req
 The diffusion execution flow as follow:
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" src="https://raw.githubusercontent.com/vllm-project/vllm-omni/refs/heads/main/docs/source/architecture/vllm-omni-diffusion-flow.png">
-    <img alt="Diffusion Flow" src="https://raw.githubusercontent.com/vllm-project/vllm-omni/refs/heads/main/docs/source/architecture/vllm-omni-diffusion-flow.png" width=55%>
+    <source media="(prefers-color-scheme: dark)" src="https://raw.githubusercontent.com/Bounty-hunter/vllm-omni/refs/heads/main/docs/source/architecture/vllm-omni-diffusion-flow.png">
+    <img alt="Diffusion Flow" src="https://raw.githubusercontent.com/Bounty-hunter/vllm-omni/refs/heads/main/docs/source/architecture/vllm-omni-diffusion-flow.png" width=55%>
   </picture>
 </p>
 
+https://github.com/Bounty-hunter/vllm-omni.git
 
 # Directory Structure
 File Structure for Adding a New Diffusion Model
