@@ -372,6 +372,10 @@ def run_multimodal_generation(args) -> None:
         prompt = query_func(audio_path=audio_path, custom_prompt=custom_prompt)
     elif args.query_type == "text":
         prompt = query_func(custom_prompt=custom_prompt)
+    elif args.query_type == "mixed_modalities":
+        prompt = query_func(
+            video_path=video_path, image_path=image_path, audio_path=audio_path, custom_prompt=custom_prompt
+        )
     else:
         prompt = query_func()
 
