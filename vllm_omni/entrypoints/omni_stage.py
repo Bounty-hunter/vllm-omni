@@ -21,6 +21,7 @@ from typing import Any
 from vllm.inputs import TextPrompt
 from vllm.inputs.preprocess import InputPreprocessor
 from vllm.logger import init_logger
+from vllm.outputs import RequestOutput
 from vllm.sampling_params import SamplingParams
 from vllm.tokenizers import TokenizerLike
 from vllm.usage.usage_lib import UsageContext
@@ -47,6 +48,7 @@ from vllm_omni.entrypoints.stage_utils import (
     set_stage_devices,
 )
 from vllm_omni.inputs.data import OmniTokensPrompt
+from vllm_omni.outputs import OmniRequestOutput
 from vllm_omni.utils import detect_device_type
 
 logger = init_logger(__name__)
@@ -1468,7 +1470,7 @@ async def _stage_worker_async(
             batch_request_ids, batch_request_outputs, _gen_ms_list, batch_metrics
         ):
             try:
-                r_outputs = [output]
+                r_outputs = [output_strip(output, omni_stage)]
                 use_shm, payload = maybe_dump_to_shm(r_outputs, shm_threshold_bytes)
                 if use_shm:
                     out_q.put(
@@ -1554,3 +1556,43 @@ def make_stage_stats(_agg_total_tokens: int, _agg_total_gen_time_ms: float):
     from vllm_omni.entrypoints.log_utils import StageStats
 
     return StageStats(total_token=_agg_total_tokens, total_gen_time=_agg_total_gen_time_ms)
+
+
+def output_strip(r_output: RequestOutput, omni_stage: OmniStage):
+    if omni_stage.final_output and omni_stage.final_output_type != "text":
+        return r_output
+
+    if isinstance(r_output, OmniRequestOutput):
+        return _output_strip_for_omni_requestoutputs(r_output)
+    elif isinstance(r_output, RequestOutput):
+        return _output_strip_for_requestoutputs(r_output)
+
+    return r_output
+
+
+def _output_strip_for_requestoutputs(r_output: RequestOutput):
+    if getattr(r_output, "finished", False):
+        return r_output
+
+    mm_output = getattr(r_output, "multimodal_output", None)
+    if mm_output is not None:
+        r_output.multimodal_output = {}
+
+    outputs = getattr(r_output, "outputs", None)
+    if outputs is not None:
+        for out in outputs:
+            if getattr(out, "multimodal_output", None):
+                out.multimodal_output = {}
+
+    return r_output
+
+
+def _output_strip_for_omni_requestoutputs(omni_r_output: OmniRequestOutput):
+    if getattr(omni_r_output, "finished", False):
+        return omni_r_output
+
+    r_output = getattr(omni_r_output, "request_output", None)
+    if r_output is not None:
+        return _output_strip_for_requestoutputs(r_output)
+
+    return omni_r_output
