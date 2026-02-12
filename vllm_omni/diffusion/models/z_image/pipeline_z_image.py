@@ -24,7 +24,6 @@ from typing import Any
 import torch
 import torch.nn as nn
 from diffusers.image_processor import VaeImageProcessor
-from diffusers.models.autoencoders import AutoencoderKL
 from diffusers.schedulers import FlowMatchEulerDiscreteScheduler
 from diffusers.utils import logging
 from diffusers.utils.torch_utils import randn_tensor
@@ -32,6 +31,7 @@ from transformers import AutoModel, AutoTokenizer
 from vllm.model_executor.models.utils import AutoWeightsLoader
 
 from vllm_omni.diffusion.data import DiffusionOutput, OmniDiffusionConfig
+from vllm_omni.diffusion.distributed.autoencoders.autoencoder_kl import DistributedAutoencoderKL
 from vllm_omni.diffusion.distributed.utils import get_local_device
 from vllm_omni.diffusion.model_loader.diffusers_loader import DiffusersPipelineLoader
 from vllm_omni.diffusion.models.z_image.z_image_transformer import (
@@ -171,7 +171,7 @@ class ZImagePipeline(nn.Module):
         self.text_encoder = AutoModel.from_pretrained(
             model, subfolder="text_encoder", local_files_only=local_files_only
         )
-        self.vae = AutoencoderKL.from_pretrained(model, subfolder="vae", local_files_only=local_files_only).to(
+        self.vae = DistributedAutoencoderKL.from_pretrained(model, subfolder="vae", local_files_only=local_files_only).to(
             self._execution_device
         )
         # Get vLLM quantization config for linear layers
