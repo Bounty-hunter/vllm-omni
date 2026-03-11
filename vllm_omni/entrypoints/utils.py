@@ -169,7 +169,7 @@ def _convert_dataclasses_to_dict(obj: Any) -> Any:
     return obj
 
 
-def resolve_model_config_path(model: str) -> str:
+def resolve_model_config_path(model: str, kwargs: dict | None = None) -> str:
     """Resolve the stage config file path from the model name.
 
     Resolves stage configuration path based on the model type and device type.
@@ -191,6 +191,8 @@ def resolve_model_config_path(model: str) -> str:
         hf_config = get_config(model, trust_remote_code=True)
         model_type = hf_config.model_type
     except (ValueError, Exception):
+        if kwargs is not None and kwargs.get("model_type", None) and kwargs["model_type"] == "dreamid-omni":
+            return None
         # If standard transformers format fails, try diffusers format
         if file_or_path_exists(model, "model_index.json", revision=None):
             model_type = _try_get_class_name_from_diffusers_config(model)
@@ -249,7 +251,7 @@ def load_stage_configs_from_model(model: str, base_engine_args: dict | None = No
     """
     if base_engine_args is None:
         base_engine_args = {}
-    stage_config_path = resolve_model_config_path(model)
+    stage_config_path = resolve_model_config_path(model, base_engine_args)
     if stage_config_path is None:
         return []
     stage_configs = load_stage_configs_from_yaml(config_path=stage_config_path, base_engine_args=base_engine_args)
@@ -307,7 +309,7 @@ def load_and_resolve_stage_configs(
         Tuple of (config_path, stage_configs)
     """
     if stage_configs_path is None:
-        config_path = resolve_model_config_path(model)
+        config_path = resolve_model_config_path(model, kwargs)
         stage_configs = load_stage_configs_from_model(model, base_engine_args=kwargs)
         if not stage_configs:
             if default_stage_cfg_factory is not None:

@@ -880,6 +880,7 @@ def _stage_worker(
             engine_args["stage_connector_spec"] = stage_connector_spec
             engine_args["stage_id"] = stage_id
         if stage_type == "diffusion":
+            model_type = engine_args.get("model_type", None)
             engine_args = filter_dataclass_kwargs(OmniDiffusionConfig, engine_args)
             engine_args.pop("model_stage", None)
             engine_args.pop("model", None)
@@ -888,6 +889,7 @@ def _stage_worker(
                 stage_id=stage_id,
                 engine_input_source=stage_payload.get("engine_input_source", []),
                 cfg_kv_collect_func=cfg_kv_collect_func,
+                model_type=model_type,
                 **engine_args,
             )
         else:

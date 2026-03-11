@@ -60,7 +60,8 @@ class DiffusionEngine:
         self.executor = executor_class(od_config)
 
         try:
-            self._dummy_run()
+            if self.od_config.model_class_name != "DreamIDOmniPipeline":
+                self._dummy_run()
         except Exception as e:
             logger.error(f"Dummy run failed: {e}")
             self.close()
