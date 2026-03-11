@@ -131,6 +131,11 @@ _DIFFUSION_MODELS = {
         "pipeline_helios",
         "HeliosPipeline",
     ),
+    "DreamIDOmniPipeline": (
+        "dreamid_omni",
+        "pipeline_dreamid_omni",
+        "DreamIDOmniPipeline",
+    ),
 }
 
 
