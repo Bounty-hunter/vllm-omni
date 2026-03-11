@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-import inspect
 import json
 import logging
 import math
@@ -17,14 +16,14 @@ from torchvision.transforms import Compose, Normalize
 from tqdm import tqdm
 
 from vllm_omni.diffusion.data import DiffusionOutput, OmniDiffusionConfig
+from vllm_omni.diffusion.distributed.cfg_parallel import CFGParallelMixin
+from vllm_omni.diffusion.distributed.parallel_state import (
+    get_cfg_group,
+    get_classifier_free_guidance_rank,
+    get_classifier_free_guidance_world_size,
+)
 from vllm_omni.diffusion.distributed.utils import get_local_device
 from vllm_omni.diffusion.models.dreamid_omni.utils.divisible_crop import DivisibleCrop
-from vllm_omni.diffusion.models.dreamid_omni.utils.model_loading import (
-    init_mmaudio_vae,
-    init_text_model,
-    init_wan_vae_2_2,
-    load_fusion_checkpoint,
-)
 from vllm_omni.diffusion.models.dreamid_omni.utils.rearrange import Rearrange
 from vllm_omni.diffusion.models.dreamid_omni.utils.resize import NaResize
 from vllm_omni.diffusion.request import OmniDiffusionRequest
@@ -49,110 +48,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-def get_dreamid_omni_post_process_func(
-    od_config: OmniDiffusionConfig,
-):
-    """Get post-processing function for DreamID-Omni."""
-
-    # Simplified version - actual implementation would depend on VAE configuration
-    def post_process_func(
-        images: torch.Tensor,
-    ):
-        # Basic post-processing - just clamp and convert to uint8
-        images = torch.clamp(images, -1, 1)
-        images = (images + 1) / 2  # [-1, 1] -> [0, 1]
-        images = (images * 255).byte()
-        return images
-
-    return post_process_func
-
-
-def calculate_shift(
-    image_seq_len,
-    base_seq_len: int = 256,
-    max_seq_len: int = 4096,
-    base_shift: float = 0.5,
-    max_shift: float = 1.15,
-):
-    """Calculate shift parameter for scheduling."""
-    m = (max_shift - base_shift) / (max_seq_len - base_seq_len)
-    b = base_shift - m * base_seq_len
-    mu = image_seq_len * m + b
-    return mu
-
-
-def retrieve_timesteps(
-    scheduler,
-    num_inference_steps: int | None = None,
-    device: str | torch.device | None = None,
-    timesteps: list[int] | None = None,
-    sigmas: list[float] | None = None,
-    **kwargs,
-) -> tuple[torch.Tensor, int]:
-    """Retrieve timesteps from scheduler."""
-    if timesteps is not None and sigmas is not None:
-        raise ValueError("Only one of `timesteps` or `sigmas` can be passed. Please choose one to set custom values")
-    if timesteps is not None:
-        accepts_timesteps = "timesteps" in set(inspect.signature(scheduler.set_timesteps).parameters.keys())
-        if not accepts_timesteps:
-            raise ValueError(
-                f"The current scheduler class {scheduler.__class__}'s `set_timesteps` does not support custom"
-                f" timestep schedules. Please check whether you are using the correct scheduler."
-            )
-        scheduler.set_timesteps(timesteps=timesteps, device=device, **kwargs)
-        timesteps = scheduler.timesteps
-        num_inference_steps = len(timesteps)
-    elif sigmas is not None:
-        accept_sigmas = "sigmas" in set(inspect.signature(scheduler.set_timesteps).parameters.keys())
-        if not accept_sigmas:
-            raise ValueError(
-                f"The current scheduler class {scheduler.__class__}'s `set_timesteps` does not support custom"
-                f" sigmas schedules. Please check whether you are using the correct scheduler."
-            )
-        scheduler.set_timesteps(sigmas=sigmas, device=device, **kwargs)
-        timesteps = scheduler.timesteps
-        num_inference_steps = len(timesteps)
-    else:
-        scheduler.set_timesteps(num_inference_steps, device=device, **kwargs)
-        timesteps = scheduler.timesteps
-    return timesteps, num_inference_steps
-
-
-def get_timestep_embedding(
-    timesteps: torch.Tensor,
-    embedding_dim: int,
-    flip_sin_to_cos: bool = False,
-    downscale_freq_shift: float = 1,
-    scale: float = 1,
-    max_period: int = 10000,
-) -> torch.Tensor:
-    """Create sinusoidal timestep embeddings."""
-    assert len(timesteps.shape) == 1, "Timesteps should be a 1d-array"
-
-    half_dim = embedding_dim // 2
-    exponent = -math.log(max_period) * torch.arange(start=0, end=half_dim, dtype=torch.float32, device=timesteps.device)
-    exponent = exponent / (half_dim - downscale_freq_shift)
-
-    emb = torch.exp(exponent).to(timesteps.dtype)
-    emb = timesteps[:, None].float() * emb[None, :]
-
-    # scale embeddings
-    emb = scale * emb
-
-    # concat sine and cosine embeddings
-    emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=-1)
-
-    # flip sine and cosine embeddings
-    if flip_sin_to_cos:
-        emb = torch.cat([emb[:, half_dim:], emb[:, :half_dim]], dim=-1)
-
-    # zero pad
-    if embedding_dim % 2 == 1:
-        emb = torch.nn.functional.pad(emb, (0, 1, 0, 0))
-    return emb
-
-
-class DreamIDOmniPipeline(nn.Module):
+class DreamIDOmniPipeline(nn.Module, CFGParallelMixin):
     """DreamID-Omni pipeline for vLLM-Omni."""
 
     def __init__(
@@ -203,6 +99,16 @@ class DreamIDOmniPipeline(nn.Module):
         self.video_latent_length = 31
         self.audio_latent_length = 157
         self.target_area = 960 * 960
+
+        # Fixed attributes, CFG scales
+        self.video_cfg_scale = 3.0
+        self.video_ref_cfg_scale = 1.5
+        self.audio_cfg_scale = 4.0
+        self.audio_ref_cfg_scale = 2.0
+
+        # Schedulers will be set in forward
+        self.scheduler_video = None
+        self.scheduler_audio = None
 
     def get_audio_video_model_config(self):
         import os
@@ -355,6 +261,128 @@ class DreamIDOmniPipeline(nn.Module):
 
         return sample_scheduler, timesteps
 
+    def diffuse(
+        self,
+        video_noise: torch.Tensor,
+        audio_noise: torch.Tensor,
+        latents_ref_image: torch.Tensor,
+        latents_ref_audio: torch.Tensor,
+        timesteps_video: torch.Tensor,
+        timesteps_audio: torch.Tensor,
+        text_embeddings_video_pos: torch.Tensor,
+        text_embeddings_video_neg: torch.Tensor,
+        text_embeddings_audio_pos: torch.Tensor,
+        text_embeddings_audio_neg: torch.Tensor,
+        max_seq_len_video: int,
+        max_seq_len_audio: int,
+        freqs_scaling_tensor: torch.Tensor,
+        ref_ip_num: int,
+        ref_audio_length: int,
+        ref_audio_lengths: list,
+        scheduler_video,
+        scheduler_audio,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Diffusion loop with CFG parallel support for DreamID-Omni.
+        """
+        for i, (t_v, t_a) in tqdm(enumerate(zip(timesteps_video, timesteps_audio))):
+            timestep_input = torch.full((1,), t_v, device=self.device)
+
+            model_input_video = torch.cat([video_noise[:, :-ref_ip_num], latents_ref_image], dim=1)
+            model_input_video_neg = torch.cat(
+                [video_noise[:, :-ref_ip_num], torch.zeros_like(latents_ref_image)], dim=1
+            )
+
+            model_input_audio = torch.cat([audio_noise[:-ref_audio_length, :], latents_ref_audio], dim=0)
+
+            model_input_audio_neg = torch.cat(
+                [audio_noise[:-ref_audio_length, :], torch.zeros_like(latents_ref_audio)], dim=0
+            )
+            ref_ip_lengths = [ref_ip_num]
+
+            common_args = {
+                "vid_seq_len": max_seq_len_video,
+                "audio_seq_len": max_seq_len_audio,
+                "freqs_scaling": freqs_scaling_tensor,
+                "ref_ip_lengths": [ref_ip_lengths],
+                "ref_audio_lengths": [ref_audio_lengths],
+            }
+            pos_args = {
+                **common_args,
+                "audio_context": [text_embeddings_audio_pos],
+                "vid_context": [text_embeddings_video_pos],
+            }
+            neg_args = {
+                **common_args,
+                "audio_context": [text_embeddings_audio_neg],
+                "vid_context": [text_embeddings_video_neg],
+            }
+
+            if get_classifier_free_guidance_world_size() > 1:
+                # Enable CFG-parallel: rank0 computes positive, rank1 computes negative.
+                cfg_group = get_cfg_group()
+                cfg_rank = get_classifier_free_guidance_rank()
+
+                if cfg_rank == 0:
+                    pred_vid, pred_audio = self.model(
+                        vid=[model_input_video], audio=[model_input_audio], t=timestep_input, **pos_args
+                    )
+                    pre_vid_ip_neg, _ = self.model(
+                        vid=[model_input_video_neg], audio=[model_input_audio], t=timestep_input, **pos_args
+                    )
+                    mix_pred = pre_vid_ip_neg
+                else:
+                    pred_vid, pred_audio = self.model(
+                        vid=[model_input_video], audio=[model_input_audio], t=timestep_input, **neg_args
+                    )
+                    _, pred_refaudio_neg = self.model(
+                        vid=[model_input_video], audio=[model_input_audio_neg], t=timestep_input, **pos_args
+                    )
+                    mix_pred = pred_refaudio_neg
+                pred_vid_gathered = cfg_group.all_gather(pred_vid, separate_tensors=True)
+                pred_audio_gathered = cfg_group.all_gather(pred_audio, separate_tensors=True)
+                mix_pred_gathered = cfg_group.all_gather(mix_pred, separate_tensors=True)
+                pred_vid_pos = pred_vid_gathered[0]
+                pred_vid_neg = pred_vid_gathered[1]
+                pred_audio_pos = pred_audio_gathered[0]
+                pred_audio_neg = pred_audio_gathered[1]
+                pre_vid_ip_neg = mix_pred_gathered[0]
+                pred_refaudio_neg = mix_pred_gathered[1]
+            else:
+                pred_vid_pos, pred_audio_pos = self.model(
+                    vid=[model_input_video], audio=[model_input_audio], t=timestep_input, **pos_args
+                )
+
+                pred_vid_neg, pred_audio_neg = self.model(
+                    vid=[model_input_video], audio=[model_input_audio], t=timestep_input, **neg_args
+                )
+
+                pre_vid_ip_neg, _ = self.model(
+                    vid=[model_input_video_neg], audio=[model_input_audio], t=timestep_input, **pos_args
+                )
+
+                _, pred_refaudio_neg = self.model(
+                    vid=[model_input_video], audio=[model_input_audio_neg], t=timestep_input, **pos_args
+                )
+
+            pred_video_guided = (
+                pred_vid_neg[0]
+                + self.video_cfg_scale * (pred_vid_pos[0] - pred_vid_neg[0])
+                + self.video_ref_cfg_scale * (pred_vid_pos[0] - pre_vid_ip_neg[0])
+            )
+
+            pred_audio_guided = (
+                pred_audio_neg[0]
+                + self.audio_cfg_scale * (pred_audio_pos[0] - pred_audio_neg[0])
+                + self.audio_ref_cfg_scale * (pred_audio_pos[0] - pred_refaudio_neg[0])
+            )
+            video_noise = scheduler_video.step(
+                pred_video_guided.unsqueeze(0), t_v, video_noise.unsqueeze(0), return_dict=False
+            )[0].squeeze(0)
+            audio_noise = scheduler_audio.step(
+                pred_audio_guided.unsqueeze(0), t_a, audio_noise.unsqueeze(0), return_dict=False
+            )[0].squeeze(0)
+
     def forward(
         self,
         request: OmniDiffusionRequest,
@@ -432,77 +460,27 @@ class DreamIDOmniPipeline(nn.Module):
 
         max_seq_len_audio = audio_noise_len
 
-        video_cfg_scale = 3.0
-        video_ref_cfg_scale = 1.5
-        audio_cfg_scale = 4.0
-        audio_ref_cfg_scale = 2.0
         with torch.amp.autocast("cuda", enabled=self.target_dtype != torch.float32, dtype=self.target_dtype):
-            for i, (t_v, t_a) in tqdm(enumerate(zip(timesteps_video, timesteps_audio))):
-                timestep_input = torch.full((1,), t_v, device=self.device)
-
-                model_input_video = torch.cat([video_noise[:, :-ref_ip_num], latents_ref_image], dim=1)
-                model_input_video_neg = torch.cat(
-                    [video_noise[:, :-ref_ip_num], torch.zeros_like(latents_ref_image)], dim=1
-                )
-
-                model_input_audio = torch.cat([audio_noise[:-ref_audio_length, :], latents_ref_audio], dim=0)
-
-                model_input_audio_neg = torch.cat(
-                    [audio_noise[:-ref_audio_length, :], torch.zeros_like(latents_ref_audio)], dim=0
-                )
-                ref_ip_lengths = [ref_ip_num]
-
-                common_args = {
-                    "vid_seq_len": max_seq_len_video,
-                    "audio_seq_len": max_seq_len_audio,
-                    "freqs_scaling": freqs_scaling_tensor,
-                    "ref_ip_lengths": [ref_ip_lengths],
-                    "ref_audio_lengths": [ref_audio_lengths],
-                }
-                pos_args = {
-                    **common_args,
-                    "audio_context": [text_embeddings_audio_pos],
-                    "vid_context": [text_embeddings_video_pos],
-                }
-                neg_args = {
-                    **common_args,
-                    "audio_context": [text_embeddings_audio_neg],
-                    "vid_context": [text_embeddings_video_neg],
-                }
-
-                pred_vid_pos, pred_audio_pos = self.model(
-                    vid=[model_input_video], audio=[model_input_audio], t=timestep_input, **pos_args
-                )
-
-                pred_vid_neg, pred_audio_neg = self.model(
-                    vid=[model_input_video], audio=[model_input_audio], t=timestep_input, **neg_args
-                )
-
-                pre_vid_ip_neg, _ = self.model(
-                    vid=[model_input_video_neg], audio=[model_input_audio], t=timestep_input, **pos_args
-                )
-
-                _, pred_refaudio_neg = self.model(
-                    vid=[model_input_video], audio=[model_input_audio_neg], t=timestep_input, **pos_args
-                )
-
-                pred_video_guided = (
-                    pred_vid_neg[0]
-                    + video_cfg_scale * (pred_vid_pos[0] - pred_vid_neg[0])
-                    + video_ref_cfg_scale * (pred_vid_pos[0] - pre_vid_ip_neg[0])
-                )
-
-                pred_audio_guided = (
-                    pred_audio_neg[0]
-                    + audio_cfg_scale * (pred_audio_pos[0] - pred_audio_neg[0])
-                    + audio_ref_cfg_scale * (pred_audio_pos[0] - pred_refaudio_neg[0])
-                )
-                video_noise = scheduler_video.step(
-                    pred_video_guided.unsqueeze(0), t_v, video_noise.unsqueeze(0), return_dict=False
-                )[0].squeeze(0)
-                audio_noise = scheduler_audio.step(
-                    pred_audio_guided.unsqueeze(0), t_a, audio_noise.unsqueeze(0), return_dict=False
-                )[0].squeeze(0)
+            self.diffuse(
+                video_noise,
+                audio_noise,
+                latents_ref_image,
+                latents_ref_audio,
+                timesteps_video,
+                timesteps_audio,
+                text_embeddings_video_pos,
+                text_embeddings_video_neg,
+                text_embeddings_audio_pos,
+                text_embeddings_audio_neg,
+                max_seq_len_video,
+                max_seq_len_audio,
+                freqs_scaling_tensor,
+                ref_ip_num,
+                ref_audio_length,
+                ref_audio_lengths,
+                scheduler_video,
+                scheduler_audio,
+            )
 
         video_noise_for_decode = video_noise[:, :-ref_ip_num]
         audio_noise_for_decode = audio_noise[:-ref_audio_length, :]
