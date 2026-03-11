@@ -10,9 +10,9 @@ from diffusers.models.modeling_utils import ModelMixin
 from vllm_omni.diffusion.attention.layer import Attention
 
 try:
-    from vllm_omni.diffusion.models.dreamid_omni.utils.dependency_loader import ensure_dependency
+    from vllm_omni.diffusion.models.dreamid_omni.utils.dependency_loader import ensure_dependencies
 
-    ensure_dependency("ovi")
+    ensure_dependencies()
     from ovi.modules.model import (
         ChannelLastConv1d,
         ConvMLP,
@@ -25,11 +25,26 @@ try:
         # rope_apply_3d,
         rope_apply,
         rope_params,
-        rope_params_with_offset,
         sinusoidal_embedding_1d,
     )
 except ImportError:
     raise ImportError("Failed to download and import dependency 'ovi'.")
+
+
+@amp.autocast("cuda", enabled=False)
+def rope_params_with_offset(positions, dim, theta=10000, freqs_scaling=1.0):
+    """
+    Calculates RoPE frequencies for given positions.
+    """
+    assert dim % 2 == 0
+    freqs = 1.0 / torch.pow(theta, torch.arange(0, dim, 2).to(torch.float32).div(dim))
+    if isinstance(freqs_scaling, torch.Tensor):
+        freqs_scaling = freqs_scaling.to(freqs.device)
+    freqs = freqs_scaling * freqs
+
+    freqs = torch.outer(positions.to(freqs.device), freqs)
+    freqs = torch.polar(torch.ones_like(freqs), freqs)
+    return freqs
 
 
 @amp.autocast("cuda", enabled=False)
@@ -153,7 +168,7 @@ class WanSelfAttention(nn.Module):
         self.attn = Attention(
             num_heads=self.num_heads,
             head_size=self.head_dim,
-            num_kv_heads=self.num_kv_heads,
+            num_kv_heads=self.num_heads,
             softmax_scale=1.0 / (self.head_dim**0.5),
             causal=False,
         )
@@ -179,9 +194,9 @@ class WanSelfAttention(nn.Module):
         q, k, v = self.qkv_fn(x)
 
         x = self.attn(
-            q=rope_apply(q, grid_sizes, freqs, ref_lengths=ref_lengths, freqs_scaling=freqs_scaling),
-            k=rope_apply(k, grid_sizes, freqs, ref_lengths=ref_lengths, freqs_scaling=freqs_scaling),
-            v=v,
+            rope_apply(q, grid_sizes, freqs, ref_lengths=ref_lengths, freqs_scaling=freqs_scaling),
+            rope_apply(k, grid_sizes, freqs, ref_lengths=ref_lengths, freqs_scaling=freqs_scaling),
+            v,
         )
 
         # output

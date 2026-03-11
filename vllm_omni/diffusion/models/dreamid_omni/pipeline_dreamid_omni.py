@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-import json
 import logging
 import math
 import os
@@ -29,10 +28,9 @@ from vllm_omni.diffusion.models.dreamid_omni.utils.resize import NaResize
 from vllm_omni.diffusion.request import OmniDiffusionRequest
 
 try:
-    from vllm_omni.diffusion.models.dreamid_omni.utils.dependency_loader import ensure_dependency
+    from vllm_omni.diffusion.models.dreamid_omni.utils.dependency_loader import ensure_dependencies
 
-    ensure_dependency("ovi")
-    from ovi.modules.fusion import FusionModel
+    ensure_dependencies()
     from ovi.utils.fm_solvers import FlowDPMSolverMultistepScheduler, get_sampling_sigmas, retrieve_timesteps
     from ovi.utils.fm_solvers_unipc import FlowUniPCMultistepScheduler
     from ovi.utils.model_loading_utils import (
@@ -43,9 +41,45 @@ try:
     )
 except ImportError:
     raise ImportError("Failed to download and import dependency 'ovi'.")
-
+from vllm_omni.diffusion.models.dreamid_omni.fusion import FusionModel
 
 logger = logging.getLogger(__name__)
+
+
+AUDIO_CONFIG = {
+    "patch_size": [1],
+    "model_type": "t2a",
+    "dim": 3072,
+    "ffn_dim": 14336,
+    "freq_dim": 256,
+    "num_heads": 24,
+    "num_layers": 30,
+    "in_dim": 20,
+    "out_dim": 20,
+    "text_len": 512,
+    "window_size": [-1, -1],
+    "qk_norm": True,
+    "cross_attn_norm": True,
+    "eps": 1e-6,
+    "temporal_rope_scaling_factor": 0.19676,
+}
+
+VIDEO_CONFIG = {
+    "patch_size": [1, 2, 2],
+    "model_type": "ti2v",
+    "dim": 3072,
+    "ffn_dim": 14336,
+    "freq_dim": 256,
+    "num_heads": 24,
+    "num_layers": 30,
+    "in_dim": 48,
+    "out_dim": 48,
+    "text_len": 512,
+    "window_size": [-1, -1],
+    "qk_norm": True,
+    "cross_attn_norm": True,
+    "eps": 1e-6,
+}
 
 
 class DreamIDOmniPipeline(nn.Module, CFGParallelMixin):
@@ -63,7 +97,7 @@ class DreamIDOmniPipeline(nn.Module, CFGParallelMixin):
 
         self.device = get_local_device()
         model = od_config.model
-        ensure_dependency()
+        ensure_dependencies()
         self.target_dtype = torch.bfloat16
 
         # Init Models
@@ -78,24 +112,23 @@ class DreamIDOmniPipeline(nn.Module, CFGParallelMixin):
         self.vae_model_audio = vae_model_audio.bfloat16()
 
         # Load T5 text model
-        self.text_model = init_text_model(model, rank=self.device, cpu_offload=self.cpu_offload)
+        self.text_model = init_text_model(model, rank=self.device)
 
         # Fusion model
         ## load audio/video model config
-        audio_config, video_config = self.get_audio_video_model_config()
-        model = FusionModel(video_config, audio_config)
+        Fusion_model = FusionModel(VIDEO_CONFIG, AUDIO_CONFIG)
 
         checkpoint_path = os.path.join(
             model,
             "DreamID_Omni",
             "dreamid_omni_oneip_part1_old_1000.safetensors",
         )
-        load_fusion_checkpoint(model, checkpoint_path=checkpoint_path)
-        self.model = model
+        load_fusion_checkpoint(Fusion_model, checkpoint_path=checkpoint_path)
+        self.model = Fusion_model
 
         # Fixed attributes, non-configurable
-        self.audio_latent_channel = audio_config.get("in_dim")
-        self.video_latent_channel = video_config.get("in_dim")
+        self.audio_latent_channel = AUDIO_CONFIG.get("in_dim")
+        self.video_latent_channel = VIDEO_CONFIG.get("in_dim")
         self.video_latent_length = 31
         self.audio_latent_length = 157
         self.target_area = 960 * 960
@@ -110,22 +143,9 @@ class DreamIDOmniPipeline(nn.Module, CFGParallelMixin):
         self.scheduler_video = None
         self.scheduler_audio = None
 
-    def get_audio_video_model_config(self):
-        import os
-
-        BASE_DIR = os.path.dirname(__file__)
-        video_config = os.path.join(BASE_DIR, "../config/video.json")
-        audio_config = os.path.join(BASE_DIR, "../config/audio.json")
-        with open(video_config) as f:
-            video_config = json.load(f)
-
-        with open(audio_config) as f:
-            audio_config = json.load(f)
-        return audio_config, video_config
-
     def load_image_latent_ref_ip_video(
         self,
-        paths: str,
+        paths,
         video_frame_height_width,
     ):
         # Load size.
@@ -147,7 +167,6 @@ class DreamIDOmniPipeline(nn.Module, CFGParallelMixin):
             else:
                 return "unknown"
 
-        # import pdb; pdb.set_trace()
         # Load image and video.
         ref_vae_latents = {
             "image": [],
@@ -155,12 +174,10 @@ class DreamIDOmniPipeline(nn.Module, CFGParallelMixin):
         }
         video_h = video_frame_height_width[0]
         video_w = video_frame_height_width[1]
-        if self.cpu_offload:
-            self.vae_model_video.model = self.vae_model_video.model.to(self.device)
         ref_audio_lengths = []
-        # import ipdb; ipdb.set_trace()
         for path in paths:
-            if is_image_or_video_by_extension(path) == "image":
+            file_type = is_image_or_video_by_extension(path)
+            if file_type == "image":
                 with Image.open(path) as img:
                     img = img.convert("RGB")
 
@@ -209,7 +226,7 @@ class DreamIDOmniPipeline(nn.Module, CFGParallelMixin):
                     )
                 ref_vae_latents["image"].append(img_vae_latent)
 
-            elif is_image_or_video_by_extension(path) == "audio":
+            elif file_type == "audio":
                 audio_array, sr = librosa.load(path, sr=16000)
                 audio_array = audio_array[int(sr * 1) : int(sr * 3)]
 
@@ -222,14 +239,16 @@ class DreamIDOmniPipeline(nn.Module, CFGParallelMixin):
                 audio_vae_latent = audio_vae_latent.squeeze(0).transpose(0, 1)
                 ref_vae_latents["audio"].append(audio_vae_latent)
             else:
-                print("Unknown file type.")
-        # import ipdb; ipdb.set_trace()
+                logger.warning(f"Unknown file type: {path}")
 
         ref_vae_latents["image"] = torch.cat(ref_vae_latents["image"], dim=1)
 
         ref_vae_latents["audio"] = torch.cat(ref_vae_latents["audio"], dim=0)
 
         return ref_vae_latents, ref_audio_lengths
+
+    def load_weights(self, weights):
+        pass
 
     def get_scheduler_time_steps(self, sampling_steps, solver_name="unipc", device=0, shift=5.0):
         torch.manual_seed(4)
@@ -382,6 +401,7 @@ class DreamIDOmniPipeline(nn.Module, CFGParallelMixin):
             audio_noise = scheduler_audio.step(
                 pred_audio_guided.unsqueeze(0), t_a, audio_noise.unsqueeze(0), return_dict=False
             )[0].squeeze(0)
+        return video_noise, audio_noise
 
     def forward(
         self,
@@ -424,7 +444,7 @@ class DreamIDOmniPipeline(nn.Module, CFGParallelMixin):
         )
 
         # 3. text embedding
-        text_embeddings = self.text_model([prompt, video_negative_prompt, audio_negative_prompt])
+        text_embeddings = self.text_model([prompt, video_negative_prompt, audio_negative_prompt], device=self.device)
         text_embeddings = [emb.to(self.target_dtype) for emb in text_embeddings]
         text_embeddings_audio_pos = text_embeddings[0]
         text_embeddings_video_pos = text_embeddings[0]
@@ -461,7 +481,7 @@ class DreamIDOmniPipeline(nn.Module, CFGParallelMixin):
         max_seq_len_audio = audio_noise_len
 
         with torch.amp.autocast("cuda", enabled=self.target_dtype != torch.float32, dtype=self.target_dtype):
-            self.diffuse(
+            video_noise, audio_noise = self.diffuse(
                 video_noise,
                 audio_noise,
                 latents_ref_image,

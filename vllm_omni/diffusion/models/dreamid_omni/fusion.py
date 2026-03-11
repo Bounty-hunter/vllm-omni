@@ -4,15 +4,15 @@ import torch.nn as nn
 from vllm_omni.diffusion.attention.layer import Attention
 
 try:
-    from vllm_omni.diffusion.models.dreamid_omni.utils.dependency_loader import ensure_dependency
+    from vllm_omni.diffusion.models.dreamid_omni.utils.dependency_loader import ensure_dependencies
 
-    ensure_dependency("ovi")
-    from ovi.modules.model import WanLayerNorm, WanRMSNorm, rope_apply
+    ensure_dependencies()
+    from ovi.modules.model import WanLayerNorm, WanRMSNorm
 except ImportError:
     raise ImportError("Failed to download and import dependency 'ovi'.")
 
 from vllm_omni.diffusion.distributed.utils import get_local_device
-from vllm_omni.diffusion.models.dreamid_omni.wan2_2 import WanModel
+from vllm_omni.diffusion.models.dreamid_omni.wan2_2 import WanModel, rope_apply
 
 
 class FusionModel(nn.Module):
@@ -40,6 +40,16 @@ class FusionModel(nn.Module):
 
             self.inject_cross_attention_kv_projections()
         self.device = get_local_device()
+
+        self.num_heads = self.video_model.num_heads
+        self.head_dim = self.video_model.dim // self.video_model.num_heads
+        self.attn = Attention(
+            num_heads=self.num_heads,
+            head_size=self.head_dim,
+            num_kv_heads=self.num_heads,
+            softmax_scale=1.0 / (self.head_dim**0.5),
+            causal=False,
+        )
 
     def inject_cross_attention_kv_projections(self):
         for vid_block in self.video_model.blocks:
@@ -101,10 +111,10 @@ class FusionModel(nn.Module):
             q, k, v = cross_attn_block.qkv_fn(src_seq, context)
             k_img = v_img = None
 
-        x = Attention(q, k, v)
+        x = self.attn(q, k, v)
 
         if k_img is not None:
-            img_x = Attention(q, k_img, v_img)
+            img_x = self.attn(q, k_img, v_img)
             x = x + img_x
 
         # is_vid = src_grid_sizes.shape[1] > 1
@@ -122,7 +132,7 @@ class FusionModel(nn.Module):
             freqs_scaling=target_freqs_scaling,
         )
 
-        target_x = Attention(q, k_target, v_target)
+        target_x = self.attn(q, k_target, v_target)
 
         x = x + target_x
 

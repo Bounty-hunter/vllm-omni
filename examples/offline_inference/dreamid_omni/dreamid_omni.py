@@ -16,10 +16,10 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--image-path", type=str, nargs="+", help="list of image-path")
     parser.add_argument("--audio-path", type=str, nargs="+", help="list of audio-path")
-    parser.add_argument("--prompt_json_path", type=str, default=None, help="Text prompt in json format.")
+    parser.add_argument("--prompt-json-path", type=str, default=None, help="Text prompt in json format.")
 
-    parser.add_argument("--height", type=int, default=720, help="Video height.")
-    parser.add_argument("--width", type=int, default=720, help="Video width.")
+    parser.add_argument("--height", type=int, default=704, help="Video height.")
+    parser.add_argument("--width", type=int, default=1024, help="Video width.")
     parser.add_argument("--num-inference-steps", type=int, default=45, help="Sampling steps.")
     parser.add_argument("--solver-name", default="unipc", help="Solver name: unipc|dpm++|euler.")
     parser.add_argument("--shift", type=float, default=5.0, help="Scheduler shift.")
@@ -77,7 +77,7 @@ def main() -> None:
     start = time.perf_counter()
     engine = OmniDiffusion(
         model=args.model,
-        model_class_name="DreamIDOmniPipeline",
+        model_type="dreamid-omni",
         disable_dummy_run=True,
     )
     outputs = engine.generate(prompt, sampling_params)
@@ -86,10 +86,10 @@ def main() -> None:
     if not outputs:
         raise RuntimeError("No output returned from DreamID-Omni.")
     output = outputs[0]
-    generated_video = output.images[0] if output.images else None
-    generated_audio = output.multimodal_output.get("audio") if output.multimodal_output else None
+    generated_video = output.images[0][0]
+    generated_audio = output.images[0][1]
     try:
-        from ovi.utils import save_video
+        from ovi.utils.io_utils import save_video
     except Exception as e:
         raise RuntimeError(f"Failed to extract video and audio from DreamID-Omni output. Error: {e}")
     output_path = args.output

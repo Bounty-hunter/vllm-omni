@@ -195,9 +195,9 @@ def initialize_model(
             od_config.vae_use_tiling = True
 
         # Configure VAE memory optimization settings from config
-        if hasattr(model.vae, "use_slicing"):
+        if hasattr(model, "vae") and hasattr(model.vae, "use_slicing"):
             model.vae.use_slicing = od_config.vae_use_slicing
-        if hasattr(model.vae, "use_tiling"):
+        if hasattr(model, "vae") and hasattr(model.vae, "use_tiling"):
             model.vae.use_tiling = od_config.vae_use_tiling
 
         if is_distributed_vae:
