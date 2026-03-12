@@ -5,9 +5,15 @@ import argparse
 import re
 import time
 
+import librosa
+from PIL import Image
+
 from vllm_omni.diffusion.data import DiffusionParallelConfig
 from vllm_omni.entrypoints.omni import Omni
 from vllm_omni.inputs.data import OmniDiffusionSamplingParams
+
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif"}
+AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".m4a", ".aac", ".ogg"}
 
 
 def parse_args() -> argparse.Namespace:
@@ -25,6 +31,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-inference-steps", type=int, default=45, help="Sampling steps.")
     parser.add_argument("--solver-name", default="unipc", help="Solver name: unipc|dpm++|euler.")
     parser.add_argument("--shift", type=float, default=5.0, help="Scheduler shift.")
+    parser.add_argument("--seed", type=int, default=103, help="Random seed for reproducible generation.")
     parser.add_argument(
         "--cfg-parallel-size",
         type=int,
@@ -44,6 +51,22 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--output", default="dreamid_output.mp4", help="Output video path.")
     return parser.parse_args()
+
+
+def load_image_and_audio(image_paths, audio_paths):
+    image = []
+    audio = []
+
+    for path in image_paths:
+        with Image.open(path) as img:
+            img = img.convert("RGB")
+            image.append(img)
+
+    for path in audio_paths:
+        audio_array, sr = librosa.load(path, sr=16000)
+        audio_array = audio_array[int(sr * 1) : int(sr * 3)]
+        audio.append(audio_array)
+    return image, audio
 
 
 def main() -> None:
@@ -66,18 +89,20 @@ def main() -> None:
             text_prompt = re.sub(r"\[[A-Z_]+\]", "", text_prompt)
             text_prompt = re.sub(r"\n\s*\n", "\n", text_prompt).strip()
 
+    image, audio = load_image_and_audio(args.image_path, args.audio_path)
+
     prompt = {
         "prompt": text_prompt,
-        "image_paths": args.image_path,
-        "audio_paths": args.audio_path,
         "video_negative_prompt": args.video_negative_prompt,
         "audio_negative_prompt": args.audio_negative_prompt,
+        "multi_modal_data": {"image": image, "audio": audio},
     }
 
     sampling_params = OmniDiffusionSamplingParams(
         height=args.height,
         width=args.width,
         num_inference_steps=args.num_inference_steps,
+        seed=args.seed,
         extra_args={
             "solver_name": args.solver_name,
             "shift": args.shift,
