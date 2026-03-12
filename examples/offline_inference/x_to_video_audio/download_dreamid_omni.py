@@ -5,9 +5,6 @@ import time
 
 from huggingface_hub import snapshot_download
 
-# Setup logging
-logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
-
 
 def timed_download(repo_id: str, local_dir: str, allow_patterns: list):
     """Download files from HF repo and log time + destination."""
@@ -22,7 +19,7 @@ def timed_download(repo_id: str, local_dir: str, allow_patterns: list):
     )
 
     elapsed = time.time() - start_time
-    logging.info(f"✅ Finished downloading {repo_id} in {elapsed:.2f} seconds. Files saved at: {local_dir}")
+    print(f"✅ Finished downloading {repo_id} in {elapsed:.2f} seconds. Files saved at: {local_dir}")
 
 
 def main(output_dir: str):
@@ -44,7 +41,7 @@ def main(output_dir: str):
 
     dreamid_dir = os.path.join(output_dir, "DreamID_Omni")
 
-    timed_download(repo_id="chetwinlow1/Ovi", local_dir=dreamid_dir)
+    timed_download(repo_id="XuGuo699/DreamID-Omni", local_dir=dreamid_dir)
 
 
 if __name__ == "__main__":

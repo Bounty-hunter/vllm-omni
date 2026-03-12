@@ -349,7 +349,10 @@ class DreamIDOmniPipeline(nn.Module, CFGParallelMixin):
                     pre_vid_ip_neg, _ = self.model(
                         vid=[model_input_video_neg], audio=[model_input_audio], t=timestep_input, **pos_args
                     )
-                    mix_pred = pre_vid_ip_neg
+                    pred_vid_0 = pred_vid[0]
+                    pred_audio_0 = pred_audio[0]
+                    pre_vid_ip_0 = pre_vid_ip_neg[0]
+                    pred_refaudio_0 = torch.zeros_like(pred_audio_0)  # dummy tensor
                 else:
                     pred_vid, pred_audio = self.model(
                         vid=[model_input_video], audio=[model_input_audio], t=timestep_input, **neg_args
@@ -357,16 +360,22 @@ class DreamIDOmniPipeline(nn.Module, CFGParallelMixin):
                     _, pred_refaudio_neg = self.model(
                         vid=[model_input_video], audio=[model_input_audio_neg], t=timestep_input, **pos_args
                     )
-                    mix_pred = pred_refaudio_neg
-                pred_vid_gathered = cfg_group.all_gather(pred_vid, separate_tensors=True)
-                pred_audio_gathered = cfg_group.all_gather(pred_audio, separate_tensors=True)
-                mix_pred_gathered = cfg_group.all_gather(mix_pred, separate_tensors=True)
-                pred_vid_pos = pred_vid_gathered[0]
-                pred_vid_neg = pred_vid_gathered[1]
-                pred_audio_pos = pred_audio_gathered[0]
-                pred_audio_neg = pred_audio_gathered[1]
-                pre_vid_ip_neg = mix_pred_gathered[0]
-                pred_refaudio_neg = mix_pred_gathered[1]
+                    pred_vid_0 = pred_vid[0]
+                    pred_audio_0 = pred_audio[0]
+                    pre_vid_ip_0 = torch.zeros_like(pred_vid_0)  # dummy tensor
+                    pred_refaudio_0 = pred_refaudio_neg[0]
+
+                pred_vid_gathered = cfg_group.all_gather(pred_vid_0, separate_tensors=True)
+                pred_audio_gathered = cfg_group.all_gather(pred_audio_0, separate_tensors=True)
+                pre_vid_ip_gathered = cfg_group.all_gather(pre_vid_ip_0, separate_tensors=True)
+                pred_refaudio_gathered = cfg_group.all_gather(pred_refaudio_0, separate_tensors=True)
+
+                pred_vid_pos = [pred_vid_gathered[0]]
+                pred_vid_neg = [pred_vid_gathered[1]]
+                pred_audio_pos = [pred_audio_gathered[0]]
+                pred_audio_neg = [pred_audio_gathered[1]]
+                pre_vid_ip_neg = [pre_vid_ip_gathered[0]]
+                pred_refaudio_neg = [pred_refaudio_gathered[1]]
             else:
                 pred_vid_pos, pred_audio_pos = self.model(
                     vid=[model_input_video], audio=[model_input_audio], t=timestep_input, **pos_args

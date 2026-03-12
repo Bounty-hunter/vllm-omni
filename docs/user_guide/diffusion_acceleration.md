@@ -76,6 +76,7 @@ The following table shows which models are currently supported by each accelerat
 |-------|------------------|:--------:|:---------:|:----------:|:--------------:|:------------:|:----:|:----:|
 | **Wan2.2** | `Wan-AI/Wan2.2-T2V-A14B-Diffusers` | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **LTX-2** | `Lightricks/LTX-2` | ❌ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
+| **DreamID-Omni** | `XuGuo699/DreamID-Omni` | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
 
 ### Quantization
 

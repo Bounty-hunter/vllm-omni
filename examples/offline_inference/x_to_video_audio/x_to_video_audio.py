@@ -101,7 +101,7 @@ def main() -> None:
         raise RuntimeError("No output returned from DreamID-Omni.")
     output = outputs[0].request_output
     generated_video = output[0].images[0][0]
-    generated_audio = output[1].images[0][1]
+    generated_audio = output[0].images[0][1]
     try:
         from vllm_omni.diffusion.models.dreamid_omni.utils.dependency_loader import ensure_dependencies
 
