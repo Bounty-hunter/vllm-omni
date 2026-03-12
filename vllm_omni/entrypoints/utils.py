@@ -196,7 +196,7 @@ def resolve_model_config_path(model_type: str) -> str | None:
     return str(stage_config_path)
 
 
-def resolve_model_type(model: str) -> str:
+def resolve_model_type(model: str, kwargs: dict | None = None) -> str:
     """Resolve the model type from the model name.
 
     Args:
@@ -215,6 +215,9 @@ def resolve_model_type(model: str) -> str:
         hf_config = get_config(model, trust_remote_code=True)
         model_type = hf_config.model_type
     except (ValueError, Exception):
+        if kwargs is not None and kwargs.get("model_type", None):
+            model_type = kwargs["model_type"]
+            return model_type
         # If standard transformers format fails, try diffusers format
         if file_or_path_exists(model, "model_index.json", revision=None):
             model_type = _try_get_class_name_from_diffusers_config(model)
@@ -314,7 +317,7 @@ def load_and_resolve_stage_configs(
     Returns:
         Tuple of (config_path, stage_configs)
     """
-    model_type = resolve_model_type(model)
+    model_type = resolve_model_type(model, kwargs)
     if stage_configs_path is None:
         config_path = resolve_model_config_path(model_type)
         stage_configs = load_stage_configs_from_model(config_path, base_engine_args=kwargs)

@@ -5,24 +5,33 @@ import argparse
 import re
 import time
 
-from vllm_omni.entrypoints.omni_diffusion import OmniDiffusion
+from vllm_omni.diffusion.data import DiffusionParallelConfig
+from vllm_omni.entrypoints.omni import Omni
 from vllm_omni.inputs.data import OmniDiffusionSamplingParams
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Offline inference for DreamID-Omni (video + audio).")
     parser.add_argument("--model", required=True, help="DreamID ckpt root directory.")
-    parser.add_argument("--prompt", required=True, help="Text prompt.")
+    parser.add_argument("--model-type", default="dreamid-omni", help="Model type.")
+    parser.add_argument("--prompt", default=None, help="Text prompt.")
 
     parser.add_argument("--image-path", type=str, nargs="+", help="list of image-path")
     parser.add_argument("--audio-path", type=str, nargs="+", help="list of audio-path")
-    parser.add_argument("--prompt-json-path", type=str, default=None, help="Text prompt in json format.")
+    parser.add_argument("--prompt-file", type=str, default=None, help="Text prompt in json format.")
 
     parser.add_argument("--height", type=int, default=704, help="Video height.")
     parser.add_argument("--width", type=int, default=1024, help="Video width.")
     parser.add_argument("--num-inference-steps", type=int, default=45, help="Sampling steps.")
     parser.add_argument("--solver-name", default="unipc", help="Solver name: unipc|dpm++|euler.")
     parser.add_argument("--shift", type=float, default=5.0, help="Scheduler shift.")
+    parser.add_argument(
+        "--cfg-parallel-size",
+        type=int,
+        default=1,
+        choices=[1, 2],
+        help="Number of GPUs used for classifier free guidance parallel size.",
+    )
     parser.add_argument(
         "--video-negative-prompt",
         default="jitter, bad hands, blur, distortion",
@@ -34,18 +43,19 @@ def parse_args() -> argparse.Namespace:
         help="Negative prompt for audio.",
     )
     parser.add_argument("--output", default="dreamid_output.mp4", help="Output video path.")
-    parser.add_argument("--disable-dummy-run", action="store_true", help="Disable engine warmup dummy run.")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    if args.prompt is None and args.prompt_file is None:
+        raise ValueError("Either --prompt or --prompt-file must be provided.")
 
     text_prompt = args.prompt
-    if args.prompt_json_path:
+    if args.prompt_file:
         import json
 
-        with open(args.prompt_json_path) as f:
+        with open(args.prompt_file) as f:
             text_prompt = json.load(f)
             text_prompt = re.sub(
                 r"\[SPEAKER_TIMESTAMPS_START\].*?\[SPEAKER_TIMESTAMPS_END\]", "", text_prompt, flags=re.DOTALL
@@ -74,21 +84,28 @@ def main() -> None:
         },
     )
 
-    start = time.perf_counter()
-    engine = OmniDiffusion(
-        model=args.model,
-        model_type="dreamid-omni",
-        disable_dummy_run=True,
+    parallel_config = DiffusionParallelConfig(
+        cfg_parallel_size=args.cfg_parallel_size,
     )
-    outputs = engine.generate(prompt, sampling_params)
+
+    omni = Omni(
+        model=args.model,
+        parallel_config=parallel_config,
+        model_type=args.model_type,
+    )
+    start = time.perf_counter()
+    outputs = omni.generate(prompt, sampling_params)
     elapsed = time.perf_counter() - start
 
     if not outputs:
         raise RuntimeError("No output returned from DreamID-Omni.")
-    output = outputs[0]
-    generated_video = output.images[0][0]
-    generated_audio = output.images[0][1]
+    output = outputs[0].request_output
+    generated_video = output[0].images[0][0]
+    generated_audio = output[1].images[0][1]
     try:
+        from vllm_omni.diffusion.models.dreamid_omni.utils.dependency_loader import ensure_dependencies
+
+        ensure_dependencies()
         from ovi.utils.io_utils import save_video
     except Exception as e:
         raise RuntimeError(f"Failed to extract video and audio from DreamID-Omni output. Error: {e}")
