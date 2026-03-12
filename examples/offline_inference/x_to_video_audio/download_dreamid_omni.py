@@ -1,14 +1,16 @@
 import argparse
-import logging
 import os
 import time
 
 from huggingface_hub import snapshot_download
 
 
-def timed_download(repo_id: str, local_dir: str, allow_patterns: list):
+def timed_download(repo_id: str, local_dir: str, allow_patterns: list | None = None):
     """Download files from HF repo and log time + destination."""
-    logging.info(f"Starting download from {repo_id} into {local_dir}")
+    if os.path.exists(local_dir):
+        print(f"Directory {local_dir} already exists. Skipping download.")
+        return
+    print(f"Starting download from {repo_id} into {local_dir}")
     start_time = time.time()
 
     snapshot_download(
@@ -39,9 +41,22 @@ def main(output_dir: str):
         allow_patterns=["ext_weights/best_netG.pt", "ext_weights/v1-16.pth"],
     )
 
-    dreamid_dir = os.path.join(output_dir, "DreamID_Omni")
+    dreamid_dir = os.path.join(output_dir, "DreamID-Omni")
 
     timed_download(repo_id="XuGuo699/DreamID-Omni", local_dir=dreamid_dir)
+
+    # Now we construct the config file
+    import json
+
+    data = {
+        "_class_name": "DreamIDOmniPipeline",
+        "fusion": "DreamID-Omni/dreamid_omni_oneip_part1_old_1000.safetensors",
+    }
+
+    with open(os.path.join(output_dir, "model_index.json"), "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+    print(f"model_index.json created at {os.path.join(output_dir, 'model_index.json')}")
 
 
 if __name__ == "__main__":

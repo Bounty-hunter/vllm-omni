@@ -27,7 +27,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--prompt-file", type=str, default=None, help="Text prompt in json format.")
 
     parser.add_argument("--height", type=int, default=704, help="Video height.")
-    parser.add_argument("--width", type=int, default=1024, help="Video width.")
+    parser.add_argument("--width", type=int, default=1280, help="Video width.")
     parser.add_argument("--num-inference-steps", type=int, default=45, help="Sampling steps.")
     parser.add_argument("--solver-name", default="unipc", help="Solver name: unipc|dpm++|euler.")
     parser.add_argument("--shift", type=float, default=5.0, help="Scheduler shift.")

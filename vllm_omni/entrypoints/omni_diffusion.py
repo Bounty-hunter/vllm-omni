@@ -61,24 +61,25 @@ class OmniDiffusion:
                 "model_index.json",
                 od_config.model,
             )
-            if config_dict is not None:
-                if od_config.model_class_name is None:
-                    od_config.model_class_name = config_dict.get("_class_name", None)
-                od_config.update_multimodal_support()
 
+            if config_dict is None:
+                raise FileNotFoundError("model_index.json not found")
+
+            if od_config.model_class_name is None:
+                od_config.model_class_name = config_dict.get("_class_name", None)
+            od_config.update_multimodal_support()
+
+            if od_config.model_class_name == "DreamIDOmniPipeline":
+                od_config.model_config = config_dict
+            else:
                 tf_config_dict = get_hf_file_to_dict(
                     "transformer/config.json",
                     od_config.model,
                 )
                 od_config.tf_model_config = TransformerConfig.from_dict(tf_config_dict)
-            else:
-                raise FileNotFoundError("model_index.json not found")
+
         except (AttributeError, OSError, ValueError, FileNotFoundError):
-            model_type = kwargs.get("model_type")
-            if model_type == "dreamid-omni":
-                cfg = {"model_type": "dreamid-omni"}
-            else:
-                cfg = get_hf_file_to_dict("config.json", od_config.model)
+            cfg = get_hf_file_to_dict("config.json", od_config.model)
             if cfg is None:
                 raise ValueError(f"Could not find config.json or model_index.json for model {od_config.model}")
 
@@ -87,9 +88,7 @@ class OmniDiffusion:
             architectures = cfg.get("architectures") or []
             pipeline_class = None
             # Bagel/NextStep models don't have a model_index.json, so we set the pipeline class name manually
-            if model_type == "dreamid-omni":
-                pipeline_class = "DreamIDOmniPipeline"
-            elif model_type == "bagel" or "BagelForConditionalGeneration" in architectures:
+            if model_type == "bagel" or "BagelForConditionalGeneration" in architectures:
                 pipeline_class = "BagelPipeline"
             elif model_type == "nextstep":
                 if od_config.model_class_name is None:

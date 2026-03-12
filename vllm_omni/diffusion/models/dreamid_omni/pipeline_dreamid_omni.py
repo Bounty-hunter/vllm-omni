@@ -118,12 +118,9 @@ class DreamIDOmniPipeline(nn.Module, CFGParallelMixin, SupportImageInput, Suppor
         ## load audio/video model config
         Fusion_model = FusionModel(VIDEO_CONFIG, AUDIO_CONFIG)
 
-        checkpoint_path = os.path.join(
-            model,
-            "DreamID_Omni",
-            "dreamid_omni_oneip_part1_old_1000.safetensors",
-        )
-        load_fusion_checkpoint(Fusion_model, checkpoint_path=checkpoint_path)
+        checkpoint_path = self.od_config.model_config.get("fusion", None)
+        assert checkpoint_path is not None, "fusion checkpoint path is None"
+        load_fusion_checkpoint(Fusion_model, checkpoint_path=os.path.join(model, checkpoint_path))
         self.model = Fusion_model
         self.transformer = self.model
 
