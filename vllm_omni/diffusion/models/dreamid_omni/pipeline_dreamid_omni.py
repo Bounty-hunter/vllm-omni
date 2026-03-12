@@ -4,6 +4,7 @@
 import logging
 import math
 import os
+from typing import List, Optional
 
 import librosa
 import torch
@@ -41,6 +42,7 @@ try:
     )
 except ImportError:
     raise ImportError("Failed to download and import dependency 'ovi'.")
+
 from vllm_omni.diffusion.models.dreamid_omni.fusion import FusionModel
 
 logger = logging.getLogger(__name__)
@@ -100,8 +102,7 @@ class DreamIDOmniPipeline(nn.Module, CFGParallelMixin):
         ensure_dependencies()
         self.target_dtype = torch.bfloat16
 
-        # Init Models
-        ## Load VAEs
+        # Init models
         vae_model_video = init_wan_vae_2_2(model, rank=self.device)
         vae_model_video.model.requires_grad_(False).eval()
         vae_model_video.model = vae_model_video.model.bfloat16()
@@ -111,29 +112,25 @@ class DreamIDOmniPipeline(nn.Module, CFGParallelMixin):
         vae_model_audio.requires_grad_(False).eval()
         self.vae_model_audio = vae_model_audio.bfloat16()
 
-        # Load T5 text model
         self.text_model = init_text_model(model, rank=self.device)
 
-        # Fusion model
-        ## load audio/video model config
-        Fusion_model = FusionModel(VIDEO_CONFIG, AUDIO_CONFIG)
+        fusion_model = FusionModel(VIDEO_CONFIG, AUDIO_CONFIG)
 
         checkpoint_path = os.path.join(
             model,
-            "DreamID_Omni",
             "dreamid_omni_oneip_part1_old_1000.safetensors",
         )
-        load_fusion_checkpoint(Fusion_model, checkpoint_path=checkpoint_path)
-        self.model = Fusion_model
+        load_fusion_checkpoint(fusion_model, checkpoint_path=checkpoint_path)
+        self.model = fusion_model
 
-        # Fixed attributes, non-configurable
+        # Fixed attributes
         self.audio_latent_channel = AUDIO_CONFIG.get("in_dim")
         self.video_latent_channel = VIDEO_CONFIG.get("in_dim")
         self.video_latent_length = 31
         self.audio_latent_length = 157
         self.target_area = 960 * 960
 
-        # Fixed attributes, CFG scales
+        # CFG scales
         self.video_cfg_scale = 3.0
         self.video_ref_cfg_scale = 1.5
         self.audio_cfg_scale = 4.0
@@ -143,106 +140,72 @@ class DreamIDOmniPipeline(nn.Module, CFGParallelMixin):
         self.scheduler_video = None
         self.scheduler_audio = None
 
+
     def load_image_latent_ref_ip_video(
         self,
-        paths,
+        image_paths,
+        audio_paths,
         video_frame_height_width,
     ):
-        # Load size.
         patch_size = self.model.video_model.patch_size
         vae_stride = [4, 16, 16]
 
-        def is_image_or_video_by_extension(file_path):
-            image_exts = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
-            video_exts = {".mp4", ".avi", ".mov", ".mkv", ".flv", ".webm"}
-            audio_exts = {".wav", ".mp3", ".aac", ".flac"}
-
-            ext = os.path.splitext(file_path)[1].lower()
-            if ext in image_exts:
-                return "image"
-            elif ext in video_exts:
-                return "video"
-            elif ext in audio_exts:
-                return "audio"
-            else:
-                return "unknown"
-
-        # Load image and video.
         ref_vae_latents = {
             "image": [],
             "audio": [],
         }
-        video_h = video_frame_height_width[0]
-        video_w = video_frame_height_width[1]
         ref_audio_lengths = []
-        for path in paths:
-            file_type = is_image_or_video_by_extension(path)
-            if file_type == "image":
-                with Image.open(path) as img:
-                    img = img.convert("RGB")
 
-                    # Calculate the required size to keep aspect ratio and fill the rest with padding.
-                    img_ratio = img.width / img.height
-                    target_ratio = video_w / video_h
+        video_h, video_w = video_frame_height_width
 
-                    if img_ratio > target_ratio:  # Image is wider than target
-                        new_width = video_w
-                        new_height = int(new_width / img_ratio)
-                    else:  # Image is taller than target
-                        new_height = video_h
-                        new_width = int(new_height * img_ratio)
+        # 1) encode images from paths
+        for path in image_paths:
+            with Image.open(path) as img:
+                img = img.convert("RGB")
+                img = img.resize((video_w, video_h), Image.Resampling.LANCZOS)
 
-                    img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            image_transform = Compose(
+                [
+                    NaResize(
+                        resolution=math.sqrt(video_h * video_w),
+                        mode="area",
+                        downsample_only=True,
+                    ),
+                    DivisibleCrop((vae_stride[1] * patch_size[1], vae_stride[2] * patch_size[2])),
+                    Normalize(0.5, 0.5),
+                    Rearrange("t c h w -> c t h w"),
+                ]
+            )
 
-                    # Create a new image with the target size and place the resized image in the center
-                    delta_w = video_w - img.size[0]
-                    delta_h = video_h - img.size[1]
-                    padding = (delta_w // 2, delta_h // 2, delta_w - (delta_w // 2), delta_h - (delta_h // 2))
-                    new_img = ImageOps.expand(img, padding, fill=(255, 255, 255))
+            new_img = image_transform([img])
+            new_img = new_img.transpose(0, 1)
+            new_img = new_img.to(self.device, dtype=self.target_dtype)
 
-                # Transform to tensor and normalize.
-                image_transform = Compose(
-                    [
-                        NaResize(
-                            resolution=math.sqrt(
-                                video_frame_height_width[0] * video_frame_height_width[1]
-                            ),  # 256*448, 480*832
-                            mode="area",
-                            downsample_only=True,
-                        ),
-                        DivisibleCrop((vae_stride[1] * patch_size[1], vae_stride[2] * patch_size[2])),
-                        Normalize(0.5, 0.5),
-                        Rearrange("t c h w -> c t h w"),
-                    ]
+            with torch.no_grad():
+                img_vae_latent = (
+                    self.vae_model_video.wrapped_encode(new_img[:, :, None])
+                    .to(self.target_dtype)
+                    .squeeze(0)
                 )
-                new_img = image_transform([new_img])
-                new_img = new_img.transpose(0, 1)
-                new_img = new_img.to(self.device)
-                new_img = new_img.to(self.target_dtype)
 
-                with torch.no_grad():
-                    img_vae_latent = (
-                        self.vae_model_video.wrapped_encode(new_img[:, :, None]).to(self.target_dtype).squeeze(0)
-                    )
-                ref_vae_latents["image"].append(img_vae_latent)
+            ref_vae_latents["image"].append(img_vae_latent)
 
-            elif file_type == "audio":
-                audio_array, sr = librosa.load(path, sr=16000)
-                audio_array = audio_array[int(sr * 1) : int(sr * 3)]
+        # 2) encode audios from paths
+        for path in audio_paths:
+            audio_array, sr = librosa.load(path, sr=16000)
+            audio_array = audio_array[int(sr * 1): int(sr * 3)]
 
-                audio_tensor = torch.from_numpy(audio_array).float().unsqueeze(0)
-                # print(audio_tensor.shape)#torch.Size([1, 81280])
+            audio_tensor = torch.from_numpy(audio_array).float().unsqueeze(0).to(self.device)
+
+            with torch.no_grad():
                 audio_vae_latent = self.vae_model_audio.wrapped_encode(audio_tensor)
-                # print(audio_vae_latent.shape)#torch.Size([1, 20, length])
-                audio_length = audio_vae_latent.shape[2]
-                ref_audio_lengths.append(audio_length)
-                audio_vae_latent = audio_vae_latent.squeeze(0).transpose(0, 1)
-                ref_vae_latents["audio"].append(audio_vae_latent)
-            else:
-                logger.warning(f"Unknown file type: {path}")
 
+            audio_length = audio_vae_latent.shape[2]
+            ref_audio_lengths.append(audio_length)
+
+            audio_vae_latent = audio_vae_latent.squeeze(0).transpose(0, 1)
+            ref_vae_latents["audio"].append(audio_vae_latent)
         ref_vae_latents["image"] = torch.cat(ref_vae_latents["image"], dim=1)
-
         ref_vae_latents["audio"] = torch.cat(ref_vae_latents["audio"], dim=0)
 
         return ref_vae_latents, ref_audio_lengths
@@ -303,6 +266,7 @@ class DreamIDOmniPipeline(nn.Module, CFGParallelMixin):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Diffusion loop with CFG parallel support for DreamID-Omni.
+        Returns the updated video_noise and audio_noise.
         """
         for i, (t_v, t_a) in tqdm(enumerate(zip(timesteps_video, timesteps_audio))):
             timestep_input = torch.full((1,), t_v, device=self.device)
@@ -317,6 +281,7 @@ class DreamIDOmniPipeline(nn.Module, CFGParallelMixin):
             model_input_audio_neg = torch.cat(
                 [audio_noise[:-ref_audio_length, :], torch.zeros_like(latents_ref_audio)], dim=0
             )
+
             ref_ip_lengths = [ref_ip_num]
 
             common_args = {
@@ -338,7 +303,6 @@ class DreamIDOmniPipeline(nn.Module, CFGParallelMixin):
             }
 
             if get_classifier_free_guidance_world_size() > 1:
-                # Enable CFG-parallel: rank0 computes positive, rank1 computes negative.
                 cfg_group = get_cfg_group()
                 cfg_rank = get_classifier_free_guidance_rank()
 
@@ -358,9 +322,11 @@ class DreamIDOmniPipeline(nn.Module, CFGParallelMixin):
                         vid=[model_input_video], audio=[model_input_audio_neg], t=timestep_input, **pos_args
                     )
                     mix_pred = pred_refaudio_neg
+
                 pred_vid_gathered = cfg_group.all_gather(pred_vid, separate_tensors=True)
                 pred_audio_gathered = cfg_group.all_gather(pred_audio, separate_tensors=True)
                 mix_pred_gathered = cfg_group.all_gather(mix_pred, separate_tensors=True)
+
                 pred_vid_pos = pred_vid_gathered[0]
                 pred_vid_neg = pred_vid_gathered[1]
                 pred_audio_pos = pred_audio_gathered[0]
@@ -386,14 +352,18 @@ class DreamIDOmniPipeline(nn.Module, CFGParallelMixin):
 
             pred_video_guided = (
                 pred_vid_neg[0]
-                + self.video_cfg_scale * (pred_vid_pos[0] - pred_vid_neg[0])
-                + self.video_ref_cfg_scale * (pred_vid_pos[0] - pre_vid_ip_neg[0])
+                ▪ self.video_cfg_scale * (pred_vid_pos[0] - pred_vid_neg[0])
+
+                ▪ self.video_ref_cfg_scale * (pred_vid_pos[0] - pre_vid_ip_neg[0])
+
             )
 
             pred_audio_guided = (
                 pred_audio_neg[0]
-                + self.audio_cfg_scale * (pred_audio_pos[0] - pred_audio_neg[0])
-                + self.audio_ref_cfg_scale * (pred_audio_pos[0] - pred_refaudio_neg[0])
+                ▪ self.audio_cfg_scale * (pred_audio_pos[0] - pred_audio_neg[0])
+
+                ▪ self.audio_ref_cfg_scale * (pred_audio_pos[0] - pred_refaudio_neg[0])
+
             )
             video_noise = scheduler_video.step(
                 pred_video_guided.unsqueeze(0), t_v, video_noise.unsqueeze(0), return_dict=False
@@ -401,6 +371,7 @@ class DreamIDOmniPipeline(nn.Module, CFGParallelMixin):
             audio_noise = scheduler_audio.step(
                 pred_audio_guided.unsqueeze(0), t_a, audio_noise.unsqueeze(0), return_dict=False
             )[0].squeeze(0)
+
         return video_noise, audio_noise
 
     def forward(
@@ -409,42 +380,52 @@ class DreamIDOmniPipeline(nn.Module, CFGParallelMixin):
         **kwargs,
     ) -> DiffusionOutput:
         """Main forward pass for DreamID-Omni pipeline for R2AV task."""
-        # Extract parameters from request
         prompt = request.prompts[0].get("prompt")
         video_negative_prompt = request.prompts[0].get("video_negative_prompt")
         audio_negative_prompt = request.prompts[0].get("audio_negative_prompt")
+
         image_paths = request.prompts[0].get("image_paths")
         audio_paths = request.prompts[0].get("audio_paths")
+
 
         height = request.sampling_params.height
         width = request.sampling_params.width
         num_inference_steps = request.sampling_params.num_inference_steps
         shift = request.sampling_params.extra_args.get("shift", 5.0)
         solver_name = request.sampling_params.extra_args.get("solver_name", "unipc")
+        seed = request.sampling_params.seed if request.sampling_params.seed is not None else 42
 
-        # 1. Prepare reference latents
-        paths = image_paths + audio_paths
+        if len(image_paths) == 0 and len(audio_paths) == 0:
+            raise ValueError("Both image_paths and audio_paths are empty. At least one valid input is required.")
 
         ref_vae_latents, ref_audio_lengths = self.load_image_latent_ref_ip_video(
-            paths=paths,
+            image_paths=image_paths,
+            audio_paths=audio_paths,
             video_frame_height_width=(height, width),
         )
-
         latents_ref_image = ref_vae_latents["image"]
         latents_ref_audio = ref_vae_latents["audio"]
-        ref_ip_num = latents_ref_image.shape[1]
-        ref_audio_length = latents_ref_audio.shape[0]
 
-        # 2. scheduler
+        ref_ip_num = 0 if latents_ref_image is None else latents_ref_image.shape[1]
+        ref_audio_length = 0 if latents_ref_audio is None else latents_ref_audio.shape[0]
+
         scheduler_video, timesteps_video = self.get_scheduler_time_steps(
-            sampling_steps=num_inference_steps, device=self.device, solver_name=solver_name, shift=shift
+            sampling_steps=num_inference_steps,
+            device=self.device,
+            solver_name=solver_name,
+            shift=shift,
         )
         scheduler_audio, timesteps_audio = self.get_scheduler_time_steps(
-            sampling_steps=num_inference_steps, device=self.device, solver_name=solver_name, shift=shift
+            sampling_steps=num_inference_steps,
+            device=self.device,
+            solver_name=solver_name,
+            shift=shift,
         )
 
-        # 3. text embedding
-        text_embeddings = self.text_model([prompt, video_negative_prompt, audio_negative_prompt], device=self.device)
+        text_embeddings = self.text_model(
+            [prompt, video_negative_prompt, audio_negative_prompt],
+            device=self.device,
+        )
         text_embeddings = [emb.to(self.target_dtype) for emb in text_embeddings]
         text_embeddings_audio_pos = text_embeddings[0]
         text_embeddings_video_pos = text_embeddings[0]
@@ -456,28 +437,35 @@ class DreamIDOmniPipeline(nn.Module, CFGParallelMixin):
         video_noise_len = self.video_latent_length + ref_ip_num
         audio_noise_len = self.audio_latent_length + ref_audio_length
         freqs_scaling_tensor = torch.tensor(
-            self.video_latent_length / self.audio_latent_length, device=self.device, dtype=self.target_dtype
+            self.video_latent_length / self.audio_latent_length,
+            device=self.device,
+            dtype=self.target_dtype,
         )
 
         video_noise = torch.randn(
             (self.video_latent_channel, video_noise_len, video_latent_h, video_latent_w),
             device=self.device,
             dtype=self.target_dtype,
-            generator=torch.Generator(device=self.device).manual_seed(42),
+            generator=torch.Generator(device=self.device).manual_seed(seed),
         )
         audio_noise = torch.randn(
             (audio_noise_len, self.audio_latent_channel),
             device=self.device,
             dtype=self.target_dtype,
-            generator=torch.Generator(device=self.device).manual_seed(42),
+            generator=torch.Generator(device=self.device).manual_seed(seed),
         )
 
-        _patch_size_h, _patch_size_w = self.model.video_model.patch_size[1], self.model.video_model.patch_size[2]
+        if (latents_ref_image is None) or (latents_ref_audio is None):
+            raise ValueError("latents_ref_image or latents_ref_audio is None: no valid reference image was loaded or encoded.")
+
+
+        _patch_size_h = self.model.video_model.patch_size[1]
+        _patch_size_w = self.model.video_model.patch_size[2]
 
         max_seq_len_video = (
-            video_noise.shape[1] * video_noise.shape[2] * video_noise.shape[3] // (_patch_size_h * _patch_size_w)
+            video_noise.shape[1] * video_noise.shape[2] * video_noise.shape[3]
+            // (_patch_size_h * _patch_size_w)
         )
-
         max_seq_len_audio = audio_noise_len
 
         with torch.amp.autocast("cuda", enabled=self.target_dtype != torch.float32, dtype=self.target_dtype):
@@ -502,8 +490,8 @@ class DreamIDOmniPipeline(nn.Module, CFGParallelMixin):
                 scheduler_audio,
             )
 
-        video_noise_for_decode = video_noise[:, :-ref_ip_num]
-        audio_noise_for_decode = audio_noise[:-ref_audio_length, :]
+        video_noise_for_decode = video_noise[:, :-ref_ip_num] if ref_ip_num > 0 else video_noise
+        audio_noise_for_decode = audio_noise[:-ref_audio_length, :] if ref_audio_length > 0 else audio_noise
 
         audio_latents_for_vae = audio_noise_for_decode.unsqueeze(0).transpose(1, 2)
         generated_audio = self.vae_model_audio.wrapped_decode(audio_latents_for_vae).squeeze().cpu().float().numpy()
