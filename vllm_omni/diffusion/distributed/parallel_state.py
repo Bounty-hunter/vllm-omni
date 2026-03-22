@@ -850,7 +850,6 @@ def initialize_model_parallel(
         backend=backend,
         parallel_mode="fully_shard",
     )
-
     if enable_expert_parallel:
         od_config: OmniDiffusionConfig | None = get_forward_context().omni_diffusion_config
         if od_config and od_config.is_moe:
@@ -860,8 +859,6 @@ def initialize_model_parallel(
                 backend=backend,
                 parallel_mode="expert",
             )
-        else:
-            raise RuntimeError("Expert parallelism enabled for a non-MoE model ")
 
     init_dit_group(dit_parallel_size, backend)
 

@@ -165,7 +165,7 @@ class UlyssesParallelAttention:
         )
 
         if attn_metadata is not None:
-            if is_joint:
+            if is_joint and not attn_metadata.use_mask_directly:
                 if attn_metadata.joint_attn_mask is None and attn_metadata.attn_mask is None:
                     attn_metadata.attn_mask = None
                 else:
@@ -187,7 +187,7 @@ class UlyssesParallelAttention:
                         else torch.cat([attn_metadata.attn_mask, attn_metadata.joint_attn_mask], dim=1)
                     )
 
-            if attn_metadata.attn_mask is not None:
+            if attn_metadata.attn_mask is not None and not attn_metadata.use_mask_directly:
                 # the final attn_mask is ready, the length should be aligedn with query length
                 assert attn_metadata.attn_mask.shape[1] == query.shape[1], (
                     f"attn_mask length: {attn_metadata.attn_mask.shape[1]} != query length: {query.shape[1]}"
