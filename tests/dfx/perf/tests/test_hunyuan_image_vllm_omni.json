@@ -4,7 +4,7 @@
         "description": "TP=4 baseline",
         "server_type": "vllm-omni",
         "server_params": {
-            "model": "tencent/HunyuanImage-3.0",
+            "model": "/scratch/fq9hpsac/d00806799/model/hunyuanimage-3.0",
             "serve_args": {
                 "tensor-parallel-size": 4,
                 "enable-diffusion-pipeline-profiler": true
@@ -35,7 +35,7 @@
         "description": "TP=4 + Expert Parallel",
         "server_type": "vllm-omni",
         "server_params": {
-            "model": "tencent/HunyuanImage-3.0",
+            "model": "/scratch/fq9hpsac/d00806799/model/hunyuanimage-3.0",
             "serve_args": {
                 "tensor-parallel-size": 4,
                 "enable-expert-parallel": true,
