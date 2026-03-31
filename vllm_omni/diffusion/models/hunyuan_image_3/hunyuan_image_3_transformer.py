@@ -955,22 +955,13 @@ class ImageKVCacheManager:
         """
         bs, q_len, num_kv_heads, head_dim = key.shape
         assert q_len == seq_len, f"for first-step, {q_len} != {seq_len}"
-        key = key.reshape(-1, num_kv_heads, head_dim)
-        value = value.reshape(-1, num_kv_heads, head_dim)
         cached_prompt_len = seq_len - shard_image_size
         if bs > 1:
             assert bs == 2, "for cfg case, bs must be 2"
 
-        cached_key = []
-        cached_value = []
-        for b in range(bs):
-            base = b * seq_len
-            # cache text prompt
-            cached_key.append(key[base : base + cached_prompt_len])
-            cached_value.append(value[base : base + cached_prompt_len])
+        cached_key = key[:, :cached_prompt_len, :, :]
+        cached_value = value[:, :cached_prompt_len, :, :]
 
-        cached_key = torch.cat(cached_key, dim=0)
-        cached_value = torch.cat(cached_value, dim=0)
         self.image_kv_cache_map = (cached_key, cached_value)
 
     def _sp_get_prompt_kv_caches(
@@ -979,23 +970,13 @@ class ImageKVCacheManager:
         seq_len: int,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         cached_key, cached_value = self.image_kv_cache_map
-        bs, q_len, kv_head_num, head_dim = key.shape
+        bs, q_len, _, _ = key.shape
 
-        cached_prompt_len = cached_key.shape[0] // bs
+        cached_prompt_len = cached_key.shape[1]
 
         assert cached_prompt_len == seq_len - q_len
 
-        joint_text_key = []
-        joint_text_value = []
-        for b in range(bs):
-            cache_base = b * cached_prompt_len
-            joint_text_key.append(cached_key[cache_base : cache_base + cached_prompt_len])
-            joint_text_value.append(cached_value[cache_base : cache_base + cached_prompt_len])
-
-        joint_text_key = torch.cat(joint_text_key, dim=0).reshape(bs, cached_prompt_len, kv_head_num, head_dim)
-        joint_text_value = torch.cat(joint_text_value, dim=0).reshape(bs, cached_prompt_len, kv_head_num, head_dim)
-
-        return joint_text_key.contiguous(), joint_text_value.contiguous()
+        return cached_key.contiguous(), cached_value.contiguous()
 
     def __call__(
         self,
@@ -1030,7 +1011,7 @@ class ImageKVCacheManager:
                 self._save_image_kv_caches(key, value, seq_len)
             else:
                 self._sp_save_prompt_kv_caches(key, value, seq_len, shard_image_size)
-                cached_prompt_len = self.image_kv_cache_map[0].shape[0] // bs
+                cached_prompt_len = self.image_kv_cache_map[0].shape[1]
                 # joint text part
                 joint_text_query = query[:, :cached_prompt_len, :, :]
                 joint_text_key = key[:, :cached_prompt_len, :, :]
