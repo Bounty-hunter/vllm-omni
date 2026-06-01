@@ -60,6 +60,12 @@ class OmniGPUWorkerBase(GPUWorker):
                 worker_name=worker_name,
                 local_rank=self.local_rank,
             )
+        self.enable_profile = False
+        self._debug_execute_model_count = 0
+        self._debug_profile_start_at = 500
+        self._debug_profile_stop_at = 1000
+        self._debug_profile_started = False
+        self._debug_profile_stopped = False
 
     def profile(self, is_start: bool = True, profile_prefix: str | None = None):
         """Override to set trace filename before starting the profiler.
@@ -88,6 +94,39 @@ class OmniGPUWorkerBase(GPUWorker):
             self.profiler.start()
         else:
             self.profiler.stop()
+
+    def execute_model(self, *args, **kwargs):
+        if self.enable_profile:
+            self._debug_execute_model_count += 1
+            if (
+                self._debug_execute_model_count == self._debug_profile_start_at
+                and not self._debug_profile_started
+                and not self._debug_profile_stopped
+            ):
+                if self.profiler is not None:
+                    print(
+                        "########################################## starting ar profile ##########################################"
+                    )
+                    self.profile(is_start=True)
+                    print(
+                        "########################################## started ar profile ##########################################"
+                    )
+                self._debug_profile_started = True
+            elif (
+                self._debug_execute_model_count == self._debug_profile_stop_at
+                and self._debug_profile_started
+                and not self._debug_profile_stopped
+            ):
+                if self.profiler is not None:
+                    print(
+                        "########################################## stopping ar profile ##########################################"
+                    )
+                    self.profile(is_start=False)
+                    print(
+                        "########################################## stopped ar profile ##########################################"
+                    )
+                self._debug_profile_stopped = True
+        return super().execute_model(*args, **kwargs)
 
     @torch.inference_mode()
     def determine_available_memory(self) -> int:
