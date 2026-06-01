@@ -124,6 +124,7 @@ async def async_request_image_edits(
 
     try:
         async with session.post(edits_url, data=form) as response:
+
             if response.status == 200:
                 resp_json = await response.json()
                 output.response_body = resp_json

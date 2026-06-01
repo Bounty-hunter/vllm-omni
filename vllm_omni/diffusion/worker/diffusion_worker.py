@@ -192,6 +192,13 @@ class DiffusionWorker:
         # requests, which only carry their request_id in subsequent ticks.
         self._step_lora_state: dict[str, tuple[LoRARequest | None, float]] = {}
         self.stage_id = getattr(od_config, "stage_id", 0)
+        self.enable_profile = False
+        self._debug_exec_model_count = 0
+        self._debug_profile_start_at = 5
+        self._debug_profile_stop_at = 7
+        self._debug_profile_started = False
+        self._debug_profile_stopped = False
+        self._debug_profile_active = False
         self.init_device()
         # Create model runner using the platform-specified class
         model_runner_cls_path = current_omni_platform.get_diffusion_model_runner_cls()
@@ -355,6 +362,36 @@ class DiffusionWorker:
     def execute_model(self, req: OmniDiffusionRequest, od_config: OmniDiffusionConfig) -> DiffusionOutput:
         """Execute a forward pass by delegating to the model runner."""
         assert self.model_runner is not None, "Model runner not initialized"
+        if self.enable_profile:
+            self._debug_exec_model_count += 1
+            if (
+                self._debug_exec_model_count == self._debug_profile_start_at
+                and not self._debug_profile_started
+                and not self._debug_profile_stopped
+            ):
+                print(
+                    "########################################## starting diffusion profile ##########################################"
+                )
+                self.profile(is_start=True)
+                print(
+                    "########################################## started diffusion profile ##########################################"
+                )
+                self._debug_profile_started = True
+                self._debug_profile_active = True
+            elif (
+                self._debug_exec_model_count == self._debug_profile_stop_at
+                and self._debug_profile_started
+                and not self._debug_profile_stopped
+            ):
+                print(
+                    "########################################## stopping diffusion profile ##########################################"
+                )
+                self.profile(is_start=False)
+                print(
+                    "########################################## stopped diffusion profile ##########################################"
+                )
+                self._debug_profile_stopped = True
+                self._debug_profile_active = False
         if self.lora_manager is not None:
             try:
                 self.lora_manager.set_active_adapter(req.sampling_params.lora_request, req.sampling_params.lora_scale)
@@ -366,7 +403,7 @@ class DiffusionWorker:
         ctx = profiler.annotate_context_manager("diffusion_forward") if profiler else nullcontext()
         with ctx:
             output = self.model_runner.execute_model(req)
-        if profiler:
+        if self.enable_profile and profiler and self._debug_profile_active:
             profiler.step()
         return output
 
