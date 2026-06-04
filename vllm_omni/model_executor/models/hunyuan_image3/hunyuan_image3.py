@@ -2064,6 +2064,7 @@ class HunyuanImage3ForConditionalGeneration(nn.Module, SupportsMultiModal, Suppo
         min_score = torch.finfo(logits.dtype).min
 
         if self._is_comprehension:
+            print("dyyyyyyyyyyyyy come?")
             # Comprehension path is stateless: we only need to mask a fixed
             # set of blocked token ids on every step. Do it in one batched
             # index_fill_ instead of a per-(req, id) Python loop of scalar
@@ -2086,7 +2087,7 @@ class HunyuanImage3ForConditionalGeneration(nn.Module, SupportsMultiModal, Suppo
                 sampling_metadata.output_token_ids[req_idx] if req_idx < len(sampling_metadata.output_token_ids) else []
             )
             last_token = decoded_tokens[-1] if decoded_tokens else -1
-
+            print(f"dyyyyyyyyyyyyy get force {decoded_tokens}")
             forced = self._get_forced_token(decoded_tokens)
             if forced is not None:
                 logits[req_idx].fill_(min_score)

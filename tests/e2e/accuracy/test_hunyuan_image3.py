@@ -27,7 +27,6 @@ from tests.e2e.accuracy.helpers import (
     download_images,
     model_output_dir,
 )
-from tests.helpers.mark import hardware_test
 from tests.helpers.runtime import OmniRunner, OmniServer
 from vllm_omni.diffusion.models.hunyuan_image3.prompt_utils import build_prompt_tokens, resolve_stop_token_ids
 
@@ -473,7 +472,6 @@ def _run_dit_model(
             torch.accelerator.empty_cache()
 
 
-@hardware_test(res={"cuda": "H100"}, num_cards=8)
 @pytest.mark.skipif(
     torch.accelerator.device_count() < AR_TP_SIZE + DIT_TP_SIZE,
     reason=f"Needs {AR_TP_SIZE + DIT_TP_SIZE}+ GPUs ({AR_TP_SIZE} AR + {DIT_TP_SIZE} DiT)",

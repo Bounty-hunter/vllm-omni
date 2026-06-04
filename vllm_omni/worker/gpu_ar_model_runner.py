@@ -805,7 +805,9 @@ class GPUARModelRunner(OmniGPUModelRunner, OmniConnectorModelRunnerMixin):
         spec_decode_metadata: Any,
     ):
         sampling_metadata = self.input_batch.sampling_metadata
+        print("dyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy 1")
         if spec_decode_metadata is None:
+            print("dyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy 2")
             model_sample = getattr(self.model, "sample", None)
             self.input_batch.update_async_output_token_ids()
             if logits is not None and callable(model_sample) and getattr(self.model, "prefer_model_sampler", False):
