@@ -129,10 +129,20 @@ class GPUARModelRunner(OmniGPUModelRunner, OmniConnectorModelRunnerMixin):
         req_ids = list(getattr(self.input_batch, "req_ids", []))
         output_token_ids = [list(req_output_token_ids[idx] or []) for idx in range(len(req_ids))]
 
+        print("[ASYNC_TOKEN_DEBUG] _build_model_sampler_output_token_ids called:")
+        print(f"  num_reqs: {len(req_ids)}")
+        print(
+            f"  output_token_ids before repair: {[[t for t in tokens[:10]] if tokens else [] for tokens in output_token_ids]}"
+        )  # Show first 10 tokens
+
         sampled_token_ids_cpu = getattr(self.input_batch, "sampled_token_ids_cpu", None)
         async_copy_ready_event = getattr(self.input_batch, "async_copy_ready_event", None)
         prev_req_id_to_index = getattr(self.input_batch, "prev_req_id_to_index", None)
         if sampled_token_ids_cpu is None or not output_token_ids or prev_req_id_to_index is None:
+            print("[ASYNC_TOKEN_DEBUG] Token repair failed - prerequisites missing:")
+            print(f"  sampled_token_ids_cpu is None: {sampled_token_ids_cpu is None}")
+            print(f"  output_token_ids empty: {not output_token_ids}")
+            print(f"  prev_req_id_to_index is None: {prev_req_id_to_index is None}")
             return output_token_ids
 
         sampled_token_ids: list[list[int]] | None = None
@@ -155,10 +165,29 @@ class GPUARModelRunner(OmniGPUModelRunner, OmniConnectorModelRunnerMixin):
             num_placeholders = len(req_history) - first_placeholder
             num_to_replace = min(num_sampled_ids, num_placeholders)
             req_history[first_placeholder : first_placeholder + num_to_replace] = new_ids[:num_to_replace]
+            print(
+                f"[ASYNC_TOKEN_DEBUG] Repaired req {req_id}: replaced {num_to_replace} tokens at position {first_placeholder}"
+            )
 
         for index, req_history in enumerate(output_token_ids):
             if -1 in req_history:
                 output_token_ids[index] = req_history[: req_history.index(-1)]
+
+        print(
+            f"[ASYNC_TOKEN_DEBUG] output_token_ids after repair: {[[t for t in tokens[:10]] if tokens else [] for tokens in output_token_ids]}"
+        )  # Show first 10 tokens
+
+        # Add warning if token repair failed
+        if any(-1 in history for history in output_token_ids):
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                "Async token repair incomplete: output_token_ids still contains -1 placeholders. "
+                "Prerequisites (prev_req_id_to_index, sampled_token_ids_cpu, async_copy_ready_event) "
+                "were not properly set. This will break models that depend on token history "
+                "(e.g., HunyuanImage3 stage transitions)."
+            )
 
         return output_token_ids
 
@@ -809,6 +838,16 @@ class GPUARModelRunner(OmniGPUModelRunner, OmniConnectorModelRunnerMixin):
         if spec_decode_metadata is None:
             print("dyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy 2")
             model_sample = getattr(self.model, "sample", None)
+            # Log prerequisites before token update
+            print("[ASYNC_TOKEN_DEBUG] Before update_async_output_token_ids:")
+            print(
+                f"  sampled_token_ids_cpu exists: {getattr(self.input_batch, 'sampled_token_ids_cpu', None) is not None}"
+            )
+            print(
+                f"  async_copy_ready_event exists: {getattr(self.input_batch, 'async_copy_ready_event', None) is not None}"
+            )
+            print(f"  prev_req_id_to_index: {getattr(self.input_batch, 'prev_req_id_to_index', None)}")
+            print(f"  current req_ids: {list(getattr(self.input_batch, 'req_ids', []))}")
             self.input_batch.update_async_output_token_ids()
             if logits is not None and callable(model_sample) and getattr(self.model, "prefer_model_sampler", False):
                 # Apply logit bias (min_tokens, allowed_token_ids) before
@@ -987,6 +1026,21 @@ class GPUARModelRunner(OmniGPUModelRunner, OmniConnectorModelRunnerMixin):
                 hidden_states,
                 scheduler_output.total_num_scheduled_tokens,
             )
+
+            # Verify mapping was set by bookkeeping
+            print("[ASYNC_TOKEN_DEBUG] After _bookkeeping_sync:")
+            print(f"  prev_req_id_to_index: {getattr(self.input_batch, 'prev_req_id_to_index', None)}")
+
+            # CRITICAL FIX: Set prev_req_id_to_index for async token repair
+            # In async scheduling, the next iteration needs this mapping to replace
+            # -1 placeholder tokens with actual sampled tokens from this iteration.
+            # This matches upstream vLLM's behavior (gpu_model_runner.py:3598-3602).
+            if self.use_async_scheduling and invalid_req_indices is not None:
+                invalid_req_indices_set = set(invalid_req_indices)
+                self.input_batch.prev_req_id_to_index = {
+                    req_id: i for i, req_id in enumerate(self.input_batch.req_ids) if i not in invalid_req_indices_set
+                }
+                print(f"[ASYNC_TOKEN_DEBUG] Set prev_req_id_to_index: {self.input_batch.prev_req_id_to_index}")
 
         if propose_drafts_after_bookkeeping:
             # ngram and other speculative decoding methods use the sampled
@@ -1205,6 +1259,15 @@ class GPUARModelRunner(OmniGPUModelRunner, OmniConnectorModelRunnerMixin):
                 async_output.sampled_token_ids_cpu,
                 async_output.async_copy_ready_event,
             )
+
+            # CRITICAL FIX: For prefer_model_sampler models, sampling_metadata.output_token_ids
+            # is empty, causing upstream set_async_sampled_token_ids() to set these to None.
+            # We need them for _build_model_sampler_output_token_ids() token repair, so force
+            # set them here regardless of sampling_metadata.output_token_ids state.
+            if self.input_batch.sampled_token_ids_cpu is None:
+                self.input_batch.sampled_token_ids_cpu = async_output.sampled_token_ids_cpu
+                self.input_batch.async_copy_ready_event = async_output.async_copy_ready_event
+                print("[ASYNC_TOKEN_DEBUG] Forced set sampled_token_ids_cpu for prefer_model_sampler")
 
         return async_output
 
