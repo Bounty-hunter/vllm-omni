@@ -962,13 +962,20 @@ class ImageKVCacheManager:
                 f"seq_len({seq_len}) - shard_image_size({shard_image_size})"
             )
 
+        # Use actual max to match _reuse_prompt_kv expectations, but avoid loop syncs
         max_cached_prompt_len = int(cached_prompt_lens.max().item())
         cached_key = key.new_zeros(bs, max_cached_prompt_len, num_kv_heads, head_dim)
         cached_value = value.new_zeros(bs, max_cached_prompt_len, num_kv_heads, head_dim)
-        for b in range(bs):
-            cached_prompt_len = int(cached_prompt_lens[b].item())
-            cached_key[b, :cached_prompt_len] = key[b, :cached_prompt_len]
-            cached_value[b, :cached_prompt_len] = value[b, :cached_prompt_len]
+
+        # Vectorized mask for selective copy - no per-batch .item() calls
+        seq_indices = torch.arange(max_cached_prompt_len, device=cached_prompt_lens.device, dtype=torch.long).unsqueeze(
+            0
+        )
+        mask = seq_indices < cached_prompt_lens.unsqueeze(1)
+        mask_4d = mask.unsqueeze(-1).unsqueeze(-1).expand(bs, max_cached_prompt_len, num_kv_heads, head_dim)
+
+        cached_key = torch.where(mask_4d, key[:, :max_cached_prompt_len, :, :], cached_key)
+        cached_value = torch.where(mask_4d, value[:, :max_cached_prompt_len, :, :], cached_value)
         self.image_kv_cache_map = (cached_key, cached_value)
         self.image_kv_cache_lens = cached_prompt_lens
         return key, value
