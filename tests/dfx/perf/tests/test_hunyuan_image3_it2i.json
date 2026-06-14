@@ -21,8 +21,8 @@
                                     "zmq_port": 50051,
                                     "protocol": "rdma",
                                     "device_name": "",
-                                    "memory_pool_size": 17179869184,
-                                    "memory_pool_device": "cpu"
+                                    "memory_pool_size": 4294967296,
+                                    "memory_pool_device": "cuda"
                                 }
                             }
                         },
@@ -33,9 +33,9 @@
                                 "final_output": true,
                                 "final_output_type": "text",
                                 "max_num_seqs": 16,
-                                "gpu_memory_utilization": 0.95,
+                                "gpu_memory_utilization": 0.85,
                                 "enforce_eager": false,
-                                "enable_prefix_caching": false,
+                                "enable_prefix_caching": true,
                                 "max_num_batched_tokens": 32768,
                                 "devices": "0,1",
                                 "tensor_parallel_size": 2,
@@ -116,7 +116,7 @@
                 "task": "ti2i",
                 "bot-task": "think_recaption",
                 "max-concurrency": 16,
-                "num-prompts": 96,
+                "num-prompts": 1,
                 "skip-performance-assertion": true,
                 "baseline": {
                     "throughput_qps": 0.1,

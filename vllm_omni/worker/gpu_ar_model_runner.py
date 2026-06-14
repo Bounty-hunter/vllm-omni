@@ -1077,6 +1077,9 @@ class GPUARModelRunner(OmniGPUModelRunner, OmniConnectorModelRunnerMixin):
         needs_scheduled_hidden_payload = needs_pooler_payload and (
             self.omni_prefix_cache is None or not self._model_needs_full_prefix_hidden_states()
         )
+        print(
+            f"dyyyyyyyyyyyyyyyyyyyyyyyyy {needs_scheduled_hidden_payload} {needs_pooler_payload} {self.omni_prefix_cache} {self._model_needs_full_prefix_hidden_states()}"
+        )
         if needs_scheduled_hidden_payload and self.omni_prefix_cache is not None:
             if staged_hidden_states_cpu is None:
                 raise RuntimeError("Prefix-cache hidden-state payload requires staged CPU hidden states.")
@@ -1089,6 +1092,7 @@ class GPUARModelRunner(OmniGPUModelRunner, OmniConnectorModelRunnerMixin):
             if audio_sparse_output:
                 pass
             elif len(downstream_req_ids) == len(req_ids_output_copy):
+                print("dyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy sync in 1")
                 hidden_states_cpu = hidden_states[:num_valid_tokens].detach().to("cpu").contiguous()
             else:
                 req_hidden_states_cpu = {}
@@ -1221,7 +1225,7 @@ class GPUARModelRunner(OmniGPUModelRunner, OmniConnectorModelRunnerMixin):
                             )
                     payload.update(mm_payload)
                 pooler_output.append(flatten_payload(payload))
-
+        print(f"dyyyyyyyyyyyyyyyyyyyyyy pooler_output {pooler_output}")
         if pooler_output and self._should_accumulate_full_payload_output():
             for i, rid in enumerate(req_ids_output_copy):
                 req_state = self.requests.get(rid)
