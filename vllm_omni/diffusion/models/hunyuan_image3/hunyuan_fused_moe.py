@@ -120,7 +120,9 @@ class HunyuanFusedMoE:
         impl = resolve_obj_by_qualname(
             current_omni_platform.get_diffusion_model_impl_qualname(op_name),
         )
-        return impl(prefix=prefix, **kwargs)
+        obj = impl(prefix=prefix, **kwargs)
+        print(f"dyyyyyyyyyyyyyyyy moe config: {obj.moe_parallel_config}")
+        return obj
 
     @classmethod
     def make_expert_params_mapping(

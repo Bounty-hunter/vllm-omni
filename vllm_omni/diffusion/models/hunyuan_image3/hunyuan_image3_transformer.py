@@ -30,8 +30,10 @@ from transformers.modeling_outputs import (
 from transformers.modeling_utils import PreTrainedModel
 from vllm.config import CacheConfig
 from vllm.distributed import (
+    get_tensor_model_parallel_rank,
     get_tensor_model_parallel_world_size,
 )
+from vllm.distributed.parallel_state import get_tp_group
 from vllm.model_executor.layers.activation import SiluAndMul
 from vllm.model_executor.layers.linear import (
     MergedColumnParallelLinear,
@@ -1634,6 +1636,7 @@ class HunYuanSparseMoeBlock(nn.Module):
             enable_eplb=self.enable_eplb,
             num_redundant_experts=self.n_redundant_experts,
             pcp_size=1,
+            is_sequence_parallel=True,
         )
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
@@ -1644,7 +1647,14 @@ class HunYuanSparseMoeBlock(nn.Module):
 
         # router_logits: (num_tokens, n_experts)
         router_logits, _ = self.gate(hidden_states)
-        final_hidden_states = self.experts(hidden_states=hidden_states, router_logits=router_logits)
+
+        tp_rank = get_tensor_model_parallel_rank()
+        if tp_rank == 0:
+            final_hidden_states = self.experts(hidden_states=hidden_states, router_logits=router_logits)
+        else:
+            final_hidden_states = torch.empty_like(hidden_states)
+
+        get_tp_group().broadcast(final_hidden_states, src=0)
 
         return final_hidden_states.view(orig_shape)
 
