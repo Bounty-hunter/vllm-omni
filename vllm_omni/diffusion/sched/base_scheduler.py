@@ -128,6 +128,17 @@ class _BaseScheduler(SchedulerInterface):
     def has_requests(self) -> bool:
         return bool(self._waiting or self._running)
 
+    def peek_waiting(self, count: int = 1) -> list[DiffusionRequestState]:
+        """Return up to *count* waiting request states without modifying state."""
+        result: list[DiffusionRequestState] = []
+        for request_id in self._waiting:
+            if len(result) >= count:
+                break
+            state = self._request_states.get(request_id)
+            if state is not None:
+                result.append(state)
+        return result
+
     def get_request_state(self, request_id: str) -> DiffusionRequestState | None:
         return self._request_states.get(request_id)
 

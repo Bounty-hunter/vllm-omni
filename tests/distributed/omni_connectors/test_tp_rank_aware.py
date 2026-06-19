@@ -587,7 +587,7 @@ class TestDistributedReceive:
             ),
             patch("vllm_omni.diffusion.distributed.parallel_state.get_cfg_group", return_value=cfg_group),
         ):
-            assert mgr.receive_multi_kv_cache_distributed(req) is True
+            assert mgr.receive_multi_kv_cache_distributed(req)[0] is True
 
         mgr.receive_multi_kv_cache.assert_called_once()
         assert mgr.receive_multi_kv_cache.call_args.args[2] == torch.device("cpu")
@@ -643,7 +643,7 @@ class TestDistributedReceive:
             ),
             patch("vllm_omni.diffusion.distributed.parallel_state.get_cfg_group", return_value=cfg_group),
         ):
-            assert mgr.receive_multi_kv_cache_distributed(req) is True
+            assert mgr.receive_multi_kv_cache_distributed(req)[0] is True
 
         mgr.receive_multi_kv_cache.assert_not_called()
         assert req.kv_metadata == {"source": "main"}
@@ -667,7 +667,7 @@ class TestDistributedReceive:
         mgr.receive_multi_kv_cache = MagicMock(return_value=True)
 
         with patch("vllm_omni.diffusion.distributed.parallel_state.get_world_group", return_value=world_group):
-            assert mgr.receive_multi_kv_cache_distributed(req, target_device=torch.device("cpu")) is True
+            assert mgr.receive_multi_kv_cache_distributed(req, target_device=torch.device("cpu"))[0] is True
 
         mgr.receive_multi_kv_cache.assert_called_once_with(req, None, torch.device("cpu"))
 
@@ -722,7 +722,7 @@ class TestDistributedReceive:
             ),
             patch("vllm_omni.diffusion.distributed.parallel_state.get_sp_group", return_value=sp_group),
         ):
-            assert mgr.receive_multi_kv_cache_distributed(req) is True
+            assert mgr.receive_multi_kv_cache_distributed(req)[0] is True
 
         # Verify behavior based on role
         if is_owner:
@@ -817,7 +817,7 @@ class TestDistributedReceive:
             ),
             patch("vllm_omni.diffusion.distributed.parallel_state.get_sp_group", return_value=sp_group),
         ):
-            assert mgr.receive_multi_kv_cache_distributed(req) is True
+            assert mgr.receive_multi_kv_cache_distributed(req)[0] is True
 
         # Verify behavior based on role
         if role == "owner":
@@ -882,7 +882,7 @@ class TestDistributedReceive:
             ),
             patch("vllm_omni.diffusion.distributed.parallel_state.get_sp_group", return_value=sp_group),
         ):
-            assert mgr.receive_multi_kv_cache_distributed(req) is False
+            assert mgr.receive_multi_kv_cache_distributed(req) == (True, None)
 
         # Owner attempted to receive but failed
         mgr.receive_multi_kv_cache.assert_called_once()

@@ -71,6 +71,7 @@ stages:
     distributed_executor_backend: "mp"
     omni_kv_config:
       need_recv_cache: true
+      kv_prefetch_count: 1
     parallel_config:
       tensor_parallel_size: 2
       enable_expert_parallel: true

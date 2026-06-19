@@ -4,8 +4,10 @@
 
 import json
 import struct
+import threading
 import time
 from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -13,6 +15,7 @@ import torch
 from vllm.logger import init_logger
 
 from vllm_omni.diffusion.request import OmniDiffusionRequest
+from vllm_omni.platforms import current_omni_platform
 
 from .factory import OmniConnectorFactory
 from .utils.config import TRANSFER_ENGINE_CONNECTOR_NAMES, ConnectorSpec
@@ -75,6 +78,32 @@ class OmniKVCacheConfig:
     recv_timeout: float = 30.0
     from_tp: int = 1
     to_tp: int = 1
+    kv_prefetch_count: int = 0
+
+
+@dataclass
+class KVPrefetchHandle:
+    """Handle for an in-flight async KV cache receive operation."""
+
+    request_id: str
+    _future: Future
+    _cancel_event: threading.Event
+    stream: Any = None
+
+    @property
+    def done(self) -> bool:
+        return self._future.done() or self._cancel_event.is_set()
+
+    def cancel(self) -> None:
+        self._cancel_event.set()
+
+    def result(self, timeout: float | None = None) -> dict | None:
+        if self._cancel_event.is_set():
+            return None
+        try:
+            return self._future.result(timeout=timeout)
+        except Exception:
+            return None
 
 
 @dataclass
@@ -335,6 +364,10 @@ class OmniKVTransferManager:
         # per-rank metadata for heterogeneous TP without querying a registry.
         self._sender_base_host: str | None = None
         self._sender_base_zmq_port: int | None = None
+
+        # Prefetch resources (lazily initialized)
+        self._prefetch_stream: Any = None
+        self._prefetch_executor: ThreadPoolExecutor | None = None
 
         if config.need_send_cache and config.connector_config:
             try:
@@ -1251,15 +1284,18 @@ class OmniKVTransferManager:
         req: Any,
         cfg_kv_collect_func: Callable | None = None,
         target_device: torch.device | None = None,
-    ) -> bool:
-        """Distributed wrapper around :meth:`receive_multi_kv_cache`.
+    ) -> tuple[bool, dict | None]:
+        """Receive phase: I/O polling + payload collection.
 
         TP-aware path selection:
         - world size 1: direct receive
         - TP active, cfg size 1: each rank independently receives
-        - TP active, cfg size > 1: cfg-rank 0 receives, then broadcasts to
-          peers that share the same TP rank
-        - TP inactive: legacy rank-0 receive then world broadcast
+        - TP active, cfg size > 1: owner receives to CPU, collects payload
+        - TP inactive: legacy rank-0 receive to CPU
+
+        Returns:
+            (success, kv_payload) where kv_payload carries a "type" tag
+            for broadcast_multi_kv_cache_distributed to consume.
         """
         from vllm_omni.diffusion.distributed.parallel_state import (
             get_cfg_group,
@@ -1267,40 +1303,32 @@ class OmniKVTransferManager:
             get_classifier_free_guidance_world_size,
             get_sequence_parallel_rank,
             get_sequence_parallel_world_size,
-            get_sp_group,
             get_world_group,
         )
 
         world = get_world_group()
 
         if world.world_size <= 1:
-            return self.receive_multi_kv_cache(req, cfg_kv_collect_func, target_device)
+            ok = self.receive_multi_kv_cache(req, cfg_kv_collect_func, target_device)
+            if not ok:
+                return False, None
+            return True, self._collect_request_kv_payload(req)
 
         topo = self._tp_topo
         tp_active = topo.source_tp_size > 1 or topo.target_tp_size > 1
-        cfg_size = 1
-        cfg_rank = 0
-        cfg_group = None
-        sp_size = 1
-        sp_rank = 0
-        sp_group = None
+
         try:
             cfg_size = get_classifier_free_guidance_world_size()
             cfg_rank = get_classifier_free_guidance_rank()
             cfg_group = get_cfg_group()
         except Exception:
-            cfg_size = 1
-            cfg_rank = 0
-            cfg_group = None
+            cfg_size, cfg_rank, cfg_group = 1, 0, None
 
         try:
             sp_size = get_sequence_parallel_world_size()
             sp_rank = get_sequence_parallel_rank()
-            sp_group = get_sp_group()
         except Exception:
-            sp_size = 1
-            sp_rank = 0
-            sp_group = None
+            sp_size, sp_rank = 1, 0
 
         if tp_active and (cfg_size <= 1 and sp_size <= 1):
             logger.info(
@@ -1309,67 +1337,177 @@ class OmniKVTransferManager:
                 topo.source_tp_size,
                 topo.target_tp_size,
             )
-            return self.receive_multi_kv_cache(req, cfg_kv_collect_func, target_device)
+            ok = self.receive_multi_kv_cache(req, cfg_kv_collect_func, target_device)
+            if not ok:
+                return False, None
+            return True, self._collect_request_kv_payload(req)
+
+        is_owner = cfg_rank == 0 and sp_rank == 0
+        kv_payload: dict[str, object] | None = None
 
         if tp_active and (cfg_size > 1 or sp_size > 1):
-            kv_payload: dict[str, object] | None = None
-            is_owner = cfg_rank == 0 and sp_rank == 0
-
-            # step1: only owner need to receive
             if is_owner:
-                received = self.receive_multi_kv_cache(
+                ok = self.receive_multi_kv_cache(
                     req,
                     cfg_kv_collect_func,
                     torch.device("cpu"),
                 )
-                if received:
-                    if cfg_size > 1:  # build cfg-local payloads
-                        cfg_rank_payloads = self._build_cfg_rank_local_payloads(
-                            req,
-                            cfg_size,
-                        )
-                        kv_payload = cfg_rank_payloads[0]
-                        # send to other cfg
-                        for dst_cfg_rank in range(1, cfg_size):
-                            cfg_group.send_object(
-                                cfg_rank_payloads[dst_cfg_rank],
-                                dst_cfg_rank,
-                            )
-                    elif sp_size > 1:
-                        kv_payload = self._collect_request_kv_payload(req)
+                if not ok:
+                    # Failure — broadcast will handle None sentinel
+                    return True, None
+
+                if cfg_size > 1:
+                    cfg_payloads = self._build_cfg_rank_local_payloads(req, cfg_size)
+                    kv_payload = {"type": "cfg", "cfg_payloads": cfg_payloads}
                 else:
-                    # Owner receive failed: send None sentinel to CFG followers to avoid deadlock
-                    if cfg_size > 1:
-                        for dst_cfg_rank in range(1, cfg_size):
-                            cfg_group.send_object(None, dst_cfg_rank)
+                    kv_payload = {
+                        "type": "sp_or_single",
+                        "payload": self._collect_request_kv_payload(req),
+                    }
+
             elif sp_rank == 0 and cfg_size > 1:
-                kv_payload = cfg_group.recv_object(0)
-            # sp broadcast
-            if sp_size > 1 and sp_group is not None:
-                kv_payload = sp_group.broadcast_object(
-                    kv_payload,
-                    src=0,
-                )
+                kv_payload = {"type": "cfg_follower", "payload": cfg_group.recv_object(0)}
 
-            if not kv_payload:
-                return False
+            return True, kv_payload
 
-            self._apply_request_kv_payload(req, kv_payload, target_device)
-            return True
-
-        kv_payload: dict[str, object] | None = None
+        # Legacy path: rank-0 receives then world broadcasts
         if world.rank_in_group == 0:
-            received = self.receive_multi_kv_cache(req, cfg_kv_collect_func, torch.device("cpu"))
-            if received:
-                kv_payload = self._collect_request_kv_payload(req)
+            ok = self.receive_multi_kv_cache(req, cfg_kv_collect_func, torch.device("cpu"))
+            if ok:
+                kv_payload = {
+                    "type": "sp_or_single",
+                    "payload": self._collect_request_kv_payload(req),
+                }
+        return True, kv_payload
 
-        kv_payload = world.broadcast_object(kv_payload, src=0)
+    def broadcast_multi_kv_cache_distributed(
+        self,
+        req: Any,
+        kv_payload: dict | None,
+        target_device: torch.device | None = None,
+    ) -> bool:
+        """Broadcast phase: CFG send/recv, SP broadcast, apply to device.
 
+        Consumes the payload produced by receive_multi_kv_cache_distributed.
+        """
         if not kv_payload:
             return False
 
-        self._apply_request_kv_payload(req, kv_payload, target_device)
+        from vllm_omni.diffusion.distributed.parallel_state import (
+            get_cfg_group,
+            get_sequence_parallel_world_size,
+            get_sp_group,
+            get_world_group,
+        )
+
+        world = get_world_group()
+
+        # Simple paths: payload already applied during receive
+        if world.world_size <= 1:
+            self._apply_request_kv_payload(req, kv_payload, target_device)
+            return True
+
+        ptype = kv_payload.get("type")
+
+        # Determine final_payload based on type
+        if ptype == "cfg":
+            try:
+                cfg_group = get_cfg_group()
+            except Exception:
+                cfg_group = None
+            cfg_payloads = kv_payload["cfg_payloads"]
+            # Owner sends slices to other CFG ranks
+            for dst in range(1, len(cfg_payloads)):
+                cfg_group.send_object(cfg_payloads[dst], dst)
+            final_payload = cfg_payloads[0]
+        elif ptype == "cfg_follower":
+            final_payload = kv_payload["payload"]
+        elif ptype == "sp_or_single":
+            final_payload = kv_payload.get("payload")
+            # Legacy world broadcast
+            topo = self._tp_topo
+            tp_active = topo.source_tp_size > 1 or topo.target_tp_size > 1
+            if not tp_active:
+                final_payload = world.broadcast_object(final_payload, src=0)
+        else:
+            final_payload = kv_payload
+
+        # SP broadcast
+        sp_size = 1
+        try:
+            sp_size = get_sequence_parallel_world_size()
+        except Exception:
+            pass
+        if sp_size > 1:
+            try:
+                sp_group = get_sp_group()
+                final_payload = sp_group.broadcast_object(final_payload, src=0)
+            except Exception:
+                pass
+
+        if not final_payload:
+            return False
+
+        self._apply_request_kv_payload(req, final_payload, target_device)
         return True
+
+    def receive_and_broadcast_kv_cache(
+        self,
+        req: Any,
+        cfg_kv_collect_func: Callable | None = None,
+        target_device: torch.device | None = None,
+    ) -> bool:
+        """Synchronous receive + broadcast in one call (backward-compatible)."""
+        success, kv_payload = self.receive_multi_kv_cache_distributed(
+            req,
+            cfg_kv_collect_func,
+            target_device,
+        )
+        if not success:
+            return False
+        if kv_payload is None:
+            return False
+        return self.broadcast_multi_kv_cache_distributed(req, kv_payload, target_device)
+
+    def _ensure_prefetch_resources(self) -> None:
+        """Lazily initialize prefetch stream and thread pool."""
+        if self._prefetch_stream is None:
+            self._prefetch_stream = current_omni_platform.Stream()
+        if self._prefetch_executor is None:
+            self._prefetch_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="kv_prefetch")
+
+    def prefetch_kv_cache(
+        self,
+        req: Any,
+        cfg_kv_collect_func: Callable | None = None,
+        target_device: torch.device | None = None,
+        cancel_event: threading.Event | None = None,
+    ) -> KVPrefetchHandle:
+        """Start background prefetch: entire receive runs on a side stream."""
+        self._ensure_prefetch_resources()
+        cancel = cancel_event or threading.Event()
+        stream = self._prefetch_stream
+
+        def _do_prefetch() -> dict | None:
+            if cancel.is_set():
+                return None
+            with current_omni_platform.stream(stream):
+                success, kv_payload = self.receive_multi_kv_cache_distributed(
+                    req,
+                    cfg_kv_collect_func,
+                    target_device,
+                )
+            if not success or cancel.is_set():
+                return None
+            return kv_payload
+
+        future = self._prefetch_executor.submit(_do_prefetch)
+        return KVPrefetchHandle(
+            request_id=getattr(req, "request_id", ""),
+            _future=future,
+            _cancel_event=cancel,
+            stream=stream,
+        )
 
 
 def _move_to_device(obj: object, device: torch.device) -> object:

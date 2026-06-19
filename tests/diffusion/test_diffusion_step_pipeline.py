@@ -256,7 +256,10 @@ def _make_runner():
     runner.offload_backend = None
     runner.state_cache = {}
     runner.kv_transfer_manager = SimpleNamespace(
-        receive_multi_kv_cache_distributed=lambda req, cfg_kv_collect_func=None, target_device=None: None
+        receive_multi_kv_cache_distributed=lambda req, cfg_kv_collect_func=None, target_device=None: (True, None),
+        receive_and_broadcast_kv_cache=lambda req, cfg_kv_collect_func=None, target_device=None: None,
+        broadcast_multi_kv_cache_distributed=lambda req, kv_payload=None, target_device=None: True,
+        config=SimpleNamespace(kv_prefetch_count=0, recv_timeout=30.0),
     )
     return runner
 
@@ -274,7 +277,10 @@ def _make_distributed_runner(mode: str, device: torch.device):
     runner.offload_backend = None
     runner.state_cache = {}
     runner.kv_transfer_manager = SimpleNamespace(
-        receive_multi_kv_cache_distributed=lambda req, cfg_kv_collect_func=None, target_device=None: None
+        receive_multi_kv_cache_distributed=lambda req, cfg_kv_collect_func=None, target_device=None: (True, None),
+        receive_and_broadcast_kv_cache=lambda req, cfg_kv_collect_func=None, target_device=None: None,
+        broadcast_multi_kv_cache_distributed=lambda req, kv_payload=None, target_device=None: True,
+        config=SimpleNamespace(kv_prefetch_count=0, recv_timeout=30.0),
     )
     return runner
 
@@ -486,10 +492,16 @@ class TestRunner:
                 return super().prepare_encode(state, **kwargs)
 
         class _KVTransferManager:
-            def receive_multi_kv_cache_distributed(self, req, cfg_kv_collect_func=None, target_device=None):
+            config = SimpleNamespace(kv_prefetch_count=0, recv_timeout=30.0)
+
+            def receive_and_broadcast_kv_cache(self, req, cfg_kv_collect_func=None, target_device=None):
                 captured["cfg_kv_collect_func"] = cfg_kv_collect_func
                 captured["target_device"] = target_device
                 req.sampling_params.past_key_values = kv_payload
+                return True
+
+            def receive_multi_kv_cache_distributed(self, req, cfg_kv_collect_func=None, target_device=None):
+                return (True, None)
 
         runner.pipeline = _CapturingStepPipeline()
         runner.pipeline.device = torch.device("cpu")

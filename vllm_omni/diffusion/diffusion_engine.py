@@ -44,7 +44,7 @@ from vllm_omni.diffusion.registry import (
 )
 from vllm_omni.diffusion.request import DUMMY_DIFFUSION_REQUEST_ID, OmniDiffusionRequest
 from vllm_omni.diffusion.sched import RequestScheduler, SchedulerInterface, StepScheduler
-from vllm_omni.diffusion.sched.interface import DiffusionRequestStatus
+from vllm_omni.diffusion.sched.interface import DiffusionRequestStatus, NewRequestData
 from vllm_omni.diffusion.worker.utils import BaseRunnerOutput, BatchRunnerOutput, RunnerOutput
 from vllm_omni.errors import client_error_from_metadata, is_client_error_status
 from vllm_omni.inputs.data import OmniDiffusionSamplingParams, OmniTextPrompt
@@ -137,6 +137,12 @@ class DiffusionEngine:
             max_num_seqs = self.scheduler.max_num_running_reqs
             self.scheduler.max_num_running_reqs = 1
             logger.warning(f"Non-stepwise-execution does not support max-num-seqs={max_num_seqs}, set it to 1.")
+
+        # KV prefetch config
+        omni_kv_config = getattr(od_config, "omni_kv_config", None) or {}
+        self._kv_prefetch_count = (
+            int(omni_kv_config.get("kv_prefetch_count", 0)) if isinstance(omni_kv_config, dict) else 0
+        )
         self.main_loop: asyncio.AbstractEventLoop | None = None
         self.stop_event: threading.Event | None = None
         self.worker_thread: threading.Thread | None = None
@@ -310,6 +316,12 @@ class DiffusionEngine:
                     continue
 
                 sched_output = self.scheduler.schedule()
+
+            # Populate prefetch hints for waiting requests
+            if self._kv_prefetch_count > 0 and not sched_output.is_empty:
+                waiting_states = self.scheduler.peek_waiting(count=self._kv_prefetch_count)
+                if waiting_states:
+                    sched_output.prefetch_hint_reqs = [NewRequestData.from_state(s) for s in waiting_states]
 
             if sched_output.is_empty:
                 self._handle_finished_requests(sched_output.finished_req_ids, None)
