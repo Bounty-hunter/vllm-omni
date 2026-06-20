@@ -959,7 +959,7 @@ class HunyuanImage3Processor:
         self,
         image: Image.Image,
         target_size: tuple[int, int],
-        crop_type: str = "resize",
+        crop_type: str = "center",
     ) -> Image.Image:
         # Default mode mirrors the official `infer_align_image_size=True`
         # path (image_processor.py:355 → crop_type="resize") used by the
@@ -1792,27 +1792,19 @@ class HunyuanImage3ForConditionalGeneration(nn.Module, SupportsMultiModal, Suppo
         Encode images through VAE encoder.
         """
         config = self.vae.config
+        print(f"dyyyyyyyyyyyyyyyyyyyyyyy {generator}")
 
-        # Cast pixel input to model dtype here (at the encoder boundary)
-        # rather than inside HunyuanImage3Processor.process_image. This
-        # matches HF's path which keeps fp32 pixels in build_cond_images and
-        # only casts inside the VAE forward — preserving fp32 precision in
-        # the multimodal_data dict and minimizing precision drift vs HF.
-        # Verified by pixel-tensor diff: removing the early bf16 cast brings
-        # omni's vae_pixel_values byte-identical to HF's (within fp32 noise),
-        # whereas an early cast leaves a ~7e-4 mean-abs-diff bf16 quantization
-        # error on every element.
-        if images.dtype != self.vae.dtype:
-            images = images.to(dtype=self.vae.dtype)
+        # Use fp16 autocast matching DiT's vae_encode (pipeline_hunyuan_image3.py:1076).
+        # VAE weights are converted to fp16 in load_weights() for compatibility.
+        with torch.autocast(device_type=images.device.type, dtype=torch.float16, enabled=True):
+            vae_encode_result = self.vae.encode(images)
+            latents = vae_encode_result.latent_dist.sample(generator)
 
-        vae_encode_result = self.vae.encode(images)
-        latents = vae_encode_result.latent_dist.sample(generator)
-
-        # Apply shift and scaling factors if present
-        if hasattr(config, "shift_factor") and config.shift_factor:
-            latents.sub_(config.shift_factor)
-        if hasattr(config, "scaling_factor") and config.scaling_factor:
-            latents.mul_(config.scaling_factor)
+            # Apply shift and scaling factors if present
+            if hasattr(config, "shift_factor") and config.shift_factor:
+                latents.sub_(config.shift_factor)
+            if hasattr(config, "scaling_factor") and config.scaling_factor:
+                latents.mul_(config.scaling_factor)
 
         # Handle temporal dimension if present
         # from (B, C, T, H, W) to (B, C, H, W)
@@ -1953,8 +1945,11 @@ class HunyuanImage3ForConditionalGeneration(nn.Module, SupportsMultiModal, Suppo
         vae_token_embeddings = []
         for vae_image_i in vae_pixel_values:
             t_i, latents_i = self._vae_encode(vae_image_i.unsqueeze(0), vae_cfg_factor, generator=vae_generator)
-            t_emb = self.time_embed(t_i[0])
-            vae_tokens, _, _ = self.patch_embed(latents_i, t_emb)
+            # Wrap in bf16 autocast matching DiT's model forward context where
+            # instantiate_vae_image_tokens calls patch_embed/time_embed.
+            with torch.autocast(device_type=latents_i.device.type, dtype=torch.bfloat16, enabled=True):
+                t_emb = self.time_embed(t_i[0])
+                vae_tokens, _, _ = self.patch_embed(latents_i, t_emb)
             vae_token_embeddings.append(vae_tokens)
 
         assert vit_embeddings is not None and vit_embeddings.shape[0] == len(vae_token_embeddings), (
@@ -2189,6 +2184,14 @@ class HunyuanImage3ForConditionalGeneration(nn.Module, SupportsMultiModal, Suppo
         )
 
         loaded_params = loader.load_weights(weights)
+
+        # Convert VAE to fp16 to match DiT's vae_autocast_dtype precision.
+        # vLLM loads all weights at model dtype (bf16), but the official DiT
+        # pipeline runs VAE under torch.autocast(dtype=float16). Keeping bf16
+        # VAE weights causes autocast to fail (input/bias dtype mismatch) and
+        # produces different latents than DiT, degrading KV-reuse SSIM.
+        self.vae.to(dtype=torch.float16)
+
         return loaded_params
 
     def get_language_model(self) -> torch.nn.Module:

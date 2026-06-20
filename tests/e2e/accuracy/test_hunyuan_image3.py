@@ -151,7 +151,7 @@ _DEPLOY_CONFIG = {
             "final_output": True,
             "final_output_type": "text",
             "max_num_seqs": 1,
-            "gpu_memory_utilization": 0.95,
+            "gpu_memory_utilization": 0.9,
             "enforce_eager": True,
             "trust_remote_code": True,
             "max_num_batched_tokens": 32768,
