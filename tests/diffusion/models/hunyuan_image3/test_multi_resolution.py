@@ -422,6 +422,25 @@ class TestGetTargetSize:
             assert rw % 16 == 0 and rh % 16 == 0
 
 
+class TestResolveCondImageVaeBucket:
+    """Cond VAE bucket must follow primary ``reso_group[ratio_idx]``, not ``get_target_size().match()``."""
+
+    def test_uses_original_aspect_for_ratio_index(self):
+        from vllm_omni.diffusion.models.hunyuan_image3.hunyuan_image3_transformer import (
+            get_cached_resolution_group,
+            resolve_cond_image_vae_bucket,
+        )
+
+        rg = get_cached_resolution_group(1024)
+        for w, h in [(512, 512), (1280, 720), (640, 1024), (800, 480)]:
+            base, idx, tw, th = resolve_cond_image_vae_bucket(rg, w, h)
+            exp_base, exp_idx = rg.get_base_size_and_ratio_index(w, h)
+            assert base == exp_base
+            assert idx == exp_idx
+            assert tw == rg[idx].width
+            assert th == rg[idx].height
+
+
 # ---------------------------------------------------------------------------
 # 3.  get_cached_resolution_group & ar2diffusion integration
 # ---------------------------------------------------------------------------

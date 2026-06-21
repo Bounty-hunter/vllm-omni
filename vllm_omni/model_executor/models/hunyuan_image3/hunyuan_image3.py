@@ -6,7 +6,6 @@ import typing
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any, Literal, TypeAlias
 
-import numpy as np
 import regex as re
 import torch
 from einops import rearrange
@@ -708,132 +707,14 @@ class HunyuanImage3PixelInputs(TensorSchema):
 class HunyuanImage3Processor:
     """Image processor for Hunyuan Image 3.0 model."""
 
-    class Resolution:
-        def __init__(self, size, *args):
-            if isinstance(size, str):
-                if "x" in size:
-                    size = size.split("x")
-                    size = (int(size[0]), int(size[1]))
-                else:
-                    size = int(size)
-            if len(args) > 0:
-                size = (size, args[0])
-            if isinstance(size, int):
-                size = (size, size)
-
-            self.h = self.height = size[0]
-            self.w = self.width = size[1]
-            self.r = self.ratio = self.height / self.width
-
-        def __getitem__(self, idx):
-            if idx == 0:
-                return self.h
-            elif idx == 1:
-                return self.w
-            else:
-                raise IndexError(f"Index {idx} out of range")
-
-        def __str__(self):
-            return f"{self.h}x{self.w}"
-
-    class ResolutionGroup:
-        """Group of resolutions for image processing."""
-
-        def __init__(self, base_size=None, step=None, align=1, extra_resolutions=None):
-            self.align = align
-            self.base_size = base_size
-            assert base_size % align == 0, f"base_size {base_size} is not divisible by align {align}"
-            if base_size is not None and not isinstance(base_size, int):
-                raise ValueError(f"base_size must be None or int, but got {type(base_size)}")
-            if step is None:
-                step = base_size // 16
-            if step is not None and step > base_size // 2:
-                raise ValueError(f"step must be smaller than base_size // 2, but got {step} > {base_size // 2}")
-
-            self.step = step
-            self.data = self._calc_by_step()
-
-            if extra_resolutions is not None:
-                for er in extra_resolutions:
-                    if not any(r.ratio == er.ratio for r in self.data):
-                        self.data.append(er)
-
-            self.ratio = np.array([x.ratio for x in self.data])
-            self.attr = ["" for _ in range(len(self.data))]
-            self.prefix_space = 0
-
-        def __len__(self):
-            return len(self.data)
-
-        def __getitem__(self, idx):
-            return self.data[idx]
-
-        def _calc_by_step(self):
-            assert self.align <= self.step, f"align {self.align} must be smaller than step {self.step}"
-
-            min_height = self.base_size // 2
-            min_width = self.base_size // 2
-            max_height = self.base_size * 2
-            max_width = self.base_size * 2
-
-            resolutions = [HunyuanImage3Processor.Resolution(self.base_size, self.base_size)]
-
-            cur_height, cur_width = self.base_size, self.base_size
-            while True:
-                if cur_height >= max_height and cur_width <= min_width:
-                    break
-
-                cur_height = min(cur_height + self.step, max_height)
-                cur_width = max(cur_width - self.step, min_width)
-                resolutions.append(
-                    HunyuanImage3Processor.Resolution(
-                        cur_height // self.align * self.align, cur_width // self.align * self.align
-                    )
-                )
-
-            cur_height, cur_width = self.base_size, self.base_size
-            while True:
-                if cur_height <= min_height and cur_width >= max_width:
-                    break
-
-                cur_height = max(cur_height - self.step, min_height)
-                cur_width = min(cur_width + self.step, max_width)
-                resolutions.append(
-                    HunyuanImage3Processor.Resolution(
-                        cur_height // self.align * self.align, cur_width // self.align * self.align
-                    )
-                )
-
-            resolutions = sorted(resolutions, key=lambda x: x.ratio)
-
-            return resolutions
-
-        def get_target_size(self, width, height):
-            ratio = height / width
-            idx = np.argmin(np.abs(self.ratio - ratio))
-            reso = self.data[idx]
-            return reso.w, reso.h
-
-        def get_base_size_and_ratio_index(self, width, height):
-            ratio = height / width
-            idx = np.argmin(np.abs(self.ratio - ratio))
-            return self.base_size, idx
-
     def __init__(self, tokenizer, hf_config, **kwargs: object):
         self.tokenizer = tokenizer
         self.hf_config = hf_config
-        # `HUNYUAN_IMAGE3_EXTRA_RESOLUTIONS` mirrors the official
-        # `vae_reso_group` extras (image_processor.py:147-152). Build with
-        # this processor's inner Resolution class so `data` stays
-        # type-homogeneous.
         from vllm_omni.diffusion.models.hunyuan_image3.hunyuan_image3_transformer import (
-            HUNYUAN_IMAGE3_EXTRA_RESOLUTIONS,
+            get_cached_resolution_group,
         )
 
-        self.reso_group = self.ResolutionGroup(
-            base_size=hf_config.image_base_size,
-            extra_resolutions=[HunyuanImage3Processor.Resolution(s) for s in HUNYUAN_IMAGE3_EXTRA_RESOLUTIONS],
-        )
+        self.reso_group = get_cached_resolution_group(hf_config.image_base_size)
         self.vision_encoder_processor = Siglip2ImageProcessorFast.from_dict(hf_config.vit_processor)
         self.vae_processor = transforms.Compose(
             [
@@ -886,6 +767,10 @@ class HunyuanImage3Processor:
         # to `max_num_patches` so VIT fields keep the existing `batched`
         # stack path.
         batch_data = []
+        from vllm_omni.diffusion.models.hunyuan_image3.hunyuan_image3_transformer import (
+            resolve_cond_image_vae_bucket,
+        )
+
         for image in images:
             current_info = {}
 
@@ -908,12 +793,13 @@ class HunyuanImage3Processor:
                 _ss = torch.tensor(_ss, dtype=torch.long)
             current_info["vit_spatial_shapes"] = _ss.squeeze(0)
 
-            # VAE: per-image bucket via `reso_group.get_target_size`; mirrors
-            # HF's `resize_and_crop` (crop_type="center", the official
-            # generate_image default with infer_align_image_size=False).
-            # Keep fp32 — the VAE encoder casts to model dtype at its
-            # boundary (see `_vae_encode`).
-            image_width, image_height = self.reso_group.get_target_size(image.width, image.height)
+            # VAE: same bucket + center-crop path as DiT ``_build_cond_joint_image``.
+            orig_width, orig_height = image.size
+            base_size, ratio_index, image_width, image_height = resolve_cond_image_vae_bucket(
+                self.reso_group,
+                orig_width,
+                orig_height,
+            )
             resized_image = self._resize_and_crop(image, (image_width, image_height))
             vae_pixel_values = self.vae_processor(resized_image).squeeze(0)
             token_height = image_height // (self.hf_config.vae_downsample_factor[0] * self.hf_config.patch_size)
@@ -923,7 +809,6 @@ class HunyuanImage3Processor:
             current_info["vae_pixel_size"] = torch.tensor(vae_pixel_values.numel(), dtype=torch.long)
             current_info["vae_token_grid_hw"] = torch.tensor([token_height, token_width])
 
-            base_size, ratio_index = self.reso_group.get_base_size_and_ratio_index(image_width, image_height)
             current_info["base_size"] = torch.tensor(base_size)
             current_info["ratio_index"] = torch.tensor(ratio_index)
 
@@ -961,11 +846,10 @@ class HunyuanImage3Processor:
         target_size: tuple[int, int],
         crop_type: str = "center",
     ) -> Image.Image:
-        # Default mode mirrors the official `infer_align_image_size=True`
-        # path (image_processor.py:355 → crop_type="resize") used by the
-        # IT2I demo: stretch the cond image to the bucket dims so its
-        # `<img_ratio_*>` tag and ViT/VAE features stay aligned with the
-        # bucket, instead of dropping content via center crop.
+        # Default ``center`` matches official HF ``resize_and_crop(crop_type=
+        # "center")`` with ``infer_align_image_size=False`` and DiT
+        # ``_resize_and_crop_center``. ``resize`` stretches to the bucket and
+        # corrupts cond VAE features written into AR KV cache.
         tw, th = target_size
         if crop_type == "resize":
             return image.resize((tw, th), resample=Image.Resampling.LANCZOS)
@@ -1792,7 +1676,6 @@ class HunyuanImage3ForConditionalGeneration(nn.Module, SupportsMultiModal, Suppo
         Encode images through VAE encoder.
         """
         config = self.vae.config
-        print(f"dyyyyyyyyyyyyyyyyyyyyyyy {generator}")
 
         # Use fp16 autocast matching DiT's vae_encode (pipeline_hunyuan_image3.py:1076).
         # VAE weights are converted to fp16 in load_weights() for compatibility.

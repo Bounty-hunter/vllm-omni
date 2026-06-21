@@ -637,6 +637,25 @@ def get_cached_resolution_group(base_size: int) -> ResolutionGroup:
     return ResolutionGroup(base_size=base_size, extra_resolutions=extra_resolutions)
 
 
+def resolve_cond_image_vae_bucket(
+    reso_group: ResolutionGroup,
+    orig_width: int,
+    orig_height: int,
+) -> tuple[int, int, int, int]:
+    """Pick the VAE bucket for a conditioning image.
+
+    Uses index-based primary resolution lookup (``reso_group[ratio_idx]``),
+    matching official HunyuanImage-3 and the DiT ``_build_cond_joint_image``
+    path. Do not use ``get_target_size().match()`` here: area-based
+    sub-resolution pick diverges from AR ratio prediction for generation.
+    """
+    base_size, ratio_idx = reso_group.get_base_size_and_ratio_index(orig_width, orig_height)
+    base_size = int(base_size)
+    ratio_idx = int(ratio_idx)
+    reso = reso_group[ratio_idx]
+    return base_size, ratio_idx, int(reso.width), int(reso.height)
+
+
 class ImageInfo:
     """Class to store image information for processing and generation."""
 
