@@ -1118,6 +1118,29 @@ class ImageKVCacheManager:
         self._injected_ar_kv = [self._injected_ar_kv[0], neg_kv]
         return key, value
 
+    def _extend_pos_ar_kv(
+        self,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        seq_len: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Extend pos AR KV after cond+think prefix prefill in partial KV reuse."""
+        bs, q_len_actual, num_kv_heads, head_dim = key.shape
+        assert bs == 1
+
+        shared_prefix_len = seq_len - q_len_actual
+        if shared_prefix_len > 0 and self._injected_ar_kv is not None:
+            pos_key, pos_value = self._injected_ar_kv[0]
+            assert shared_prefix_len <= pos_key.shape[0]
+            pfx_k = pos_key[:shared_prefix_len].reshape(1, shared_prefix_len, num_kv_heads, head_dim)
+            pfx_v = pos_value[:shared_prefix_len].reshape(1, shared_prefix_len, num_kv_heads, head_dim)
+            key = torch.cat([pfx_k, key], dim=1)
+            value = torch.cat([pfx_v, value], dim=1)
+
+        pos_kv = (key.reshape(-1, num_kv_heads, head_dim), value.reshape(-1, num_kv_heads, head_dim))
+        self._injected_ar_kv = [pos_kv]
+        return key, value
+
     def __call__(
         self,
         query: torch.Tensor,
@@ -1147,7 +1170,17 @@ class ImageKVCacheManager:
         key = key.reshape(bs, q_len, kv_head_num_per_rank, head_dim)
         value = value.reshape(bs, q_len, kv_head_num_per_rank, head_dim)
 
-        if uncond_cfg_prefill:
+        cond_prefix_prefill = kwargs.get("cond_prefix_prefill", False)
+        if cond_prefix_prefill:
+            key, value = self._extend_pos_ar_kv(key, value, seq_len)
+            if self.sp_size > 1:
+                joint_text_query = query
+                joint_text_key = key
+                joint_text_value = value
+                query = query[:, :0, :, :]
+                key = key[:, :0, :, :]
+                value = value[:, :0, :, :]
+        elif uncond_cfg_prefill:
             key, value = self._build_neg_ar_kv(key, value, seq_len)
             if self.sp_size > 1:
                 joint_text_query = query
@@ -1984,10 +2017,11 @@ class HunyuanImagePreprocessor(nn.Module):
         image_token_len: int,
         is_first_step: bool = False,
         uncond_cfg_prefill: bool = False,
+        cond_prefix_prefill: bool = False,
         gen_timestep_scatter_index: torch.Tensor | None = None,
     ):
         # ---------- compute prompt length ----------
-        if uncond_cfg_prefill:
+        if uncond_cfg_prefill or cond_prefix_prefill:
             prompt_len = hidden_states.shape[1]
         elif is_first_step:
             assert gen_timestep_scatter_index is not None, (
@@ -2397,6 +2431,7 @@ class HunyuanImage3Model(nn.Module):
         num_image_tokens: int | None = None,
         gen_timestep_scatter_index: torch.Tensor | None = None,
         uncond_cfg_prefill: bool = False,
+        cond_prefix_prefill: bool = False,
         ar_kv_reuse_len: int = 0,
         full_attn_spans: list[list[tuple[int, int]]] | None = None,
     ) -> tuple | BaseModelOutputWithPast:
@@ -2441,6 +2476,7 @@ class HunyuanImage3Model(nn.Module):
                 num_image_tokens,
                 first_step,
                 uncond_cfg_prefill=uncond_cfg_prefill,
+                cond_prefix_prefill=cond_prefix_prefill,
                 gen_timestep_scatter_index=gen_timestep_scatter_index,
             )
             assert len(set(query_lens)) == 1 and len(set(seq_lens)) == 1, (
@@ -2504,6 +2540,7 @@ class HunyuanImage3Model(nn.Module):
                 shard_image_size=shard_image_size,
                 shard_padding_size=shard_padding_size,
                 uncond_cfg_prefill=uncond_cfg_prefill,
+                cond_prefix_prefill=cond_prefix_prefill,
                 full_attn_spans=full_attn_spans,
             )
 
@@ -2797,6 +2834,166 @@ class HunyuanImage3Text2ImagePipeline(DiffusionPipeline):
             neg_reuse_kv_len = None
         return pos_reuse_kv_len, neg_reuse_kv_len
 
+    def _get_text_only_ar_kv_inject_len(
+        self,
+        model_kwargs: dict,
+        full_reuse_len: int,
+    ) -> int:
+        """Reuse AR KV only for text before the first cond joint-image span."""
+        tokenizer_output = model_kwargs["tokenizer_output"]
+        joint_slices_batch = tokenizer_output.joint_image_slices
+        if not joint_slices_batch:
+            return full_reuse_len
+
+        first_cond_start = full_reuse_len
+        found = False
+        for slices_i in joint_slices_batch:
+            if not slices_i:
+                continue
+            for image_slice in slices_i:
+                if image_slice.start is None:
+                    continue
+                found = True
+                first_cond_start = min(first_cond_start, image_slice.start)
+
+        if not found or first_cond_start >= full_reuse_len:
+            return full_reuse_len
+
+        logger.info(
+            "Partial AR KV reuse: inject text-only len=%d (full=%d, first cond at %d)",
+            first_cond_start,
+            full_reuse_len,
+            first_cond_start,
+        )
+        return first_cond_start
+
+    @staticmethod
+    def _attach_cond_prefix_prefill_fields(
+        prefill_inputs: dict,
+        model_kwargs: dict,
+        batch_slice: slice,
+        seq_start: int,
+        seq_end: int,
+    ) -> None:
+        if model_kwargs.get("cond_vae_images") is None:
+            return
+
+        batch_cond = batch_slice
+        v = model_kwargs["cond_vae_images"]
+        if isinstance(v, torch.Tensor):
+            prefill_inputs["cond_vae_images"] = v[batch_cond]
+        elif isinstance(v, list):
+            prefill_inputs["cond_vae_images"] = v[batch_cond.start : batch_cond.stop]
+
+        v = model_kwargs.get("cond_timestep")
+        if v is not None:
+            if isinstance(v, torch.Tensor):
+                prefill_inputs["cond_timestep"] = v[batch_cond]
+            elif isinstance(v, list):
+                prefill_inputs["cond_timestep"] = v[batch_cond.start : batch_cond.stop]
+
+        v = model_kwargs.get("cond_vit_images")
+        if v is not None:
+            if isinstance(v, torch.Tensor):
+                prefill_inputs["cond_vit_images"] = v[batch_cond]
+            elif isinstance(v, list):
+                prefill_inputs["cond_vit_images"] = v[batch_cond.start : batch_cond.stop]
+
+        v = model_kwargs.get("vit_kwargs")
+        if v is not None:
+            prefill_inputs["vit_kwargs"] = {
+                k: (val[batch_cond.start : batch_cond.stop] if isinstance(val, list) else val[batch_cond])
+                for k, val in v.items()
+            }
+
+        if model_kwargs.get("cond_vae_image_mask") is not None:
+            prefill_inputs["cond_vae_image_mask"] = model_kwargs["cond_vae_image_mask"][batch_cond, seq_start:seq_end]
+        if model_kwargs.get("cond_vit_image_mask") is not None:
+            prefill_inputs["cond_vit_image_mask"] = model_kwargs["cond_vit_image_mask"][batch_cond, seq_start:seq_end]
+        if model_kwargs.get("cond_timestep_scatter_index") is not None:
+            prefill_inputs["cond_timestep_scatter_index"] = (
+                model_kwargs["cond_timestep_scatter_index"][batch_cond] - seq_start
+            )
+
+    # ==========================================================
+    # Positive Cond Prefix Prefill (partial KV reuse)
+    # ==========================================================
+    def _maybe_run_positive_cond_prefix_prefill(
+        self,
+        input_ids,
+        model_kwargs,
+        batch_size,
+        positive_reuse_len,
+        inject_len,
+        cfg_parallel_ready,
+        cfg_rank,
+        device,
+    ):
+        if cfg_parallel_ready and cfg_rank != 0:
+            return
+
+        prefill_inputs = self._build_positive_cond_prefix_prefill_inputs(
+            input_ids=input_ids,
+            model_kwargs=model_kwargs,
+            batch_size=batch_size,
+            positive_reuse_len=positive_reuse_len,
+            inject_len=inject_len,
+            cfg_parallel_ready=cfg_parallel_ready,
+        )
+
+        with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=True):
+            self.model.forward_call(**prefill_inputs)
+
+    def _build_positive_cond_prefix_prefill_inputs(
+        self,
+        input_ids,
+        model_kwargs,
+        batch_size,
+        positive_reuse_len,
+        inject_len,
+        cfg_parallel_ready,
+    ):
+        assert batch_size == 1
+        seq_slice = slice(inject_len, positive_reuse_len)
+        prefill_seq_len = positive_reuse_len
+        prefill_query_len = positive_reuse_len - inject_len
+        assert prefill_query_len > 0, "prefill_query_len should be greater than 0"
+
+        if cfg_parallel_ready:
+            batch_slice = slice(None)
+            custom_pos_emb = model_kwargs["custom_pos_emb"]
+        else:
+            batch_slice = slice(0, batch_size)
+            custom_pos_emb = (
+                model_kwargs["custom_pos_emb"][0][batch_slice],
+                model_kwargs["custom_pos_emb"][1][batch_slice],
+            )
+
+        prefill_inputs = dict(
+            input_ids=input_ids[batch_slice, seq_slice],
+            attention_mask=model_kwargs["attention_mask"][batch_slice, :, seq_slice, :prefill_seq_len],
+            position_ids=model_kwargs["position_ids"][batch_slice, seq_slice],
+            custom_pos_emb=custom_pos_emb,
+            mode="gen_image",
+            first_step=True,
+            cond_prefix_prefill=True,
+            query_lens=[prefill_query_len],
+            seq_lens=[prefill_seq_len],
+            num_image_tokens=0,
+            ar_kv_reuse_len=inject_len,
+            full_attn_spans=model_kwargs["full_attn_spans"][batch_slice]
+            if model_kwargs.get("full_attn_spans")
+            else None,
+        )
+        self._attach_cond_prefix_prefill_fields(
+            prefill_inputs,
+            model_kwargs,
+            batch_slice,
+            inject_len,
+            positive_reuse_len,
+        )
+        return prefill_inputs
+
     # ==========================================================
     # Negative CFG Prefill
     # ==========================================================
@@ -2825,6 +3022,7 @@ class HunyuanImage3Text2ImagePipeline(DiffusionPipeline):
             negative_reuse_len=negative_reuse_len,
             positive_reuse_len=positive_reuse_len,
             cfg_parallel_ready=cfg_parallel_ready,
+            ar_kv_inject_len=model_kwargs.get("_ar_kv_inject_len"),
         )
 
         if logger.isEnabledFor(logging.DEBUG):
@@ -2851,11 +3049,20 @@ class HunyuanImage3Text2ImagePipeline(DiffusionPipeline):
         negative_reuse_len,
         positive_reuse_len,
         cfg_parallel_ready,
+        ar_kv_inject_len: int | None = None,
     ):
         assert batch_size == 1
-        seq_slice = slice(negative_reuse_len, positive_reuse_len)
+        inject_len = ar_kv_inject_len if ar_kv_inject_len is not None else negative_reuse_len
+        if negative_reuse_len > inject_len:
+            seq_start = inject_len
+            ar_kv_reuse_len = inject_len
+        else:
+            seq_start = negative_reuse_len
+            ar_kv_reuse_len = negative_reuse_len
+
+        seq_slice = slice(seq_start, positive_reuse_len)
         prefill_seq_len = positive_reuse_len
-        prefill_query_len = positive_reuse_len - negative_reuse_len
+        prefill_query_len = positive_reuse_len - seq_start
         assert prefill_query_len > 0, "prefill_query_len should be greater than 0"
 
         if cfg_parallel_ready:
@@ -2868,7 +3075,7 @@ class HunyuanImage3Text2ImagePipeline(DiffusionPipeline):
                 model_kwargs["custom_pos_emb"][1][batch_slice],
             )
 
-        return dict(
+        prefill_inputs = dict(
             input_ids=input_ids[batch_slice, seq_slice],
             attention_mask=model_kwargs["attention_mask"][batch_slice, :, seq_slice, :prefill_seq_len],
             position_ids=model_kwargs["position_ids"][batch_slice, seq_slice],
@@ -2879,11 +3086,22 @@ class HunyuanImage3Text2ImagePipeline(DiffusionPipeline):
             query_lens=[prefill_query_len],
             seq_lens=[prefill_seq_len],
             num_image_tokens=0,
-            ar_kv_reuse_len=negative_reuse_len,
+            ar_kv_reuse_len=ar_kv_reuse_len,
             full_attn_spans=model_kwargs["full_attn_spans"][batch_slice]
             if model_kwargs.get("full_attn_spans")
             else None,
         )
+
+        if inject_len < positive_reuse_len:
+            self._attach_cond_prefix_prefill_fields(
+                prefill_inputs,
+                model_kwargs,
+                batch_slice,
+                seq_start,
+                positive_reuse_len,
+            )
+
+        return prefill_inputs
 
     # ==========================================================
     # Keep Negative KV Only
@@ -2938,6 +3156,7 @@ class HunyuanImage3Text2ImagePipeline(DiffusionPipeline):
         model_kwargs.pop("cond_timestep_scatter_index", None)
         model_kwargs.pop("cond_timestep", None)
         model_kwargs.pop("cond_vit_images", None)
+        model_kwargs.pop("vit_kwargs", None)
 
         return input_ids
 
@@ -2956,17 +3175,34 @@ class HunyuanImage3Text2ImagePipeline(DiffusionPipeline):
 
         # 1. positive prefix len
         positive_reuse_len, negative_reuse_len = self._get_kv_reuse_len(model_kwargs, batch_size)
+        inject_len = self._get_text_only_ar_kv_inject_len(model_kwargs, positive_reuse_len)
+        partial_cond_recompute = inject_len < positive_reuse_len
+        model_kwargs["_ar_kv_inject_len"] = inject_len
+
         logger.info(
             f"Handling AR KV reuse with positive_reuse_len={positive_reuse_len}, "
-            f"negative_reuse_len={negative_reuse_len}"
+            f"negative_reuse_len={negative_reuse_len}, inject_len={inject_len}"
         )
         if positive_reuse_len <= 0:
             return input_ids, 0
 
-        # 2. inject positive kv
-        self.model.inject_ar_kv_into_layers(ar_kv_data, positive_reuse_len)
+        # 2. inject text-only or full positive kv
+        self.model.inject_ar_kv_into_layers(ar_kv_data, inject_len)
 
-        # 3. negative cfg prefill
+        # 3. recompute cond+think in DiT before truncating to gen-only tokens
+        if partial_cond_recompute:
+            self._maybe_run_positive_cond_prefix_prefill(
+                input_ids=input_ids,
+                model_kwargs=model_kwargs,
+                batch_size=batch_size,
+                positive_reuse_len=positive_reuse_len,
+                inject_len=inject_len,
+                cfg_parallel_ready=cfg_parallel_ready,
+                cfg_rank=cfg_rank,
+                device=device,
+            )
+
+        # 4. negative cfg prefill
         if self.do_classifier_free_guidance:
             self._maybe_run_negative_cfg_prefill(
                 input_ids=input_ids,
@@ -2979,13 +3215,14 @@ class HunyuanImage3Text2ImagePipeline(DiffusionPipeline):
                 device=device,
             )
 
-        # 4. truncate reused prefix
+        # 5. truncate reused prefix at think/recaption end (same as full KV path)
         input_ids = self._truncate_reused_prefix(
             input_ids=input_ids,
             model_kwargs=model_kwargs,
             positive_reuse_len=positive_reuse_len,
         )
 
+        model_kwargs.pop("_ar_kv_inject_len", None)
         return input_ids, positive_reuse_len
 
     @torch.no_grad()

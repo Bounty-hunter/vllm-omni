@@ -1298,10 +1298,8 @@ class HunyuanImage3Pipeline(
         )
         output, sections = out["output"], out["sections"]
 
-        # 4. Encode conditional images
-        # Skip encoding if AR KV reuse is enabled
-        has_ar_kv = kwargs.get("ar_kv_data")
-        if batch_cond_image_info is not None and len(batch_cond_image_info[0]) > 0 and not has_ar_kv:
+        # 4. Encode conditional images (always; partial AR KV reuse only covers text before cond)
+        if batch_cond_image_info is not None and len(batch_cond_image_info[0]) > 0:
             cond_vae_images, cond_timestep, cond_vit_images = self._encode_cond_image(
                 batch_cond_image_info, cfg_factor[mode], generator=generator
             )
@@ -1635,13 +1633,14 @@ class HunyuanImage3Pipeline(
         seq_lens: list[int] | None = None,
         num_image_tokens: int | None = None,
         uncond_cfg_prefill: bool = False,
+        cond_prefix_prefill: bool = False,
         ar_kv_reuse_len: int = 0,
         full_attn_spans: list[list[tuple[int, int]]] | None = None,
     ) -> tuple | CausalMMOutputWithPast:
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         # Sanity Check of Inputs
         self._check_inputs(
-            mode == "gen_image" and not uncond_cfg_prefill,
+            mode == "gen_image" and not uncond_cfg_prefill and not cond_prefix_prefill,
             "in `gen_image` mode",
             [
                 ("images", images),
@@ -1650,7 +1649,7 @@ class HunyuanImage3Pipeline(
             ],
         )
         self._check_inputs(
-            mode == "gen_image" and first_step and not uncond_cfg_prefill,
+            mode == "gen_image" and first_step and not uncond_cfg_prefill and not cond_prefix_prefill,
             "in `gen_image` mode at the first step",
             [
                 ("image_mask", image_mask),
@@ -1689,7 +1688,7 @@ class HunyuanImage3Pipeline(
             # For gen_text, make sure gen_timestep_scatter_index is None
             gen_timestep_scatter_index = None
             token_h, token_w = None, None
-        elif uncond_cfg_prefill:
+        elif uncond_cfg_prefill or cond_prefix_prefill:
             token_h, token_w = None, None
         else:
             if first_step:
@@ -1740,6 +1739,7 @@ class HunyuanImage3Pipeline(
                 num_image_tokens=num_image_tokens,
                 gen_timestep_scatter_index=gen_timestep_scatter_index,
                 uncond_cfg_prefill=uncond_cfg_prefill,
+                cond_prefix_prefill=cond_prefix_prefill,
                 ar_kv_reuse_len=ar_kv_reuse_len,
                 full_attn_spans=full_attn_spans,
             )
@@ -1750,7 +1750,7 @@ class HunyuanImage3Pipeline(
             logits = self.lm_head(hidden_states)
             logits = logits.float()
             diffusion_prediction = None
-        elif uncond_cfg_prefill:
+        elif uncond_cfg_prefill or cond_prefix_prefill:
             logits = None
             diffusion_prediction = None
         else:
