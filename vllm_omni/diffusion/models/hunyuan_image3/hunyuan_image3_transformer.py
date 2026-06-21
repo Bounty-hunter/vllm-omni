@@ -2912,6 +2912,25 @@ class HunyuanImage3Text2ImagePipeline(DiffusionPipeline):
         model_kwargs["gen_timestep_scatter_index"] = model_kwargs["gen_timestep_scatter_index"] - positive_reuse_len
         model_kwargs["ar_kv_reuse_offset"] = positive_reuse_len
 
+        # Drop prefix-only full-attn spans; shift suffix spans to truncated coordinates.
+        full_attn_spans = model_kwargs.get("full_attn_spans")
+        if isinstance(full_attn_spans, list):
+            shifted_spans: list[list[tuple[int, int]]] = []
+            for spans in full_attn_spans:
+                if not spans:
+                    shifted_spans.append([])
+                    continue
+                new_spans: list[tuple[int, int]] = []
+                for start, end in spans:
+                    if end <= positive_reuse_len:
+                        continue
+                    new_start = max(0, start - positive_reuse_len)
+                    new_end = end - positive_reuse_len
+                    if new_start < new_end:
+                        new_spans.append((new_start, new_end))
+                shifted_spans.append(new_spans)
+            model_kwargs["full_attn_spans"] = shifted_spans
+
         # cond-image have computed in ar, we may skip it by index in the future.
         model_kwargs.pop("cond_vae_images", None)
         model_kwargs.pop("cond_vae_image_mask", None)

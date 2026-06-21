@@ -157,6 +157,7 @@ _DEPLOY_CONFIG = {
             "max_num_batched_tokens": 32768,
             "devices": AR_DEVICES,
             "tensor_parallel_size": AR_TP_SIZE,
+            "attention_backend": "FLEX_ATTENTION",
             "hf_overrides": {
                 "rope_parameters": {"mrope_section": [0, 32, 32], "rope_type": "default"},
             },
@@ -317,6 +318,7 @@ def _run_offline(deploy_config_path: str, output_path: Path) -> tuple[Image.Imag
                 "use_system_prompt": system_prompt_type,
                 "modalities": ["image"],
                 "multi_modal_data": {"image": images},
+                "mm_processor_kwargs": {"vae_generator_seed": SEED},
             }
         ]
         t0 = time.perf_counter()

@@ -47,6 +47,9 @@ stages:
     max_num_batched_tokens: 32768
     devices: "0,1"
     tensor_parallel_size: 2
+    # FlexAttention implements mm_prefix bidirectional regions more faithfully than
+    # TRITON_ATTN for HunyuanImage3 joint_full cond tokens (KV reuse IT2I accuracy).
+    attention_backend: FLEX_ATTENTION
     hf_overrides:
       rope_parameters:
         mrope_section: [0, 32, 32]

@@ -1388,6 +1388,10 @@ class HunyuanImage3ForConditionalGeneration(nn.Module, SupportsMultiModal, Suppo
                 "HunyuanImage3 AR: mm_prefix_lm disabled — KV-reuse cond KV will use causal "
                 "attention and IT2I SSIM will degrade. Check vllm_omni.patch import order."
             )
+        attn_backend = getattr(getattr(vllm_config, "attention_config", None), "backend", None)
+        if attn_backend is not None:
+            backend_name = getattr(attn_backend, "name", str(attn_backend))
+            logger.info("HunyuanImage3 AR: attention backend=%s", backend_name)
         if get_pp_group().is_last_rank:
             self.unpadded_vocab_size = config.vocab_size
             self.lm_head = ParallelLMHead(
