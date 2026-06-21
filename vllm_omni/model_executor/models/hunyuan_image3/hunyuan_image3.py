@@ -1381,6 +1381,13 @@ class HunyuanImage3ForConditionalGeneration(nn.Module, SupportsMultiModal, Suppo
         self.quant_config = quant_config
         self.vllm_config = vllm_config
         self.model = HunyuanModel(vllm_config=vllm_config, prefix="model")
+        if vllm_config.model_config.is_mm_prefix_lm:
+            logger.info("HunyuanImage3 AR: mm_prefix_lm enabled (joint_image VAE+sep+ViT bidirectional attention).")
+        else:
+            logger.warning(
+                "HunyuanImage3 AR: mm_prefix_lm disabled — KV-reuse cond KV will use causal "
+                "attention and IT2I SSIM will degrade. Check vllm_omni.patch import order."
+            )
         if get_pp_group().is_last_rank:
             self.unpadded_vocab_size = config.vocab_size
             self.lm_head = ParallelLMHead(

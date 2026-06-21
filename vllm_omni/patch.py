@@ -58,8 +58,11 @@ _original_is_mm_prefix_lm = _cp.func if hasattr(_cp, "func") else _cp.fget
 def _patched_is_mm_prefix_lm(self):
     if _original_is_mm_prefix_lm(self):
         return True
-    model_type = getattr(self.hf_config, "model_type", "")
-    return model_type in _OMNI_MM_PREFIX_LM_MODELS
+    hf_config = self.hf_config
+    model_type = getattr(hf_config, "model_type", "")
+    if model_type in _OMNI_MM_PREFIX_LM_MODELS:
+        return True
+    return getattr(hf_config, "cond_token_attn_type", None) == "joint_full"
 
 
 _patched_cp = cached_property(_patched_is_mm_prefix_lm)
