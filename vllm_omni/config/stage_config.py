@@ -334,6 +334,8 @@ class StageDeployConfig:
     enable_expert_parallel: bool | None = None
     ulysses_degree: int | None = None
     ulysses_mode: str | None = None
+    ulysses_overlap_enabled: bool | None = None
+    ulysses_overlap_chunk_size: int | None = None
     ring_degree: int | None = None
     sequence_parallel_size: int | None = None
     cfg_parallel_size: int | None = None

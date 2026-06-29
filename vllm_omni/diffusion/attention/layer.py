@@ -153,6 +153,15 @@ class Attention(nn.Module):
         self._disable_kv_quant: bool = disable_kv_quant
         self._init_kv_cache_quantization(config)
 
+        # Ulysses overlap configuration
+        self._overlap_enabled: bool = False
+        self._overlap_chunk_size: int = 0
+        if config is not None:
+            p = config.parallel_config
+            self._overlap_enabled = getattr(p, "ulysses_overlap_enabled", False)
+            self._overlap_chunk_size = getattr(p, "ulysses_overlap_chunk_size", 0)
+        self._comm_stream = None
+
     def _get_active_parallel_strategy(self):
         """Get the parallel strategy based on current SP active state.
 
@@ -262,6 +271,16 @@ class Attention(nn.Module):
         # Get the appropriate parallel strategy based on SP active state
         strategy = self._get_active_parallel_strategy()
 
+        # Chunked overlap path: pipeline pre_attention/attention/post_attention per chunk
+        if (
+            self._overlap_enabled
+            and strategy is not self._no_parallel_strategy
+            and not self.use_ring
+            and hasattr(strategy, "name")
+            and strategy.name == "ulysses"
+        ):
+            return self._forward_impl_overlap(query, key, value, attn_metadata, strategy)
+
         # 1. Prepare inputs (Communication / Resharding)
         # For Ulysses: AllToAll Q/K/V; Slicing joint_q/k/v
         # For Ring: Concat joint_q
@@ -300,3 +319,130 @@ class Attention(nn.Module):
             )
 
         raise RuntimeError("Ring attention is enabled but strategy is not RingParallelAttention")
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Ulysses chunked overlap: pipeline pre_attention / attention / post_attention
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _get_comm_stream(self):
+        if self._comm_stream is None:
+            self._comm_stream = current_omni_platform.Stream()
+        return self._comm_stream
+
+    def _forward_impl_overlap(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        attn_metadata: AttentionMetadata | None,
+        strategy,
+    ) -> torch.Tensor:
+        """Chunked all2all/attention overlap pipeline.
+
+        Splits Q/K/V along the head dimension into chunks, then pipelines each
+        chunk through pre_attention (fwd all2all) -> attention -> post_attention
+        (bwd all2all) using a separate communication stream for overlap.
+        """
+        B, S_local, H, D = query.shape
+
+        chunk_size = self._overlap_chunk_size
+        if chunk_size <= 0:
+            chunk_size = H // 2
+
+        assert H % chunk_size == 0, f"num_heads={H} must be divisible by ulysses_overlap_chunk_size={chunk_size}"
+        ulysses_degree = self.parallel_strategy._sp_group.ulysses_world_size
+        assert chunk_size % ulysses_degree == 0, (
+            f"ulysses_overlap_chunk_size={chunk_size} must be divisible by "
+            f"ulysses_degree={ulysses_degree}, so each chunk's heads can be "
+            f"evenly distributed across SP ranks"
+        )
+
+        C = H // chunk_size
+
+        q_chunks = query.split(chunk_size, dim=2)
+        k_chunks = key.split(chunk_size, dim=2)
+        v_chunks = value.split(chunk_size, dim=2)
+
+        attn_meta_chunks = self._chunk_attn_metadata(attn_metadata, C)
+
+        comm_stream = self._get_comm_stream()
+        compute_stream = current_omni_platform.current_stream()
+
+        fwd_events: list = [None] * C
+        fwd_results: list = [None] * C
+        output_chunks: list = [None] * C
+        bwd_events: list = [None] * C
+
+        # Prime: launch chunk 0 pre_attention on comm_stream
+        with current_omni_platform.stream(comm_stream):
+            comm_stream.wait_stream(compute_stream)
+            fwd_results[0] = strategy.pre_attention(q_chunks[0], k_chunks[0], v_chunks[0], attn_meta_chunks[0])
+            fwd_events[0] = current_omni_platform.Event()
+            fwd_events[0].record(comm_stream)
+
+        for i in range(C):
+            # Wait for chunk i's pre_attention to finish
+            compute_stream.wait_event(fwd_events[i])
+            q_i, k_i, v_i, meta_i, ctx_i = fwd_results[i]
+
+            # Overlap: launch chunk i+1 pre_attention on comm_stream
+            if i + 1 < C:
+                with current_omni_platform.stream(comm_stream):
+                    fwd_results[i + 1] = strategy.pre_attention(
+                        q_chunks[i + 1],
+                        k_chunks[i + 1],
+                        v_chunks[i + 1],
+                        attn_meta_chunks[i + 1],
+                    )
+                    fwd_events[i + 1] = current_omni_platform.Event()
+                    fwd_events[i + 1].record(comm_stream)
+
+            # Compute attention for chunk i on compute_stream
+            meta_i = self._with_kv_cache_dtype(meta_i)
+            out_i = self._run_local_attention(q_i, k_i, v_i, meta_i)
+
+            # Launch chunk i's post_attention on comm_stream
+            attn_done = current_omni_platform.Event()
+            attn_done.record(compute_stream)
+            with current_omni_platform.stream(comm_stream):
+                comm_stream.wait_event(attn_done)
+                output_chunks[i] = strategy.post_attention(out_i, ctx_i)
+                bwd_events[i] = current_omni_platform.Event()
+                bwd_events[i].record(comm_stream)
+
+        # Wait for all post_attention to complete
+        for evt in bwd_events:
+            compute_stream.wait_event(evt)
+
+        return torch.cat(output_chunks, dim=2)
+
+    def _chunk_attn_metadata(
+        self, attn_metadata: AttentionMetadata | None, num_chunks: int
+    ) -> list[AttentionMetadata | None]:
+        """Create per-chunk AttentionMetadata with joint tensors split along heads."""
+        if attn_metadata is None:
+            return [None] * num_chunks
+
+        has_joint = (
+            attn_metadata.joint_query is not None
+            and attn_metadata.joint_key is not None
+            and attn_metadata.joint_value is not None
+        )
+
+        if not has_joint:
+            return [replace(attn_metadata) for _ in range(num_chunks)]
+
+        jq_chunks = attn_metadata.joint_query.chunk(num_chunks, dim=-2)
+        jk_chunks = attn_metadata.joint_key.chunk(num_chunks, dim=-2)
+        jv_chunks = attn_metadata.joint_value.chunk(num_chunks, dim=-2)
+
+        metas = []
+        for i in range(num_chunks):
+            meta_i = replace(
+                attn_metadata,
+                joint_query=jq_chunks[i],
+                joint_key=jk_chunks[i],
+                joint_value=jv_chunks[i],
+            )
+            metas.append(meta_i)
+        return metas

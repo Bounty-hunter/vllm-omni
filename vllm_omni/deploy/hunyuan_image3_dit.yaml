@@ -21,8 +21,10 @@ stages:
       data_parallel_size: 1
       tensor_parallel_size: 1
       enable_expert_parallel: true
-      sequence_parallel_size: 4
-      ulysses_degree: 4
+      sequence_parallel_size: 2
+      ulysses_degree: 2
+      ulysses_overlap_enabled: true
+      ulysses_overlap_chunk_size: 16
       ring_degree: 1
       cfg_parallel_size: 1
       vae_patch_parallel_size: 1

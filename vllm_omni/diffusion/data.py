@@ -215,6 +215,24 @@ class DiffusionParallelConfig:
     hsdp_replicate_size: int = 1
     """Number of replica groups for HSDP. Each replica holds a full sharded copy."""
 
+    ulysses_overlap_enabled: bool = False
+    """Enable chunked overlap between Ulysses all2all communication and attention compute.
+
+    When enabled, the head dimension is split into chunks of size
+    ``ulysses_overlap_chunk_size`` and the forward all2all, attention kernel,
+    and reverse all2all are pipelined across chunks using separate CUDA streams.
+    Only effective when ulysses_degree > 1 and ring_degree == 1.
+    """
+
+    ulysses_overlap_chunk_size: int = 0
+    """Number of heads per chunk for Ulysses overlap pipelining.
+
+    Must satisfy: chunk_size % ulysses_degree == 0 (so each chunk's heads can
+    be evenly distributed across SP ranks during all2all).
+    Also requires: H % chunk_size == 0 (H is the model's total head count).
+    When set to 0, automatically uses H // 2 (i.e. 2 chunks) at runtime.
+    """
+
     @model_validator(mode="after")
     def _validate_parallel_config(self) -> Self:
         """Validates the config relationships among the parallel strategies."""
@@ -245,6 +263,20 @@ class DiffusionParallelConfig:
         if self.use_hsdp:
             assert self.hsdp_replicate_size > 0, "HSDP replicate size must be > 0"
             assert self.hsdp_shard_size > 0, "HSDP shard size must be > 0 (should be set in __post_init__)"
+
+        # Validate Ulysses overlap configuration
+        if self.ulysses_overlap_enabled:
+            assert self.ulysses_degree > 1, "Ulysses overlap requires ulysses_degree > 1"
+            assert self.ring_degree == 1, (
+                "Ulysses overlap is not compatible with Ring attention (ring_degree must be 1)"
+            )
+            if self.ulysses_overlap_chunk_size > 0:
+                assert self.ulysses_overlap_chunk_size % self.ulysses_degree == 0, (
+                    f"ulysses_overlap_chunk_size ({self.ulysses_overlap_chunk_size}) must be "
+                    f"divisible by ulysses_degree ({self.ulysses_degree}), otherwise heads "
+                    f"cannot be evenly distributed across SP ranks after chunking."
+                )
+
         return self
 
     def __post_init__(self) -> None:

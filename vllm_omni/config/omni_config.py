@@ -109,6 +109,8 @@ class _ParallelConfigEngineOverrides(TypedDict, total=False):
     ulysses_degree: int
     ring_degree: int
     ulysses_mode: str
+    ulysses_overlap_enabled: bool
+    ulysses_overlap_chunk_size: int
     cfg_parallel_size: int
     vae_patch_parallel_size: int
     use_hsdp: bool
@@ -353,6 +355,8 @@ class OmniStageDiffusionParallelConfig(OmniStageParallelConfig):
     ulysses_degree: int = Field(default=1, ge=1)
     ring_degree: int = Field(default=1, ge=1)
     ulysses_mode: str = "strict"
+    ulysses_overlap_enabled: bool = False
+    ulysses_overlap_chunk_size: int = Field(default=0, ge=0)
     cfg_parallel_size: int = Field(default=1, ge=1, le=3)
     vae_patch_parallel_size: int = Field(default=1, ge=1)
     vae_parallel_mode: str = "tile"
