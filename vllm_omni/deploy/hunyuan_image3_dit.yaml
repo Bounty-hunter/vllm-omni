@@ -19,10 +19,10 @@ stages:
     parallel_config:
       pipeline_parallel_size: 1
       data_parallel_size: 1
-      tensor_parallel_size: 4
+      tensor_parallel_size: 1
       enable_expert_parallel: true
-      sequence_parallel_size: 1
-      ulysses_degree: 1
+      sequence_parallel_size: 4
+      ulysses_degree: 4
       ring_degree: 1
       cfg_parallel_size: 1
       vae_patch_parallel_size: 1
