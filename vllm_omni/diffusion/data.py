@@ -163,6 +163,12 @@ class DiffusionParallelConfig:
     ring_degree: int = 1
     """Number of GPUs used for ring sequence parallelism."""
 
+    attention_comm_overlap: bool = False
+    """Enable comm/compute overlap for Ulysses attention collectives."""
+
+    attention_head_chunks: int = 2
+    """Number of head chunks for attention comm/compute overlap (default: 2)."""
+
     ulysses_mode: str = "strict"
     """Ulysses sequence-parallel mode.
 

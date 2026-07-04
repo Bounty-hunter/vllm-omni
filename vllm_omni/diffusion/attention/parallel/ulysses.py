@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Callable
 
 import torch
 import torch.distributed as dist
@@ -13,6 +14,13 @@ from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata
 from vllm_omni.diffusion.attention.parallel.base import ParallelAttentionContext
 from vllm_omni.diffusion.distributed.comm import SeqAllToAll4D
 from vllm_omni.diffusion.distributed.group_coordinator import SequenceParallelGroupCoordinator
+from vllm_omni.diffusion.distributed.overlap import (
+    AttentionOverlapConfig,
+    CommStreamContext,
+    HeadChunkUlyssesRunner,
+    resolve_attention_overlap_config,
+)
+from vllm_omni.diffusion.config import get_current_diffusion_config_or_none
 from vllm_omni.diffusion.forward_context import get_ulysses_mode
 
 
@@ -471,3 +479,47 @@ class UlyssesParallelAttention:
                 use_sync=ctx.use_sync,
             )
         return SeqAllToAll4D.apply(ctx.ulysses_pg, attn_output, ctx.gather_idx, ctx.scatter_idx, ctx.use_sync)
+
+    def _resolve_overlap_config(self, num_heads: int) -> AttentionOverlapConfig:
+        config = get_current_diffusion_config_or_none()
+        parallel_config = getattr(config, "parallel_config", None) if config is not None else None
+        return resolve_attention_overlap_config(parallel_config, num_heads=num_heads)
+
+    def supports_head_chunk_overlap(
+        self,
+        query: torch.Tensor,
+        attn_metadata: AttentionMetadata | None,
+    ) -> bool:
+        overlap_cfg = self._resolve_overlap_config(int(query.shape[2]))
+        if not overlap_cfg.active:
+            return False
+        if get_ulysses_mode(default="strict") != "strict":
+            return False
+        if self._sp_group.ring_world_size > 1:
+            return False
+        if self._use_sync:
+            return False
+        if attn_metadata is not None and any(
+            getattr(attn_metadata, name, None) is not None
+            for name in ("joint_query", "joint_key", "joint_value")
+        ):
+            return False
+        return True
+
+    def forward_with_head_chunk_overlap(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        attn_metadata: AttentionMetadata | None,
+        attention_fn: Callable[[torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor],
+    ) -> torch.Tensor:
+        overlap_cfg = self._resolve_overlap_config(int(query.shape[2]))
+        runner = HeadChunkUlyssesRunner(
+            self._ulysses_pg,
+            scatter_idx=self._scatter_idx,
+            gather_idx=self._gather_idx,
+            num_chunks=overlap_cfg.head_chunks,
+        )
+        with CommStreamContext(device=query.device, enabled=True):
+            return runner.run(query, key, value, attention_fn)

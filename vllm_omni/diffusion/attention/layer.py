@@ -19,8 +19,10 @@ from vllm_omni.diffusion.attention.backends.sdpa import SDPABackend
 from vllm_omni.diffusion.attention.parallel import build_parallel_attention_strategy
 from vllm_omni.diffusion.attention.parallel.base import NoParallelAttention
 from vllm_omni.diffusion.attention.parallel.ring import RingParallelAttention
+from vllm_omni.diffusion.attention.parallel.ulysses import UlyssesParallelAttention
 from vllm_omni.diffusion.attention.selector import get_attn_backend_for_role
 from vllm_omni.diffusion.config import get_current_diffusion_config_or_none
+from vllm_omni.diffusion.distributed.overlap import CommStreamContext, resolve_attention_overlap_config
 from vllm_omni.diffusion.distributed.parallel_state import get_sp_group
 from vllm_omni.diffusion.forward_context import get_forward_context, is_forward_context_available
 from vllm_omni.platforms import current_omni_platform
@@ -252,6 +254,23 @@ class Attention(nn.Module):
     ) -> torch.Tensor:
         return self._forward_impl(query, key, value, attn_metadata)
 
+    def _resolve_attention_comm_overlap(self, num_heads: int):
+        config = get_current_diffusion_config_or_none()
+        parallel_config = getattr(config, "parallel_config", None) if config is not None else None
+        return resolve_attention_overlap_config(parallel_config, num_heads=num_heads)
+
+    def _run_attention_core(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        attn_metadata: AttentionMetadata | None,
+        strategy,
+    ) -> torch.Tensor:
+        if self.use_ring and strategy is not self._no_parallel_strategy:
+            return self._run_ring_attention(query, key, value, attn_metadata)
+        return self._run_local_attention(query, key, value, attn_metadata)
+
     def _forward_impl(
         self,
         query: torch.Tensor,
@@ -261,25 +280,40 @@ class Attention(nn.Module):
     ) -> torch.Tensor:
         # Get the appropriate parallel strategy based on SP active state
         strategy = self._get_active_parallel_strategy()
+        overlap_cfg = self._resolve_attention_comm_overlap(int(query.shape[2]))
+        use_head_chunk_overlap = (
+            isinstance(strategy, UlyssesParallelAttention)
+            and strategy.supports_head_chunk_overlap(query, attn_metadata)
+        )
+        comm_enabled = overlap_cfg.enabled and torch.cuda.is_available()
 
-        # 1. Prepare inputs (Communication / Resharding)
-        # For Ulysses: AllToAll Q/K/V; Slicing joint_q/k/v
-        # For Ring: Concat joint_q
-        query, key, value, attn_metadata, ctx = strategy.pre_attention(query, key, value, attn_metadata)
+        with CommStreamContext(enabled=comm_enabled, device=query.device):
+            if use_head_chunk_overlap:
+                return strategy.forward_with_head_chunk_overlap(
+                    query,
+                    key,
+                    value,
+                    attn_metadata,
+                    attention_fn=lambda q, k, v: self._run_attention_core(
+                        q, k, v, attn_metadata, strategy
+                    ),
+                )
 
-        attn_metadata = self._with_kv_cache_dtype(attn_metadata)
+            # 1. Prepare inputs (Communication / Resharding)
+            # For Ulysses: AllToAll Q/K/V; Slicing joint_q/k/v
+            # For Ring: Concat joint_q
+            query, key, value, attn_metadata, ctx = strategy.pre_attention(query, key, value, attn_metadata)
 
-        # 2. Kernel Execution (Computation)
-        if self.use_ring and strategy is not self._no_parallel_strategy:
-            out = self._run_ring_attention(query, key, value, attn_metadata)
-        else:
-            out = self._run_local_attention(query, key, value, attn_metadata)
+            attn_metadata = self._with_kv_cache_dtype(attn_metadata)
 
-        # 3. Post-processing (Reverse Communication)
-        # For Ulysses: AllToAll Output, and AllGather Joint Output
-        out = strategy.post_attention(out, ctx)
+            # 2. Kernel Execution (Computation)
+            out = self._run_attention_core(query, key, value, attn_metadata, strategy)
 
-        return out
+            # 3. Post-processing (Reverse Communication)
+            # For Ulysses: AllToAll Output, and AllGather Joint Output
+            out = strategy.post_attention(out, ctx)
+
+            return out
 
     def _run_local_attention(self, query, key, value, attn_metadata):
         if query.dtype == torch.float32:

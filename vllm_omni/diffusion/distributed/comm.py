@@ -2,19 +2,201 @@
 # SPDX-License-Identifier: Apache-2.0
 # DeepSpeed Team & Jiarui Fang
 #  from https://github.com/feifeibear/long-context-attention/blob/main/yunchang/comm/all_to_all.py
+from __future__ import annotations
+
+from dataclasses import dataclass
 from typing import Any
 
 import torch
 import torch.distributed as dist
 from torch import Tensor
 
+from vllm_omni.diffusion.distributed.overlap.stream import get_current_comm_stream
 from vllm_omni.platforms import current_omni_platform
 
-__all__ = ["all_to_all_4D", "all_to_all_5D", "SeqAllToAll4D", "SeqAllToAll5D", "RingComm"]
+__all__ = [
+    "AllToAll4DPending",
+    "all_to_all_4D",
+    "all_to_all_4D_finalize",
+    "all_to_all_4D_launch",
+    "all_to_all_5D",
+    "SeqAllToAll4D",
+    "SeqAllToAll5D",
+    "RingComm",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class _AllToAll4DLayout:
+    scatter_idx: int
+    gather_idx: int
+    bs: int
+    shard_seqlen: int
+    seqlen: int
+    shard_hc: int
+    hc: int
+    hs: int
+    seq_world_size: int
+
+
+@dataclass(frozen=True, slots=True)
+class AllToAll4DPending:
+    """In-flight 4D all-to-all: collective launched, finalize pending on compute stream."""
+
+    comm_buf: Tensor
+    layout: _AllToAll4DLayout
+    comm_done: torch.Event
+
+
+def _run_all_to_all_single(
+    output: Tensor,
+    input_t: Tensor,
+    group: dist.ProcessGroup,
+    *,
+    use_sync: bool,
+    comm_done: torch.Event | None,
+    wait_on_compute: bool,
+) -> None:
+    world_size = dist.get_world_size(group)
+    if world_size <= 1:
+        output.copy_(input_t)
+        stream = torch.cuda.current_stream()
+        if comm_done is not None:
+            comm_done.record(stream)
+        return
+
+    comm_stream = get_current_comm_stream()
+    compute_stream = torch.cuda.current_stream()
+
+    if comm_stream is not None and not use_sync:
+        with torch.cuda.stream(comm_stream):
+            dist.all_to_all_single(output, input_t, group=group)
+        event = comm_done if comm_done is not None else torch.Event()
+        event.record(comm_stream)
+        if wait_on_compute:
+            compute_stream.wait_event(event)
+        return
+
+    dist.all_to_all_single(output, input_t, group=group)
+    if use_sync:
+        current_omni_platform.synchronize()
+    if comm_done is not None:
+        comm_done.record(compute_stream)
+
+
+def _prepare_all_to_all_4D(
+    input: Tensor,
+    scatter_idx: int,
+    gather_idx: int,
+    group: dist.ProcessGroup,
+) -> tuple[Tensor, Tensor, _AllToAll4DLayout]:
+    assert input.dim() == 4, f"input must be 4D tensor, got {input.dim()} and shape {input.shape}"
+
+    seq_world_size = dist.get_world_size(group)
+
+    if scatter_idx == 2 and gather_idx == 1:
+        bs, shard_seqlen, hc, hs = input.shape
+        seqlen = shard_seqlen * seq_world_size
+        shard_hc = hc // seq_world_size
+        input_t = input.reshape(bs, shard_seqlen, seq_world_size, shard_hc, hs).transpose(0, 2).contiguous()
+        comm_buf = torch.empty_like(input_t)
+        layout = _AllToAll4DLayout(
+            scatter_idx=scatter_idx,
+            gather_idx=gather_idx,
+            bs=bs,
+            shard_seqlen=shard_seqlen,
+            seqlen=seqlen,
+            shard_hc=shard_hc,
+            hc=hc,
+            hs=hs,
+            seq_world_size=seq_world_size,
+        )
+        return input_t, comm_buf, layout
+
+    if scatter_idx == 1 and gather_idx == 2:
+        bs, seqlen, shard_hc, hs = input.shape
+        hc = shard_hc * seq_world_size
+        shard_seqlen = seqlen // seq_world_size
+        input_t = (
+            input.reshape(bs, seq_world_size, shard_seqlen, shard_hc, hs)
+            .transpose(0, 3)
+            .transpose(0, 1)
+            .contiguous()
+            .reshape(seq_world_size, shard_hc, shard_seqlen, bs, hs)
+        )
+        comm_buf = torch.empty_like(input_t)
+        layout = _AllToAll4DLayout(
+            scatter_idx=scatter_idx,
+            gather_idx=gather_idx,
+            bs=bs,
+            shard_seqlen=shard_seqlen,
+            seqlen=seqlen,
+            shard_hc=shard_hc,
+            hc=hc,
+            hs=hs,
+            seq_world_size=seq_world_size,
+        )
+        return input_t, comm_buf, layout
+
+    raise RuntimeError("scatter_idx must be 1 or 2 and gather_idx must be 1 or 2")
+
+
+def _finalize_all_to_all_4D(comm_buf: Tensor, layout: _AllToAll4DLayout) -> Tensor:
+    if layout.scatter_idx == 2 and layout.gather_idx == 1:
+        if layout.seq_world_size <= 1:
+            output = comm_buf
+        else:
+            output = comm_buf
+        output = output.reshape(layout.seqlen, layout.bs, layout.shard_hc, layout.hs)
+        return output.transpose(0, 1).contiguous().reshape(
+            layout.bs, layout.seqlen, layout.shard_hc, layout.hs
+        )
+
+    if layout.scatter_idx == 1 and layout.gather_idx == 2:
+        output = comm_buf.reshape(layout.hc, layout.shard_seqlen, layout.bs, layout.hs)
+        return output.transpose(0, 2).contiguous().reshape(
+            layout.bs, layout.shard_seqlen, layout.hc, layout.hs
+        )
+
+    raise RuntimeError("scatter_idx must be 1 or 2 and gather_idx must be 1 or 2")
+
+
+def all_to_all_4D_launch(
+    input: Tensor,
+    scatter_idx: int = 2,
+    gather_idx: int = 1,
+    group: dist.ProcessGroup | None = None,
+    use_sync: bool = False,
+) -> AllToAll4DPending:
+    input_t, comm_buf, layout = _prepare_all_to_all_4D(input, scatter_idx, gather_idx, group)
+    comm_done = torch.Event()
+    _run_all_to_all_single(
+        comm_buf,
+        input_t,
+        group,
+        use_sync=use_sync,
+        comm_done=comm_done,
+        wait_on_compute=False,
+    )
+    return AllToAll4DPending(comm_buf=comm_buf, layout=layout, comm_done=comm_done)
+
+
+def all_to_all_4D_finalize(
+    pending: AllToAll4DPending,
+    *,
+    stream: torch.cuda.Stream | None = None,
+) -> Tensor:
+    compute_stream = stream or torch.cuda.current_stream()
+    compute_stream.wait_event(pending.comm_done)
+    return _finalize_all_to_all_4D(pending.comm_buf, pending.layout)
 
 
 def all_to_all_4D(
-    input: torch.tensor, scatter_idx: int = 2, gather_idx: int = 1, group=None, use_sync: bool = False
+    input: torch.tensor,
+    scatter_idx: int = 2,
+    gather_idx: int = 1,
+    group=None,
+    use_sync: bool = False,
 ) -> torch.tensor:
     """
     all-to-all for QKV
@@ -29,75 +211,8 @@ def all_to_all_4D(
     Returns:
         torch.tensor: resharded tensor (bs, seqlen/P, hc, hs)
     """
-    assert input.dim() == 4, f"input must be 4D tensor, got {input.dim()} and shape {input.shape}"
-
-    seq_world_size = dist.get_world_size(group)
-
-    if scatter_idx == 2 and gather_idx == 1:
-        # input (torch.tensor): a tensor sharded along dim 1 (bs, seqlen/P, hc, hs) output: (bs, seqlen, hc/P, hs)
-        bs, shard_seqlen, hc, hs = input.shape
-        seqlen = shard_seqlen * seq_world_size
-        shard_hc = hc // seq_world_size
-
-        # transpose groups of heads with the seq-len parallel dimension, so that we can scatter them!
-        # (bs, seqlen/P, hc, hs) -reshape-> (bs, seq_len/P, P, hc/P, hs) -transpose(0,2)-> (P, seq_len/P, bs, hc/P, hs)
-        input_t = input.reshape(bs, shard_seqlen, seq_world_size, shard_hc, hs).transpose(0, 2).contiguous()
-
-        output = torch.empty_like(input_t)
-        # https://pytorch.org/docs/stable/distributed.html#torch.distributed.all_to_all_single
-        # (P, seq_len/P, bs, hc/P, hs) scatter seqlen -all2all-> (P, seq_len/P, bs, hc/P, hs) scatter head
-
-        if seq_world_size > 1:
-            dist.all_to_all_single(output, input_t, group=group)
-            if use_sync:
-                current_omni_platform.synchronize()
-        else:
-            output = input_t
-        # if scattering the seq-dim, transpose the heads back to the original dimension
-        output = output.reshape(seqlen, bs, shard_hc, hs)
-
-        # (seq_len, bs, hc/P, hs) -reshape-> (bs, seq_len, hc/P, hs)
-        output = output.transpose(0, 1).contiguous().reshape(bs, seqlen, shard_hc, hs)
-
-        return output
-
-    elif scatter_idx == 1 and gather_idx == 2:
-        # input (torch.tensor): a tensor sharded along dim 1 (bs, seqlen, hc/P, hs) output: (bs, seqlen/P, hc, hs)
-        bs, seqlen, shard_hc, hs = input.shape
-        hc = shard_hc * seq_world_size
-        shard_seqlen = seqlen // seq_world_size
-        seq_world_size = dist.get_world_size(group)
-
-        # transpose groups of heads with the seq-len parallel dimension, so that we can scatter them!
-        # (bs, seqlen, hc/P, hs) -reshape-> (bs, P, seq_len/P, hc/P, hs) -transpose(0, 3)->
-        #  (hc/P, P, seqlen/P, bs, hs) -transpose(0, 1) -> (P, hc/P, seqlen/P, bs, hs)
-        input_t = (
-            input.reshape(bs, seq_world_size, shard_seqlen, shard_hc, hs)
-            .transpose(0, 3)
-            .transpose(0, 1)
-            .contiguous()
-            .reshape(seq_world_size, shard_hc, shard_seqlen, bs, hs)
-        )
-
-        output = torch.empty_like(input_t)
-        # https://pytorch.org/docs/stable/distributed.html#torch.distributed.all_to_all_single
-        # (P, bs x hc/P, seqlen/P, hs) scatter seqlen -all2all-> (P, bs x seq_len/P, hc/P, hs) scatter head
-        if seq_world_size > 1:
-            dist.all_to_all_single(output, input_t, group=group)
-            if use_sync:
-                current_omni_platform.synchronize()
-        else:
-            output = input_t
-
-        # if scattering the seq-dim, transpose the heads back to the original dimension
-        output = output.reshape(hc, shard_seqlen, bs, hs)
-
-        # (hc, seqlen/N, bs, hs) -transpose(0,2)-> (bs, seqlen/N, hc, hs)
-        output = output.transpose(0, 2).contiguous().reshape(bs, shard_seqlen, hc, hs)
-
-        return output
-    else:
-        raise RuntimeError("scatter_idx must be 1 or 2 and gather_idx must be 1 or 2")
+    pending = all_to_all_4D_launch(input, scatter_idx, gather_idx, group=group, use_sync=use_sync)
+    return all_to_all_4D_finalize(pending)
 
 
 class SeqAllToAll4D(torch.autograd.Function):
