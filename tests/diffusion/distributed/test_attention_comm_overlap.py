@@ -65,6 +65,8 @@ def test_overlap_supports_joint_when_divisible():
     class _FakeSPGroup:
         ulysses_world_size = 2
         ring_world_size = 1
+        ulysses_rank = 0
+        ulysses_group = None
 
     strategy = UlyssesParallelAttention(
         sp_group=_FakeSPGroup(),  # type: ignore[arg-type]
