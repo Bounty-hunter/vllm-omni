@@ -112,6 +112,24 @@ def parse_args():
             "Contents must be hashable."
         ),
     )
+    parser.add_argument(
+        "--profiler-config",
+        type=parse_profiler_config,
+        default=None,
+        help=(
+            'JSON profiler config for torch/cuda profiling, for example '
+            '\'{"profiler":"torch","torch_profiler_dir":"./perf",'
+            '"torch_profiler_record_shapes":true,"torch_profiler_with_stack":true}\'. '
+            "When set, start_profile/stop_profile are enabled around generation."
+        ),
+    )
+    parser.add_argument(
+        "--profiler-stages",
+        type=int,
+        nargs="*",
+        default=None,
+        help="List of stage IDs to profile. If not set, profiles all stages.",
+    )
 
     return parser.parse_args()
 
@@ -131,6 +149,20 @@ def parse_additional_config(raw_value: str | None) -> dict | None:
     if not isinstance(additional_config, dict):
         raise ValueError(f"--additional-config must decode to a JSON object, got {type(additional_config).__name__}")
     return additional_config
+
+
+def parse_profiler_config(raw_value: str) -> dict:
+    """Parse a JSON string into a profiler_config mapping."""
+    try:
+        profiler_config = json.loads(raw_value)
+    except json.JSONDecodeError as exc:
+        raise argparse.ArgumentTypeError(f"--profiler-config must be valid JSON: {exc}") from exc
+
+    if not isinstance(profiler_config, dict):
+        raise argparse.ArgumentTypeError(
+            f"--profiler-config must decode to a JSON object, got {type(profiler_config).__name__}"
+        )
+    return profiler_config
 
 
 def main():
@@ -168,6 +200,8 @@ def main():
 
     if additional_config is not None:
         omni_kwargs["additional_config"] = additional_config
+    if args.profiler_config is not None:
+        omni_kwargs["profiler_config"] = args.profiler_config
     if deploy_config is not None:
         omni_kwargs["deploy_config"] = deploy_config
     else:
@@ -290,8 +324,17 @@ def main():
         print(f"  Input image: {args.image_path}")
     if additional_config is not None:
         print(f"  Additional config: {additional_config}")
+    if args.profiler_config is not None:
+        print(f"  Profiler config: {args.profiler_config}")
+        if args.profiler_stages is not None:
+            print(f"  Profiler stages: {args.profiler_stages}")
     print(f"  Prompts: {prompts}")
     print(f"{'=' * 60}\n")
+
+    profiler_enabled = args.profiler_config is not None
+    if profiler_enabled:
+        print("[Profiler] Starting profiling...")
+        omni.start_profile(stages=args.profiler_stages)
 
     # When --stream is set, print AR CoT text token-by-token in real time.
     # Otherwise, collect and print the full AR text once when stage 0 finishes.
@@ -301,6 +344,8 @@ def main():
         py_generator=True,
         use_tqdm=False,
     )
+    if profiler_enabled:
+        omni.stop_profile(stages=args.profiler_stages)
     img_idx = 0
     for req_output in omni_outputs:
         ro = getattr(req_output, "request_output", None)
