@@ -283,7 +283,7 @@ class Attention(nn.Module):
             isinstance(strategy, UlyssesParallelAttention)
             and strategy.supports_head_chunk_overlap(query, attn_metadata)
         )
-        comm_enabled = overlap_cfg.enabled and torch.cuda.is_available()
+        comm_enabled = overlap_cfg.active and torch.cuda.is_available()
 
         with CommStreamContext(enabled=comm_enabled, device=query.device):
             if use_head_chunk_overlap:

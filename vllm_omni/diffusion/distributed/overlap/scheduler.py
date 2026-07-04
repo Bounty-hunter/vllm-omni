@@ -3,151 +3,127 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Callable
+from collections.abc import Callable, Sequence
+from typing import Generic, TypeVar
 
 import torch
-import torch.distributed as dist
 from torch import Tensor
 
-from vllm_omni.diffusion.distributed.comm import AllToAll4DPending, all_to_all_4D_finalize, all_to_all_4D_launch
 from vllm_omni.diffusion.distributed.overlap.stream import CommStreamManager
 
+ComputeInput = TypeVar("ComputeInput")
+CommState = TypeVar("CommState")
 
-@dataclass
-class _PreChunkPending:
-    query: AllToAll4DPending
-    key: AllToAll4DPending
-    value: AllToAll4DPending
-
-
-@dataclass
-class _ChunkSlot:
-    pre_ready: torch.Event
-    post_ready: torch.Event
-    pre: _PreChunkPending | None = None
-    post: AllToAll4DPending | None = None
+LaunchPreFn = Callable[[int], CommState]
+LaunchPostFn = Callable[[int, Tensor], CommState]
+FinalizePreFn = Callable[[int, CommState], ComputeInput]
+ComputeFn = Callable[[int, ComputeInput], Tensor]
+FinalizePostFn = Callable[[int, CommState], Tensor]
+MergeFn = Callable[[Sequence[Tensor]], Tensor]
 
 
-AttentionFn = Callable[[Tensor, Tensor, Tensor], Tensor]
+class ChunkOverlapScheduler(Generic[ComputeInput, CommState]):
+    """Generic chunk pipeline scheduler for comm/compute overlap.
 
+    Each chunk goes through three caller-defined phases:
 
-class HeadChunkUlyssesRunner:
-    """Head-chunk Ulysses pipeline: FA(i) || pre-A2A(i+1), FA(i+1) || post-A2A(i)."""
+    - **stage0 (pre-comm)**: ``launch_pre`` enqueues async comm; ``finalize_pre`` waits
+      and returns compute inputs (e.g. pre-attention AllToAll).
+    - **stage1 (compute)**: ``compute`` runs on the main stream (e.g. FlashAttention).
+    - **stage2 (post-comm)**: ``launch_post`` enqueues async comm; ``finalize_post``
+      waits and returns the chunk result (e.g. post-attention AllToAll).
 
-    def __init__(
-        self,
-        process_group: dist.ProcessGroup,
-        *,
-        scatter_idx: int,
-        gather_idx: int,
-        num_chunks: int,
-    ) -> None:
+    Overlap schedule (``num_chunks >= 2``):
+
+    .. code-block:: text
+
+        comm:  pre(c0) | pre(c1)     | post(c0) | post(c1)
+        main:  wait    | FA(c0)      | FA(c1)   | wait/merge
+                      └ FA(c0) ∥ pre(c1) ─┘└ FA(c1) ∥ post(c0) ─┘
+
+    Callers define chunking and comm/compute details; this class only orchestrates
+    CUDA stream dependencies and iteration order.
+    """
+
+    def __init__(self, num_chunks: int, *, device: torch.device | int) -> None:
         if num_chunks < 1:
             raise ValueError(f"num_chunks must be >= 1, got {num_chunks}")
-        self._pg = process_group
-        self._scatter_idx = scatter_idx
-        self._gather_idx = gather_idx
         self._num_chunks = num_chunks
+        self._device = torch.device(device)
+        self._compute_stream = CommStreamManager.get_compute_stream(self._device)
+        self._comm_stream = CommStreamManager.get(self._device)
 
     @property
     def num_chunks(self) -> int:
         return self._num_chunks
 
+    @property
+    def compute_stream(self) -> torch.cuda.Stream:
+        return self._compute_stream
+
+    @property
+    def comm_stream(self) -> torch.cuda.Stream:
+        return self._comm_stream
+
+    def _mark_comm_done(self) -> torch.Event:
+        ready = torch.Event()
+        with torch.cuda.stream(self._comm_stream):
+            ready.record(self._comm_stream)
+        return ready
+
+    def _launch_pre(self, chunk_index: int, launch_pre: Callable[[int], CommState]) -> tuple[torch.Event, CommState]:
+        state = launch_pre(chunk_index)
+        return self._mark_comm_done(), state
+
+    def _launch_post(
+        self,
+        chunk_index: int,
+        compute_output: Tensor,
+        launch_post: Callable[[int, Tensor], CommState],
+    ) -> tuple[torch.Event, CommState]:
+        state = launch_post(chunk_index, compute_output)
+        return self._mark_comm_done(), state
+
     def run(
         self,
-        query: Tensor,
-        key: Tensor,
-        value: Tensor,
-        attention_fn: AttentionFn,
+        *,
+        launch_pre: Callable[[int], CommState],
+        finalize_pre: Callable[[int, CommState], ComputeInput],
+        compute: Callable[[int, ComputeInput], Tensor],
+        launch_post: Callable[[int, Tensor], CommState],
+        finalize_post: Callable[[int, CommState], Tensor],
+        merge: MergeFn,
     ) -> Tensor:
-        head_count = int(query.shape[2])
-        if head_count % self._num_chunks != 0:
-            raise ValueError(
-                f"Head count {head_count} is not divisible by num_chunks={self._num_chunks}."
-            )
-        chunk_heads = head_count // self._num_chunks
+        if self._num_chunks == 1:
+            pre_ready, pre_state = self._launch_pre(0, launch_pre)
+            self._compute_stream.wait_event(pre_ready)
+            compute_input = finalize_pre(0, pre_state)
+            compute_output = compute(0, compute_input)
+            post_ready, post_state = self._launch_post(0, compute_output, launch_post)
+            self._compute_stream.wait_event(post_ready)
+            return finalize_post(0, post_state)
 
-        compute_stream = CommStreamManager.get_compute_stream(query.device)
-        comm_stream = CommStreamManager.get(query.device)
-        slots = [_ChunkSlot(pre_ready=torch.Event(), post_ready=torch.Event()) for _ in range(self._num_chunks)]
+        pre_ready, pre_state = self._launch_pre(0, launch_pre)
+        self._compute_stream.wait_event(pre_ready)
+        compute_inputs: list[ComputeInput] = [finalize_pre(0, pre_state)]
 
-        def slice_chunk(tensor: Tensor, index: int) -> Tensor:
-            start = index * chunk_heads
-            end = start + chunk_heads
-            return tensor[:, :, start:end, :].contiguous()
+        post_states: list[tuple[torch.Event, CommState]] = []
+        for chunk_index in range(self._num_chunks):
+            pending_pre: tuple[torch.Event, CommState] | None = None
+            if chunk_index + 1 < self._num_chunks:
+                pending_pre = self._launch_pre(chunk_index + 1, launch_pre)
 
-        def launch_pre(index: int) -> None:
-            slot = slots[index]
-            slot.pre = _PreChunkPending(
-                query=all_to_all_4D_launch(
-                    slice_chunk(query, index),
-                    self._scatter_idx,
-                    self._gather_idx,
-                    group=self._pg,
-                ),
-                key=all_to_all_4D_launch(
-                    slice_chunk(key, index),
-                    self._scatter_idx,
-                    self._gather_idx,
-                    group=self._pg,
-                ),
-                value=all_to_all_4D_launch(
-                    slice_chunk(value, index),
-                    self._scatter_idx,
-                    self._gather_idx,
-                    group=self._pg,
-                ),
-            )
-            with torch.cuda.stream(comm_stream):
-                slot.pre_ready.record(comm_stream)
+            compute_output = compute(chunk_index, compute_inputs[chunk_index])
+            post_states.append(self._launch_post(chunk_index, compute_output, launch_post))
 
-        def finalize_pre(index: int) -> tuple[Tensor, Tensor, Tensor]:
-            pending = slots[index].pre
-            assert pending is not None
-            return (
-                all_to_all_4D_finalize(pending.query, stream=compute_stream),
-                all_to_all_4D_finalize(pending.key, stream=compute_stream),
-                all_to_all_4D_finalize(pending.value, stream=compute_stream),
-            )
-
-        def launch_post(index: int, attn_out: Tensor) -> None:
-            slot = slots[index]
-            slot.post = all_to_all_4D_launch(
-                attn_out,
-                self._gather_idx,
-                self._scatter_idx,
-                group=self._pg,
-            )
-            with torch.cuda.stream(comm_stream):
-                slot.post_ready.record(comm_stream)
-
-        def finalize_post(index: int) -> Tensor:
-            pending = slots[index].post
-            assert pending is not None
-            return all_to_all_4D_finalize(pending, stream=compute_stream)
-
-        launch_pre(0)
-        compute_stream.wait_event(slots[0].pre_ready)
-        chunk_qkv = [finalize_pre(0)]
+            if pending_pre is not None:
+                pending_ready, pending_state = pending_pre
+                self._compute_stream.wait_event(pending_ready)
+                compute_inputs.append(finalize_pre(chunk_index + 1, pending_state))
 
         post_outputs: list[Tensor] = []
-        for index in range(self._num_chunks):
-            if index + 1 < self._num_chunks:
-                launch_pre(index + 1)
+        for chunk_index, (post_ready, post_state) in enumerate(post_states):
+            self._compute_stream.wait_event(post_ready)
+            post_outputs.append(finalize_post(chunk_index, post_state))
 
-            q_chunk, k_chunk, v_chunk = chunk_qkv[index]
-            attn_out = attention_fn(q_chunk, k_chunk, v_chunk)
-            launch_post(index, attn_out)
-
-            if index + 1 < self._num_chunks:
-                compute_stream.wait_event(slots[index + 1].pre_ready)
-                chunk_qkv.append(finalize_pre(index + 1))
-
-        for index in range(self._num_chunks):
-            compute_stream.wait_event(slots[index].post_ready)
-            post_outputs.append(finalize_post(index))
-
-        if len(post_outputs) == 1:
-            return post_outputs[0]
-        return torch.cat(post_outputs, dim=2)
+        return merge(post_outputs)

@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Sequence
 
 import torch
 import torch.distributed as dist
@@ -12,12 +12,12 @@ import torch.nn.functional as F
 
 from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata
 from vllm_omni.diffusion.attention.parallel.base import ParallelAttentionContext
-from vllm_omni.diffusion.distributed.comm import SeqAllToAll4D
+from vllm_omni.diffusion.distributed.comm import AllToAll4DPending, SeqAllToAll4D, all_to_all_4D_finalize, all_to_all_4D_launch
 from vllm_omni.diffusion.distributed.group_coordinator import SequenceParallelGroupCoordinator
 from vllm_omni.diffusion.distributed.overlap import (
     AttentionOverlapConfig,
+    ChunkOverlapScheduler,
     CommStreamContext,
-    HeadChunkUlyssesRunner,
     get_active_parallel_config,
     resolve_attention_overlap_config,
 )
@@ -170,6 +170,30 @@ class _UlyssesCtx(ParallelAttentionContext):
     uaa_local_seq_len: int = 0
     orig_head_cnt: int = 0
     joint_orig_head_cnt: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class _JointOverlapState:
+    """Rank-local joint Q/K/V prepared for head-chunk overlap."""
+
+    query: torch.Tensor
+    key: torch.Tensor
+    value: torch.Tensor
+    joint_len: int
+    joint_strategy: str
+    heads_per_rank: int
+
+
+@dataclass(frozen=True, slots=True)
+class _PostChunkState:
+    image_pending: AllToAll4DPending
+    joint_output: torch.Tensor
+
+
+@dataclass(frozen=True, slots=True)
+class _ChunkPostResult:
+    image: torch.Tensor
+    joint: torch.Tensor
 
 
 class UlyssesParallelAttention:
@@ -483,6 +507,155 @@ class UlyssesParallelAttention:
     def _resolve_overlap_config(self, num_heads: int) -> AttentionOverlapConfig:
         return resolve_attention_overlap_config(get_active_parallel_config(), num_heads=num_heads)
 
+    def _heads_per_chunk(self, head_count: int, num_chunks: int) -> int:
+        if head_count % num_chunks != 0:
+            raise ValueError(f"Head count {head_count} is not divisible by num_chunks={num_chunks}.")
+        return head_count // num_chunks
+
+    def _slice_head_chunk(self, tensor: torch.Tensor, chunk_index: int, heads_per_chunk: int) -> torch.Tensor:
+        start = chunk_index * heads_per_chunk
+        end = start + heads_per_chunk
+        return tensor[:, :, start:end, :].contiguous()
+
+    def _prepare_joint_overlap_state(
+        self,
+        attn_metadata: AttentionMetadata | None,
+        *,
+        num_chunks: int,
+    ) -> _JointOverlapState | None:
+        if attn_metadata is None:
+            return None
+        joint_query = attn_metadata.joint_query
+        joint_key = attn_metadata.joint_key
+        joint_value = attn_metadata.joint_value
+        if joint_query is None and joint_key is None and joint_value is None:
+            return None
+        if joint_query is None or joint_key is None or joint_value is None:
+            raise ValueError("joint_query, joint_key, and joint_value should be None or not None simultaneously.")
+
+        joint_strategy = attn_metadata.joint_strategy
+        if joint_strategy not in ("front", "rear"):
+            raise ValueError(
+                f"joint_strategy: {joint_strategy} not supported. supported joint strategy: ['front', 'rear']"
+            )
+
+        ulysses_world_size = self._sp_group.ulysses_world_size
+        ulysses_rank = self._sp_group.ulysses_rank
+        joint_head_cnt = int(joint_query.shape[-2])
+        if joint_head_cnt % (ulysses_world_size * num_chunks) != 0:
+            supported = _positive_divisors(joint_head_cnt)
+            raise ValueError(
+                "Ulysses head-chunk overlap requires joint head_cnt divisible by "
+                f"ulysses_degree * attention_head_chunks, but got joint_head_cnt={joint_head_cnt}, "
+                f"ulysses_degree={ulysses_world_size}, attention_head_chunks={num_chunks}. "
+                f"Try attention_head_chunks in {supported}."
+            )
+
+        heads_per_rank = joint_head_cnt // ulysses_world_size
+        rank_head_start = heads_per_rank * ulysses_rank
+        rank_head_end = heads_per_rank * (ulysses_rank + 1)
+        joint_query = joint_query[..., rank_head_start:rank_head_end, :]
+        joint_key = joint_key[..., rank_head_start:rank_head_end, :]
+        joint_value = joint_value[..., rank_head_start:rank_head_end, :]
+
+        return _JointOverlapState(
+            query=joint_query,
+            key=joint_key,
+            value=joint_value,
+            joint_len=int(joint_query.shape[1]),
+            joint_strategy=joint_strategy,
+            heads_per_rank=heads_per_rank,
+        )
+
+    def _apply_overlap_joint_mask(
+        self,
+        attn_metadata: AttentionMetadata | None,
+        joint_state: _JointOverlapState | None,
+        query: torch.Tensor,
+    ) -> None:
+        if attn_metadata is None or joint_state is None:
+            return
+
+        use_2d_mask = False
+        if attn_metadata.attn_mask is not None and attn_metadata.attn_mask.ndim == 2:
+            use_2d_mask = True
+        if attn_metadata.joint_attn_mask is not None and attn_metadata.joint_attn_mask.ndim == 2:
+            use_2d_mask = True
+        if not use_2d_mask:
+            return
+
+        if attn_metadata.joint_attn_mask is None and attn_metadata.attn_mask is None:
+            attn_metadata.attn_mask = None
+            return
+
+        if attn_metadata.attn_mask is None:
+            attn_metadata.attn_mask = torch.ones(
+                [query.shape[0], query.shape[1] - attn_metadata.joint_attn_mask.shape[1]],
+                dtype=torch.bool,
+                device=query.device,
+            )
+        elif attn_metadata.joint_attn_mask is None:
+            attn_metadata.joint_attn_mask = torch.ones(
+                [query.shape[0], query.shape[1] - attn_metadata.attn_mask.shape[1]],
+                dtype=torch.bool,
+                device=query.device,
+            )
+
+        if joint_state.joint_strategy == "front":
+            attn_metadata.attn_mask = torch.cat(
+                [attn_metadata.joint_attn_mask, attn_metadata.attn_mask],
+                dim=1,
+            )
+        else:
+            attn_metadata.attn_mask = torch.cat(
+                [attn_metadata.attn_mask, attn_metadata.joint_attn_mask],
+                dim=1,
+            )
+        assert attn_metadata.attn_mask.shape[1] == query.shape[1], (
+            f"attn_mask length: {attn_metadata.attn_mask.shape[1]} != query length: {query.shape[1]}"
+        )
+        attn_metadata.attn_mask = attn_metadata.attn_mask.bool().contiguous()
+
+    def _concat_joint_and_image_qkv(
+        self,
+        joint_state: _JointOverlapState,
+        chunk_index: int,
+        num_chunks: int,
+        image_q: torch.Tensor,
+        image_k: torch.Tensor,
+        image_v: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        joint_heads_per_chunk = self._heads_per_chunk(joint_state.heads_per_rank, num_chunks)
+        joint_q = self._slice_head_chunk(joint_state.query, chunk_index, joint_heads_per_chunk)
+        joint_k = self._slice_head_chunk(joint_state.key, chunk_index, joint_heads_per_chunk)
+        joint_v = self._slice_head_chunk(joint_state.value, chunk_index, joint_heads_per_chunk)
+
+        if joint_state.joint_strategy == "rear":
+            query = torch.cat([image_q, joint_q], dim=1)
+            key = torch.cat([image_k, joint_k], dim=1)
+            value = torch.cat([image_v, joint_v], dim=1)
+        else:
+            query = torch.cat([joint_q, image_q], dim=1)
+            key = torch.cat([joint_k, image_k], dim=1)
+            value = torch.cat([joint_v, image_v], dim=1)
+        return query, key, value
+
+    def _split_joint_and_image_output(
+        self,
+        joint_state: _JointOverlapState,
+        attn_output: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        joint_len = joint_state.joint_len
+        if joint_state.joint_strategy == "front":
+            return attn_output[:, :joint_len], attn_output[:, joint_len:]
+        return attn_output[:, :-joint_len], attn_output[:, -joint_len:]
+
+    def _all_gather_joint_heads(self, joint_output: torch.Tensor) -> torch.Tensor:
+        output_joint = joint_output.contiguous()
+        gathered_joint = [torch.zeros_like(output_joint) for _ in range(dist.get_world_size(self._ulysses_pg))]
+        dist.all_gather(gathered_joint, output_joint, group=self._ulysses_pg)
+        return torch.cat(gathered_joint, dim=2)
+
     def supports_head_chunk_overlap(
         self,
         query: torch.Tensor,
@@ -497,11 +670,12 @@ class UlyssesParallelAttention:
             return False
         if self._use_sync:
             return False
-        if attn_metadata is not None and any(
-            getattr(attn_metadata, name, None) is not None
-            for name in ("joint_query", "joint_key", "joint_value")
-        ):
-            return False
+
+        if attn_metadata is not None and attn_metadata.joint_query is not None:
+            joint_head_cnt = int(attn_metadata.joint_query.shape[-2])
+            divisor = self._sp_group.ulysses_world_size * overlap_cfg.head_chunks
+            if joint_head_cnt % divisor != 0:
+                return False
         return True
 
     def forward_with_head_chunk_overlap(
@@ -513,11 +687,126 @@ class UlyssesParallelAttention:
         attention_fn: Callable[[torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor],
     ) -> torch.Tensor:
         overlap_cfg = self._resolve_overlap_config(int(query.shape[2]))
-        runner = HeadChunkUlyssesRunner(
-            self._ulysses_pg,
-            scatter_idx=self._scatter_idx,
-            gather_idx=self._gather_idx,
-            num_chunks=overlap_cfg.head_chunks,
-        )
+        num_chunks = overlap_cfg.head_chunks
+        image_heads_per_chunk = self._heads_per_chunk(int(query.shape[2]), num_chunks)
+        joint_state = self._prepare_joint_overlap_state(attn_metadata, num_chunks=num_chunks)
+
+        scheduler = ChunkOverlapScheduler(num_chunks, device=query.device)
+        mask_prepared = False
+
+        def launch_pre(
+            chunk_index: int,
+        ) -> tuple[AllToAll4DPending, AllToAll4DPending, AllToAll4DPending]:
+            return (
+                all_to_all_4D_launch(
+                    self._slice_head_chunk(query, chunk_index, image_heads_per_chunk),
+                    self._scatter_idx,
+                    self._gather_idx,
+                    group=self._ulysses_pg,
+                ),
+                all_to_all_4D_launch(
+                    self._slice_head_chunk(key, chunk_index, image_heads_per_chunk),
+                    self._scatter_idx,
+                    self._gather_idx,
+                    group=self._ulysses_pg,
+                ),
+                all_to_all_4D_launch(
+                    self._slice_head_chunk(value, chunk_index, image_heads_per_chunk),
+                    self._scatter_idx,
+                    self._gather_idx,
+                    group=self._ulysses_pg,
+                ),
+            )
+
+        def finalize_pre(
+            chunk_index: int,
+            pending: tuple[AllToAll4DPending, AllToAll4DPending, AllToAll4DPending],
+        ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+            nonlocal mask_prepared
+            stream = scheduler.compute_stream
+            q_pending, k_pending, v_pending = pending
+            image_q = all_to_all_4D_finalize(q_pending, stream=stream)
+            image_k = all_to_all_4D_finalize(k_pending, stream=stream)
+            image_v = all_to_all_4D_finalize(v_pending, stream=stream)
+
+            if joint_state is None:
+                return image_q, image_k, image_v
+
+            q_chunk, k_chunk, v_chunk = self._concat_joint_and_image_qkv(
+                joint_state,
+                chunk_index,
+                num_chunks,
+                image_q,
+                image_k,
+                image_v,
+            )
+            if not mask_prepared:
+                self._apply_overlap_joint_mask(attn_metadata, joint_state, q_chunk)
+                mask_prepared = True
+            return q_chunk, k_chunk, v_chunk
+
+        def compute(
+            chunk_index: int,
+            qkv: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+        ) -> torch.Tensor:
+            del chunk_index
+            q_chunk, k_chunk, v_chunk = qkv
+            return attention_fn(q_chunk, k_chunk, v_chunk)
+
+        def launch_post(chunk_index: int, attn_out: torch.Tensor) -> AllToAll4DPending | _PostChunkState:
+            del chunk_index
+            if joint_state is None:
+                return all_to_all_4D_launch(
+                    attn_out,
+                    self._gather_idx,
+                    self._scatter_idx,
+                    group=self._ulysses_pg,
+                )
+
+            output_joint, output_img = self._split_joint_and_image_output(joint_state, attn_out)
+            return _PostChunkState(
+                image_pending=all_to_all_4D_launch(
+                    output_img,
+                    self._gather_idx,
+                    self._scatter_idx,
+                    group=self._ulysses_pg,
+                ),
+                joint_output=output_joint,
+            )
+
+        def finalize_post(chunk_index: int, pending: AllToAll4DPending | _PostChunkState) -> torch.Tensor | _ChunkPostResult:
+            del chunk_index
+            stream = scheduler.compute_stream
+            if joint_state is None:
+                assert isinstance(pending, AllToAll4DPending)
+                return all_to_all_4D_finalize(pending, stream=stream)
+
+            assert isinstance(pending, _PostChunkState)
+            image = all_to_all_4D_finalize(pending.image_pending, stream=stream)
+            joint = self._all_gather_joint_heads(pending.joint_output)
+            return _ChunkPostResult(image=image, joint=joint)
+
+        def merge(outputs: Sequence[torch.Tensor | _ChunkPostResult]) -> torch.Tensor:
+            if joint_state is None:
+                tensors = [output for output in outputs]
+                if len(tensors) == 1:
+                    return tensors[0]
+                return torch.cat(tensors, dim=2)
+
+            chunk_results = [output for output in outputs]
+            assert all(isinstance(result, _ChunkPostResult) for result in chunk_results)
+            images = torch.cat([result.image for result in chunk_results], dim=2)
+            joints = torch.cat([result.joint for result in chunk_results], dim=2)
+            if joint_state.joint_strategy == "front":
+                return torch.cat([joints, images], dim=1)
+            return torch.cat([images, joints], dim=1)
+
         with CommStreamContext(device=query.device, enabled=True):
-            return runner.run(query, key, value, attention_fn)
+            return scheduler.run(
+                launch_pre=launch_pre,
+                finalize_pre=finalize_pre,
+                compute=compute,
+                launch_post=launch_post,
+                finalize_post=finalize_post,
+                merge=merge,
+            )
