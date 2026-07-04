@@ -371,6 +371,10 @@ def main():
                 img.save(save_path)
                 print(f"\n[Output] Saved image to {save_path}")
             img_idx += 1
+            if profiler_enabled:
+                print("[Profiler] Stopping profiling...")
+                omni.stop_profile(stages=args.profiler_stages)
+                profiler_enabled = False
 
     if profiler_enabled:
         print("[Profiler] Stopping profiling...")
