@@ -344,8 +344,6 @@ def main():
         py_generator=True,
         use_tqdm=False,
     )
-    if profiler_enabled:
-        omni.stop_profile(stages=args.profiler_stages)
     img_idx = 0
     for req_output in omni_outputs:
         ro = getattr(req_output, "request_output", None)
@@ -373,6 +371,10 @@ def main():
                 img.save(save_path)
                 print(f"\n[Output] Saved image to {save_path}")
             img_idx += 1
+
+    if profiler_enabled:
+        print("[Profiler] Stopping profiling...")
+        omni.stop_profile(stages=args.profiler_stages)
 
 
 if __name__ == "__main__":
