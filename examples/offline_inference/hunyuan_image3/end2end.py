@@ -295,48 +295,39 @@ def main():
 
     # When --stream is set, print AR CoT text token-by-token in real time.
     # Otherwise, collect and print the full AR text once when stage 0 finishes.
-    start_profile = getattr(omni, "start_profile", None)
-    stop_profile = getattr(omni, "stop_profile", None)
-    if callable(start_profile):
-        start_profile()
-
+    omni.start_profile()
     omni_outputs = omni.generate(
         prompts=formatted_prompts,
         sampling_params_list=params_list,
         py_generator=True,
         use_tqdm=False,
     )
+    omni.stop_profile()
     img_idx = 0
-    try:
-        for req_output in omni_outputs:
-            ro = getattr(req_output, "request_output", None)
-            stage_id = getattr(req_output, "stage_id", None)
+    for req_output in omni_outputs:
+        ro = req_output.request_output
+        stage_id = req_output.stage_id
 
-            # AR stage text — each CompletionOutput.text is already a delta when
-            # output_kind=DELTA, so we can print it directly (matching the pattern
-            # in serving_chat.py).
-            if stage_id == 0 and ro and getattr(ro, "outputs", None):
-                for o in ro.outputs:
-                    text = getattr(o, "text", "") or ""
-                    if text:
-                        print(text, end="", flush=True)
-                # Non-streaming: one shot with full text — emit a trailing newline.
-                if not args.stream:
-                    print(flush=True)
+        # AR stage text — each CompletionOutput.text is already a delta when
+        # output_kind=DELTA, so we can print it directly (matching the pattern
+        # in serving_chat.py).
+        if stage_id == 0 and ro.outputs:
+            for o in ro.outputs:
+                text = o.text or ""
+                if text:
+                    print(text, end="", flush=True)
+            # Non-streaming: one shot with full text — emit a trailing newline.
+            if not args.stream:
+                print(flush=True)
 
-            # Collect images from diffusion stage
-            images = getattr(req_output, "images", None)
-            if not images and ro and hasattr(ro, "images"):
-                images = ro.images
-            if images:
-                for j, img in enumerate(images):
-                    save_path = os.path.join(args.output, f"output_{img_idx}_{j}.png")
-                    img.save(save_path)
-                    print(f"\n[Output] Saved image to {save_path}")
-                img_idx += 1
-    finally:
-        if callable(stop_profile):
-            stop_profile()
+        # Collect images from diffusion stage
+        images = req_output.images
+        if images:
+            for j, img in enumerate(images):
+                save_path = os.path.join(args.output, f"output_{img_idx}_{j}.png")
+                img.save(save_path)
+                print(f"\n[Output] Saved image to {save_path}")
+            img_idx += 1
 
 
 if __name__ == "__main__":
