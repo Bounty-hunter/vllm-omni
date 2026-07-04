@@ -51,3 +51,18 @@ def resolve_attention_overlap_config(
             )
 
     return AttentionOverlapConfig(enabled=True, head_chunks=head_chunks)
+
+
+def get_active_parallel_config():
+    """Resolve parallel config from thread-local diffusion config or forward context."""
+    from vllm_omni.diffusion.config import get_current_diffusion_config_or_none
+    from vllm_omni.diffusion.forward_context import get_forward_context, is_forward_context_available
+
+    config = get_current_diffusion_config_or_none()
+    if config is not None:
+        return getattr(config, "parallel_config", None)
+
+    if is_forward_context_available():
+        return get_forward_context().omni_diffusion_config.parallel_config
+
+    return None

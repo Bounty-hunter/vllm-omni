@@ -18,9 +18,9 @@ from vllm_omni.diffusion.distributed.overlap import (
     AttentionOverlapConfig,
     CommStreamContext,
     HeadChunkUlyssesRunner,
+    get_active_parallel_config,
     resolve_attention_overlap_config,
 )
-from vllm_omni.diffusion.config import get_current_diffusion_config_or_none
 from vllm_omni.diffusion.forward_context import get_ulysses_mode
 
 
@@ -481,9 +481,7 @@ class UlyssesParallelAttention:
         return SeqAllToAll4D.apply(ctx.ulysses_pg, attn_output, ctx.gather_idx, ctx.scatter_idx, ctx.use_sync)
 
     def _resolve_overlap_config(self, num_heads: int) -> AttentionOverlapConfig:
-        config = get_current_diffusion_config_or_none()
-        parallel_config = getattr(config, "parallel_config", None) if config is not None else None
-        return resolve_attention_overlap_config(parallel_config, num_heads=num_heads)
+        return resolve_attention_overlap_config(get_active_parallel_config(), num_heads=num_heads)
 
     def supports_head_chunk_overlap(
         self,

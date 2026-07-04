@@ -22,7 +22,7 @@ from vllm_omni.diffusion.attention.parallel.ring import RingParallelAttention
 from vllm_omni.diffusion.attention.parallel.ulysses import UlyssesParallelAttention
 from vllm_omni.diffusion.attention.selector import get_attn_backend_for_role
 from vllm_omni.diffusion.config import get_current_diffusion_config_or_none
-from vllm_omni.diffusion.distributed.overlap import CommStreamContext, resolve_attention_overlap_config
+from vllm_omni.diffusion.distributed.overlap import CommStreamContext, get_active_parallel_config, resolve_attention_overlap_config
 from vllm_omni.diffusion.distributed.parallel_state import get_sp_group
 from vllm_omni.diffusion.forward_context import get_forward_context, is_forward_context_available
 from vllm_omni.platforms import current_omni_platform
@@ -255,9 +255,7 @@ class Attention(nn.Module):
         return self._forward_impl(query, key, value, attn_metadata)
 
     def _resolve_attention_comm_overlap(self, num_heads: int):
-        config = get_current_diffusion_config_or_none()
-        parallel_config = getattr(config, "parallel_config", None) if config is not None else None
-        return resolve_attention_overlap_config(parallel_config, num_heads=num_heads)
+        return resolve_attention_overlap_config(get_active_parallel_config(), num_heads=num_heads)
 
     def _run_attention_core(
         self,
