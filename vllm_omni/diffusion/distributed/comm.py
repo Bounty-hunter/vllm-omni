@@ -11,7 +11,6 @@ import torch
 import torch.distributed as dist
 from torch import Tensor
 
-from vllm_omni.diffusion.distributed.overlap.stream import get_current_comm_stream
 from vllm_omni.platforms import current_omni_platform
 
 __all__ = [
@@ -65,7 +64,11 @@ def _run_all_to_all_single(
             comm_done.record(stream)
         return
 
-    comm_stream = get_current_comm_stream()
+    comm_stream = None
+    if not use_sync:
+        from vllm_omni.diffusion.distributed.overlap.stream import get_current_comm_stream
+
+        comm_stream = get_current_comm_stream()
     compute_stream = torch.cuda.current_stream()
 
     if comm_stream is not None and not use_sync:
