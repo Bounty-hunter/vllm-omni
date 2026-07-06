@@ -27,7 +27,7 @@ class CommStreamManager:
         dev = torch.device(device)
         idx = dev.index if dev.index is not None else torch.cuda.current_device()
         if idx not in cls._streams:
-            cls._streams[idx] = torch.cuda.Stream(device=idx)
+            cls._streams[idx] = torch.cuda.Stream(device=idx, priority=-1)
         return cls._streams[idx]
 
     @classmethod
