@@ -1043,12 +1043,14 @@ class ImageKVCacheManager:
         bs: int,
         shard_image_size: int | None = None,
         position_ids: torch.Tensor | None = None,
+        n_rep: int = 1,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Reuse cached prompt KV in subsequent denoising steps.
 
-        Non-SP: concatenates cached prompt KV with current image KV.
-        SP: returns cached prompt KV only (used as joint_text).
+        Non-SP: merges cached prompt KV with current image KV and expands GQA
+        heads (fused Triton path when available). Returns ``[B,P+I,Hq,D]``.
+        SP: returns cached prompt KV only (used as joint_text), still ``Hkv``.
         """
         cached_key, cached_value = self.image_kv_cache_map
         _, q_len, _, _ = key.shape
@@ -1071,9 +1073,11 @@ class ImageKVCacheManager:
                 assert torch.all(position_ids[:, 0] == self.image_kv_cache_lens.to(position_ids.device)), (
                     "The first current position must immediately follow each sample's cached prompt KV."
                 )
-        new_key = torch.cat([cached_key, key], dim=1)
-        new_value = torch.cat([cached_value, value], dim=1)
-        return new_key.contiguous(), new_value.contiguous()
+        from vllm_omni.diffusion.layers.triton.fused_cat_repeat_kv import fused_cat_repeat_kv
+
+        new_key = fused_cat_repeat_kv(cached_key, key, n_rep=n_rep)
+        new_value = fused_cat_repeat_kv(cached_value, value, n_rep=n_rep)
+        return new_key, new_value
 
     def _build_neg_ar_kv(
         self,
@@ -1160,10 +1164,21 @@ class ImageKVCacheManager:
                 value = value[:, local_prompt_len:, :, :]
         else:
             if self.sp_size <= 1:
-                key, value = self._reuse_prompt_kv(key, value, seq_len, bs, position_ids=kwargs.get("position_ids"))
+                # Fused cat(||) + GQA repeat → [B, P+I, Hq, D]; skip repeat_kv below.
+                key, value = self._reuse_prompt_kv(
+                    key,
+                    value,
+                    seq_len,
+                    bs,
+                    position_ids=kwargs.get("position_ids"),
+                    n_rep=repeat_num,
+                )
+                repeat_num = 1
             else:
                 joint_text_query = query[:, :0, :, :]
-                joint_text_key, joint_text_value = self._reuse_prompt_kv(key, value, seq_len, bs, shard_image_size)
+                joint_text_key, joint_text_value = self._reuse_prompt_kv(
+                    key, value, seq_len, bs, shard_image_size
+                )
 
         key = repeat_kv(key, repeat_num)
         value = repeat_kv(value, repeat_num)
