@@ -765,9 +765,9 @@ class OmniDiffusionConfig:
     # Disable with CLI ``--no-hunyuan-fused-attn-epilogue`` or env
     # ``VLLM_OMNI_HUNYUAN_FUSED_ATTN_EPILOGUE=0``.
     enable_hunyuan_fused_attn_epilogue: bool = True
-    # Disable with CLI ``--no-hunyuan-fused-cat-repeat-kv`` or env
-    # ``VLLM_OMNI_HUNYUAN_FUSED_CAT_REPEAT_KV=0``.
-    enable_hunyuan_fused_cat_repeat_kv: bool = True
+    # Opt-in: CLI ``--hunyuan-fused-cat-repeat-kv`` or env
+    # ``VLLM_OMNI_HUNYUAN_FUSED_CAT_REPEAT_KV=1``. Default off (e2e tile regresses).
+    enable_hunyuan_fused_cat_repeat_kv: bool = False
 
     # Step mode settings
     step_execution: bool = False

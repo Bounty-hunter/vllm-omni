@@ -728,10 +728,11 @@ class OmniServeCommand(CLISubcommand):
             "--hunyuan-fused-cat-repeat-kv",
             dest="enable_hunyuan_fused_cat_repeat_kv",
             action=argparse.BooleanOptionalAction,
-            default=True,
+            default=False,
             help=(
                 "Enable HunyuanImage3 fused prompt||image KV cat + GQA repeat "
-                "(default: on). Use --no-hunyuan-fused-cat-repeat-kv to disable."
+                "(default: off; current Triton tile regresses e2e). "
+                "Use --hunyuan-fused-cat-repeat-kv to enable."
             ),
         )
         omni_config_group.add_argument(

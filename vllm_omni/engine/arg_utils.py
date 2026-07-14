@@ -487,7 +487,7 @@ class OrchestratorArgs:
     enable_diffusion_pipeline_profiler: bool = False
     enable_ar_profiler: bool = False
     enable_hunyuan_fused_attn_epilogue: bool = True
-    enable_hunyuan_fused_cat_repeat_kv: bool = True
+    enable_hunyuan_fused_cat_repeat_kv: bool = False
     auxiliary_text_encoder: str | None = None
     log_file: str | None = None
     replica_id: int | None = None

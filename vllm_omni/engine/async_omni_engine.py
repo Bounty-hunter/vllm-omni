@@ -1034,7 +1034,7 @@ class AsyncOmniEngine:
             "force_cutlass_fp8": bool(kwargs.get("force_cutlass_fp8", False)),
             "enable_diffusion_pipeline_profiler": kwargs.get("enable_diffusion_pipeline_profiler", False),
             "enable_hunyuan_fused_attn_epilogue": kwargs.get("enable_hunyuan_fused_attn_epilogue", True),
-            "enable_hunyuan_fused_cat_repeat_kv": kwargs.get("enable_hunyuan_fused_cat_repeat_kv", True),
+            "enable_hunyuan_fused_cat_repeat_kv": kwargs.get("enable_hunyuan_fused_cat_repeat_kv", False),
             "streaming_output": kwargs.get("diffusion_streaming_output", False),
             "enable_ar_profiler": kwargs.get("enable_ar_profiler", False),
             "extras": {
