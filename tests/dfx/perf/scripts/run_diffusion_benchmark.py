@@ -356,6 +356,14 @@ class DiffusionServer:
 # ---------------------------------------------------------------------------
 
 
+# Flags registered with argparse.BooleanOptionalAction (support --no-<flag>).
+_BOOLEAN_OPTIONAL_SERVE_FLAGS = frozenset(
+    {
+        "hunyuan-fused-attn-epilogue",
+    }
+)
+
+
 def _build_serve_args(serve_args_dict: dict[str, Any]) -> list[str]:
     """Convert a serve_args dict from test.json into a flat CLI argument list."""
     args: list[str] = []
@@ -364,6 +372,8 @@ def _build_serve_args(serve_args_dict: dict[str, Any]) -> list[str]:
         if isinstance(value, bool):
             if value:
                 args.append(flag)
+            elif key in _BOOLEAN_OPTIONAL_SERVE_FLAGS:
+                args.append(f"--no-{key}")
         elif isinstance(value, dict):
             args.extend([flag, json.dumps(value, separators=(",", ":"))])
         else:
