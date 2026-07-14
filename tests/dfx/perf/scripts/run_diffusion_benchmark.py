@@ -360,6 +360,7 @@ class DiffusionServer:
 _BOOLEAN_OPTIONAL_SERVE_FLAGS = frozenset(
     {
         "hunyuan-fused-attn-epilogue",
+        "hunyuan-fused-cat-repeat-kv",
     }
 )
 

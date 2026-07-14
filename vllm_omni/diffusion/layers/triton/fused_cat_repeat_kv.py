@@ -134,11 +134,40 @@ except Exception:
 
 
 def is_hunyuan_fused_cat_repeat_kv_enabled() -> bool:
-    """Env ``VLLM_OMNI_HUNYUAN_FUSED_CAT_REPEAT_KV`` (default on)."""
+    """Resolve whether fused prompt||image KV cat + GQA repeat is enabled.
+
+    Precedence:
+    1. Env ``VLLM_OMNI_HUNYUAN_FUSED_CAT_REPEAT_KV`` (0/false/off disables)
+    2. ``OmniDiffusionConfig.enable_hunyuan_fused_cat_repeat_kv``
+    3. Default ``True``
+    """
     env = os.environ.get("VLLM_OMNI_HUNYUAN_FUSED_CAT_REPEAT_KV")
-    if env is None:
-        return True
-    return env.strip().lower() not in {"0", "false", "off", "no"}
+    if env is not None:
+        return env.strip().lower() not in {"0", "false", "off", "no"}
+
+    try:
+        from vllm_omni.diffusion.config import get_current_diffusion_config_or_none
+
+        cfg = get_current_diffusion_config_or_none()
+        if cfg is not None:
+            return bool(getattr(cfg, "enable_hunyuan_fused_cat_repeat_kv", True))
+    except Exception:
+        pass
+
+    try:
+        from vllm_omni.diffusion.forward_context import (
+            get_forward_context,
+            is_forward_context_available,
+        )
+
+        if is_forward_context_available():
+            cfg = get_forward_context().omni_diffusion_config
+            if cfg is not None:
+                return bool(getattr(cfg, "enable_hunyuan_fused_cat_repeat_kv", True))
+    except Exception:
+        pass
+
+    return True
 
 
 def fused_cat_repeat_kv_ref(

@@ -725,6 +725,16 @@ class OmniServeCommand(CLISubcommand):
             ),
         )
         omni_config_group.add_argument(
+            "--hunyuan-fused-cat-repeat-kv",
+            dest="enable_hunyuan_fused_cat_repeat_kv",
+            action=argparse.BooleanOptionalAction,
+            default=True,
+            help=(
+                "Enable HunyuanImage3 fused prompt||image KV cat + GQA repeat "
+                "(default: on). Use --no-hunyuan-fused-cat-repeat-kv to disable."
+            ),
+        )
+        omni_config_group.add_argument(
             "--enable-ar-profiler",
             action="store_true",
             help="Enable AR stage profiler to include AR stage timing in stage_durations.",
