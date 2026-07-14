@@ -1033,6 +1033,7 @@ class AsyncOmniEngine:
             **({"diffusion_attention_config": attention_config} if attention_config is not None else {}),
             "force_cutlass_fp8": bool(kwargs.get("force_cutlass_fp8", False)),
             "enable_diffusion_pipeline_profiler": kwargs.get("enable_diffusion_pipeline_profiler", False),
+            "enable_hunyuan_fused_attn_epilogue": kwargs.get("enable_hunyuan_fused_attn_epilogue", True),
             "streaming_output": kwargs.get("diffusion_streaming_output", False),
             "enable_ar_profiler": kwargs.get("enable_ar_profiler", False),
             "extras": {
@@ -1209,6 +1210,13 @@ class AsyncOmniEngine:
                             cfg.engine_args, profiler_key, False
                         ):
                             setattr(cfg.engine_args, profiler_key, val)
+                # Default-on fused epilogue: must inject False when disabled.
+                if "enable_hunyuan_fused_attn_epilogue" in kwargs:
+                    setattr(
+                        cfg.engine_args,
+                        "enable_hunyuan_fused_attn_epilogue",
+                        bool(kwargs["enable_hunyuan_fused_attn_epilogue"]),
+                    )
                 quantization = kwargs.get("quantization")
                 if quantization is not None:
                     if not hasattr(cfg.engine_args, "quantization") or cfg.engine_args.quantization is None:

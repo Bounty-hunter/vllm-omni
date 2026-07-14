@@ -714,6 +714,17 @@ class OmniServeCommand(CLISubcommand):
             help="Enable diffusion pipeline profiler to display stage durations.",
         )
         omni_config_group.add_argument(
+            "--hunyuan-fused-attn-epilogue",
+            dest="enable_hunyuan_fused_attn_epilogue",
+            action=argparse.BooleanOptionalAction,
+            default=True,
+            help=(
+                "Enable HunyuanImage3 fused packed-QKV NeoX-RoPE + QK-RMSNorm "
+                "epilogue before attention (default: on). "
+                "Use --no-hunyuan-fused-attn-epilogue to disable."
+            ),
+        )
+        omni_config_group.add_argument(
             "--enable-ar-profiler",
             action="store_true",
             help="Enable AR stage profiler to include AR stage timing in stage_durations.",

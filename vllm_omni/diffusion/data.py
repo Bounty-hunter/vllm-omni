@@ -767,6 +767,11 @@ class OmniDiffusionConfig:
     # Diffusion pipeline Profiling config
     enable_diffusion_pipeline_profiler: bool = False
 
+    # HunyuanImage3: fuse packed-QKV NeoX-RoPE + QK-RMSNorm before attention.
+    # Disable with CLI ``--no-hunyuan-fused-attn-epilogue`` or env
+    # ``VLLM_OMNI_HUNYUAN_FUSED_ATTN_EPILOGUE=0``.
+    enable_hunyuan_fused_attn_epilogue: bool = True
+
     # Step mode settings
     step_execution: bool = False
 

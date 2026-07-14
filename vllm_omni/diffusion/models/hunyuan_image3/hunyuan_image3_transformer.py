@@ -1761,6 +1761,56 @@ class HunYuanAttention(nn.Module):
             self.query_layernorm = RMSNorm(self.head_dim, eps=config.rms_norm_eps)
             self.key_layernorm = RMSNorm(self.head_dim, eps=config.rms_norm_eps)
 
+    def _forward_fused_image_epilogue(
+        self,
+        qkv: torch.Tensor,
+        *,
+        bsz: int,
+        q_len: int,
+        custom_pos_emb: tuple[torch.FloatTensor] | None,
+        attention_mask: torch.Tensor | None,
+        kwargs: dict[str, Any],
+    ) -> torch.Tensor | None:
+        """Packed-QKV → NeoX-RoPE → QK-RMSNorm (single Triton epilogue).
+
+        Returns attn output ``[B*S, H, D]`` on success, else ``None`` (caller fallback).
+        """
+        if not self.use_qk_norm or custom_pos_emb is None:
+            return None
+        query_lens = kwargs.get("query_lens")
+        if not query_lens:
+            return None
+        try:
+            from vllm_omni.diffusion.layers.triton.fused_qkv_neox_rope_qk_rmsnorm import (
+                fused_qkv_neox_rope_qk_rmsnorm,
+                is_hunyuan_fused_attn_epilogue_enabled,
+            )
+        except ImportError:
+            return None
+        if not is_hunyuan_fused_attn_epilogue_enabled():
+            return None
+
+        first_step = kwargs.get("first_step", False)
+        try:
+            cos, sin = self.image_rope2d_emb._prepare_cos_sin(custom_pos_emb, first_step, qkv.device)
+            q, k, v = fused_qkv_neox_rope_qk_rmsnorm(
+                qkv,
+                cos,
+                sin,
+                self.query_layernorm.weight,
+                self.key_layernorm.weight,
+                batch_size=bsz,
+                seq_len=q_len,
+                num_heads=self.num_heads,
+                num_kv_heads=self.num_kv_heads,
+                head_dim=self.head_dim,
+                eps=self.query_layernorm.variance_epsilon,
+            )
+        except Exception as e:
+            logger.debug("fused QKV RoPE+QK-RMSNorm unavailable, fallback: %s", e)
+            return None
+        return self.image_attn(q, k, v, attention_mask=attention_mask, **kwargs)
+
     def forward(
         self,
         positions: torch.Tensor,
@@ -1773,10 +1823,27 @@ class HunYuanAttention(nn.Module):
         bsz, q_len, hidden_size = hidden_states.size()
         hidden_states = hidden_states.reshape(-1, hidden_size)
         qkv, _ = self.qkv_proj(hidden_states)
+
+        past_key_value: Cache | None = kwargs.get("past_key_value", None)
+        mode = kwargs.get("mode", "gen_text")
+        # Big fusion: avoid split / RoPE / Norm / layout copies when past KV unused.
+        if mode == "gen_image" and past_key_value is None and self.use_qk_norm:
+            attn_output = self._forward_fused_image_epilogue(
+                qkv,
+                bsz=bsz,
+                q_len=q_len,
+                custom_pos_emb=custom_pos_emb,
+                attention_mask=attention_mask,
+                kwargs=kwargs,
+            )
+            if attn_output is not None:
+                attn_output = attn_output.reshape(bsz * q_len, -1)
+                output, _ = self.o_proj(attn_output)
+                return output.reshape(bsz, q_len, -1), None, past_key_value
+
         qkv = qkv.reshape(bsz, q_len, -1)
         q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
 
-        past_key_value: Cache | None = kwargs.get("past_key_value", None)
         if past_key_value is not None:
             position_ids = kwargs.get("position_ids")
             key_states = k.reshape(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
@@ -1784,7 +1851,7 @@ class HunYuanAttention(nn.Module):
             cache_kwargs = {"cache_position": position_ids}
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_id, cache_kwargs)
         # for image_generation
-        if kwargs.get("mode", "gen_text") == "gen_image":
+        if mode == "gen_image":
             # assert positions is None, "positions should be None for image attention"
             q, k = self.image_rope2d_emb(q, k, hidden_states, custom_pos_emb, **kwargs)
         else:
@@ -1793,7 +1860,7 @@ class HunYuanAttention(nn.Module):
             q = self.query_layernorm(q.view(-1, self.num_heads, self.head_dim).contiguous())
             k = self.key_layernorm(k.view(-1, self.num_kv_heads, self.head_dim).contiguous())
         # for image_generation
-        if kwargs.get("mode", "gen_text") == "gen_image":
+        if mode == "gen_image":
             attn_output = self.image_attn(q, k, v, attention_mask=attention_mask, **kwargs)
         else:
             attn_output = self.attn(q, k, v)
