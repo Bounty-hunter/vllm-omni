@@ -744,6 +744,10 @@ class OmniDiffusionConfig:
     # does not enable FP8 by itself; it only selects CUTLASS once the checkpoint
     # has already resolved to vLLM's ModelOpt FP8 linear method.
     force_cutlass_fp8: bool = False
+    # MoE expert backend for diffusion workers (propagated to vLLM KernelConfig).
+    # BF16/unquantized supports: auto | triton | flashinfer_cutlass | flashinfer_trtllm.
+    # Quantized/ModelOpt may also use cutlass. Default "auto".
+    moe_backend: str = "auto"
 
     # Diffusion attention KV cache dtype (not vLLM's --kv-cache-dtype for AR models).
     # None = native dtype (no quantization).

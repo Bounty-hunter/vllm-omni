@@ -264,6 +264,10 @@ class DiffusionWorker:
         # Since vLLM v0.20.0, IR wraps GPU ops. Set IR op priority preference to enforce GPU op fusion during wrapping.
         # Also need to log, because vLLM internally logs another line in VllmConfig.__post_init__. Avoid confusion.
         vllm_config.kernel_config.ir_op_priority = _resolve_ir_op_priority(self.od_config, vllm_config)
+        moe_backend = getattr(self.od_config, "moe_backend", None) or "auto"
+        if moe_backend != "auto":
+            vllm_config.kernel_config.moe_backend = moe_backend
+            logger.info("Diffusion worker MoE backend override: %s", moe_backend)
         logger.info(
             "Final IR op priority after setting vLLM-Omni overrides: %s", vllm_config.kernel_config.ir_op_priority
         )

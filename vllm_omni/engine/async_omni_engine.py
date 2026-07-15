@@ -1032,6 +1032,7 @@ class AsyncOmniEngine:
             "diffusion_kv_cache_skip_layers": kwargs.get("diffusion_kv_cache_skip_layers", None),
             **({"diffusion_attention_config": attention_config} if attention_config is not None else {}),
             "force_cutlass_fp8": bool(kwargs.get("force_cutlass_fp8", False)),
+            "moe_backend": str(kwargs.get("moe_backend") or "auto"),
             "enable_diffusion_pipeline_profiler": kwargs.get("enable_diffusion_pipeline_profiler", False),
             "enable_hunyuan_fused_attn_epilogue": kwargs.get("enable_hunyuan_fused_attn_epilogue", True),
             "enable_hunyuan_fused_cat_repeat_kv": kwargs.get("enable_hunyuan_fused_cat_repeat_kv", False),
@@ -1224,6 +1225,9 @@ class AsyncOmniEngine:
                         "enable_hunyuan_fused_cat_repeat_kv",
                         bool(kwargs["enable_hunyuan_fused_cat_repeat_kv"]),
                     )
+                moe_backend = kwargs.get("moe_backend")
+                if moe_backend is not None:
+                    setattr(cfg.engine_args, "moe_backend", moe_backend)
                 quantization = kwargs.get("quantization")
                 if quantization is not None:
                     if not hasattr(cfg.engine_args, "quantization") or cfg.engine_args.quantization is None:

@@ -1,0 +1,68 @@
+[
+    {
+        "test_name": "test_hunyuan_tp4_moe_triton_1024",
+        "description": "TP=4 BF16 1024 MoE backend=triton",
+        "server_type": "vllm-omni",
+        "server_params": {
+            "model": "tencent/HunyuanImage-3.0-Instruct",
+            "serve_args": {
+                "deploy-config": "../vllm_omni/deploy/hunyuan_image3_dit.yaml",
+                "tensor-parallel-size": 4,
+                "moe-backend": "triton"
+            }
+        },
+        "benchmark_params": [
+            {
+                "name": "1024x1024_steps8",
+                "dataset": "random",
+                "task": "t2i",
+                "width": 1024,
+                "height": 1024,
+                "num-inference-steps": 8,
+                "num-prompts": 10,
+                "max-concurrency": 1,
+                "skip-performance-assertion": true,
+                "baseline": {
+                    "throughput_qps": 0.213,
+                    "latency_mean": 4.6953,
+                    "latency_p99": 4.8601,
+                    "peak_memory_mb_max": 56912.0,
+                    "peak_memory_mb_mean": 56912.0
+                }
+            }
+        ]
+    },
+    {
+        "test_name": "test_hunyuan_tp4_moe_flashinfer_cutlass_1024",
+        "description": "TP=4 BF16 1024 MoE backend=flashinfer_cutlass",
+        "server_type": "vllm-omni",
+        "server_params": {
+            "model": "tencent/HunyuanImage-3.0-Instruct",
+            "serve_args": {
+                "deploy-config": "../vllm_omni/deploy/hunyuan_image3_dit.yaml",
+                "tensor-parallel-size": 4,
+                "moe-backend": "flashinfer_cutlass"
+            }
+        },
+        "benchmark_params": [
+            {
+                "name": "1024x1024_steps8",
+                "dataset": "random",
+                "task": "t2i",
+                "width": 1024,
+                "height": 1024,
+                "num-inference-steps": 8,
+                "num-prompts": 10,
+                "max-concurrency": 1,
+                "skip-performance-assertion": true,
+                "baseline": {
+                    "throughput_qps": 0.213,
+                    "latency_mean": 4.6953,
+                    "latency_p99": 4.8601,
+                    "peak_memory_mb_max": 56912.0,
+                    "peak_memory_mb_mean": 56912.0
+                }
+            }
+        ]
+    }
+]
