@@ -419,6 +419,11 @@ class HunyuanImage3Pipeline(
             out_channels=self.hf_config.vae["latent_channels"],
             out_norm=True,
         )
+        # Fixed-resolution ResBlock/UNet convs benefit from cuDNN autotune + NHWC.
+        # Microbench on L20X: ~10.5ms -> ~6.4–7.4ms for the hot 4096 3x3 fprop.
+        torch.backends.cudnn.benchmark = True
+        self.patch_embed = self.patch_embed.to(memory_format=torch.channels_last)
+        self.final_layer = self.final_layer.to(memory_format=torch.channels_last)
         self.time_embed_2 = TimestepEmbedder(hidden_size=self.hf_config.hidden_size)
         self.lm_head = nn.Linear(self.hf_config.hidden_size, self.hf_config.vocab_size, bias=False)
         self.vllm_config = get_current_vllm_config()
@@ -449,6 +454,11 @@ class HunyuanImage3Pipeline(
             mod = named_modules.get(prefix)
             if mod:
                 mod.to(device)
+        # Keep UNet patch/unpatch convs in channels-last after device move.
+        for name in ("patch_embed", "final_layer"):
+            mod = named_modules.get(name)
+            if mod is not None:
+                mod.to(device=device, memory_format=torch.channels_last)
 
         unexpected_keywords = [
             "guidance_emb",

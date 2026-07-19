@@ -3411,6 +3411,8 @@ class UNetDown(nn.Module):
 
     def forward(self, x, t):
         assert x.shape[2] % self.patch_size == 0 and x.shape[3] % self.patch_size == 0
+        if x.dim() == 4 and not x.is_contiguous(memory_format=torch.channels_last):
+            x = x.contiguous(memory_format=torch.channels_last)
         for module in self.model:
             if isinstance(module, ResBlock):
                 x = module(x, t)
@@ -3495,6 +3497,7 @@ class UNetUp(nn.Module):
     # batch_size, seq_len, model_dim
     def forward(self, x, t, token_h, token_w):
         x = rearrange(x, "b (h w) c -> b c h w", h=token_h, w=token_w)
+        x = x.contiguous(memory_format=torch.channels_last)
         for module in self.model:
             if isinstance(module, ResBlock):
                 x = module(x, t)
