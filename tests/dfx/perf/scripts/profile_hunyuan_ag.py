@@ -52,6 +52,13 @@ def parse_args() -> argparse.Namespace:
         default=True,
         help="Enable MoE expert parallel (default: on). Pass --no-enable-expert-parallel to disable.",
     )
+    p.add_argument(
+        "--enable-diffusion-pipeline-profiler",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable stage-level DiffusionPipelineProfiler (default: on). "
+        "Pass --no-enable-diffusion-pipeline-profiler to disable.",
+    )
     p.add_argument("--width", type=int, default=1024)
     p.add_argument("--height", type=int, default=1024)
     p.add_argument("--num-inference-steps", type=int, default=8)
@@ -94,7 +101,7 @@ def main() -> None:
         "cfg_parallel_size": 1,
         "vae_patch_parallel_size": 1,
         "enable_expert_parallel": bool(args.enable_expert_parallel),
-        "enable_diffusion_pipeline_profiler": True,
+        "enable_diffusion_pipeline_profiler": bool(args.enable_diffusion_pipeline_profiler),
         "profiler_config": profiler_config,
         "init_timeout": args.init_timeout,
         "stage_init_timeout": args.stage_init_timeout,
@@ -107,8 +114,8 @@ def main() -> None:
 
     print(
         f"[profile] mode={args.mode} degree={args.degree} tp={args.tensor_parallel_size} "
-        f"ep={args.enable_expert_parallel} fp8=y profiler_dir={profiler_dir} "
-        f"num_prompts={args.num_prompts}"
+        f"ep={args.enable_expert_parallel} pipeline_profiler={args.enable_diffusion_pipeline_profiler} "
+        f"fp8=y profiler_dir={profiler_dir} num_prompts={args.num_prompts}"
     )
     print(f"[profile] omni_kwargs={json.dumps({k: v for k, v in omni_kwargs.items() if k != 'profiler_config'}, default=str)}")
 
