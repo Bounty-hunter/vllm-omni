@@ -46,6 +46,12 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--degree", type=int, default=4, help="SP degree (ulysses or allgather).")
     p.add_argument("--tensor-parallel-size", type=int, default=1)
+    p.add_argument(
+        "--enable-expert-parallel",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable MoE expert parallel (default: on). Pass --no-enable-expert-parallel to disable.",
+    )
     p.add_argument("--width", type=int, default=1024)
     p.add_argument("--height", type=int, default=1024)
     p.add_argument("--num-inference-steps", type=int, default=8)
@@ -87,7 +93,7 @@ def main() -> None:
         "ring_degree": 1,
         "cfg_parallel_size": 1,
         "vae_patch_parallel_size": 1,
-        "enable_expert_parallel": True,
+        "enable_expert_parallel": bool(args.enable_expert_parallel),
         "enable_diffusion_pipeline_profiler": True,
         "profiler_config": profiler_config,
         "init_timeout": args.init_timeout,
@@ -101,7 +107,8 @@ def main() -> None:
 
     print(
         f"[profile] mode={args.mode} degree={args.degree} tp={args.tensor_parallel_size} "
-        f"fp8=y profiler_dir={profiler_dir} num_prompts={args.num_prompts}"
+        f"ep={args.enable_expert_parallel} fp8=y profiler_dir={profiler_dir} "
+        f"num_prompts={args.num_prompts}"
     )
     print(f"[profile] omni_kwargs={json.dumps({k: v for k, v in omni_kwargs.items() if k != 'profiler_config'}, default=str)}")
 
