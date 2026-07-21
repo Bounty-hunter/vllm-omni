@@ -1,0 +1,32 @@
+# HunyuanImage-3 DiT FP8, EP=off, AllGather4 (TP=1, allgather_degree=4).
+pipeline: hunyuan_image3_dit
+async_chunk: false
+
+stages:
+  - stage_id: 0
+    max_num_seqs: 1
+    gpu_memory_utilization: 0.9
+    enforce_eager: true
+    devices: "0,1,2,3"
+    quantization: fp8
+    vae_use_slicing: false
+    vae_use_tiling: false
+    cache_backend:
+    cache_config:
+    enable_cache_dit_summary: false
+    parallel_config:
+      pipeline_parallel_size: 1
+      data_parallel_size: 1
+      tensor_parallel_size: 1
+      enable_expert_parallel: false
+      sequence_parallel_size: 4
+      ulysses_degree: 1
+      ring_degree: 1
+      allgather_degree: 4
+      cfg_parallel_size: 1
+      vae_patch_parallel_size: 1
+      use_hsdp: false
+      hsdp_shard_size: -1
+      hsdp_replicate_size: 1
+    default_sampling_params:
+      seed: 42
