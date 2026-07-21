@@ -66,15 +66,15 @@ class AllGatherKVParallelAttention:
         if joint_strategy not in {"front", "rear"}:
             raise ValueError(f"Unsupported joint_strategy: {joint_strategy!r}")
 
-        # Fuse K/V into one AllGather (cat on head_dim), then split.
+        # Fuse K/V into one AllGather (cat on batch dim=0), then chunk.
         # Same seq-parallel layout as two separate gathers; one larger collective.
+        # dim=0 keeps K/V contiguous blocks and makes cat/split trivial vs dim=-1.
         if key.shape != value.shape:
             raise ValueError(
                 "AllGather-KV SP fused gather requires key/value to share shape, "
                 f"got key={tuple(key.shape)} value={tuple(value.shape)}."
             )
-        head_dim = key.shape[-1]
-        kv_cat = torch.cat([key, value], dim=-1)
+        kv_cat = torch.cat([key, value], dim=0)
         global _AG_SHAPE_LOGGED
         if not _AG_SHAPE_LOGGED:
             _AG_SHAPE_LOGGED = True
@@ -95,7 +95,7 @@ class AllGatherKVParallelAttention:
             dim=1,
             group=self._allgather_group,
         )
-        k_img_full, v_img_full = kv_img_full.split(head_dim, dim=-1)
+        k_img_full, v_img_full = kv_img_full.chunk(2, dim=0)
 
         if joint_k is not None:
             if joint_k.shape[2] != key.shape[2]:

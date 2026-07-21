@@ -179,8 +179,8 @@ def _fused_kv_gather_chunks(
     key_chunks: list[torch.Tensor],
     value_chunks: list[torch.Tensor],
 ) -> list[list[torch.Tensor]]:
-    """One AllGather of cat(K, V, dim=-1), matching fused AllGather-KV path."""
-    return [[torch.cat([k, v], dim=-1) for k, v in zip(key_chunks, value_chunks, strict=True)]]
+    """One AllGather of cat(K, V, dim=0), matching fused AllGather-KV path."""
+    return [[torch.cat([k, v], dim=0) for k, v in zip(key_chunks, value_chunks, strict=True)]]
 
 
 def test_allgather_kv_slices_full_dense_mask_to_local_query_rows():
@@ -403,7 +403,7 @@ def test_allgather_kv_keeps_gathered_kv_compressed_for_gqa():
     _, k_full, v_full, _, _ = strategy.pre_attention(query, key_chunks[rank], value_chunks[rank], AttentionMetadata())
 
     assert sp_group.gathered_input_shapes == [
-        (1, img_seq_local, kv_heads, 2),
+        (2, img_seq_local, kv_heads, 1),
     ]
     assert k_full.shape == (1, img_seq_local * 2, kv_heads, 1)
     assert v_full.shape == (1, img_seq_local * 2, kv_heads, 1)
