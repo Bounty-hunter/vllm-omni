@@ -175,6 +175,14 @@ class _MockAllGatherSPGroup:
         return torch.cat(chunks, dim=dim)
 
 
+def _fused_kv_gather_chunks(
+    key_chunks: list[torch.Tensor],
+    value_chunks: list[torch.Tensor],
+) -> list[list[torch.Tensor]]:
+    """One AllGather of cat(K, V, dim=-1), matching fused AllGather-KV path."""
+    return [[torch.cat([k, v], dim=-1) for k, v in zip(key_chunks, value_chunks, strict=True)]]
+
+
 def test_allgather_kv_slices_full_dense_mask_to_local_query_rows():
     rank = 1
     joint_len = 1
@@ -189,7 +197,7 @@ def test_allgather_kv_slices_full_dense_mask_to_local_query_rows():
         torch.full((1, img_seq_local, 1, 1), 40.0),
     ]
     strategy = AllGatherKVParallelAttention(
-        _MockAllGatherSPGroup(rank=rank, gather_chunks=[key_chunks, value_chunks]),
+        _MockAllGatherSPGroup(rank=rank, gather_chunks=_fused_kv_gather_chunks(key_chunks, value_chunks)),
     )
 
     query = torch.zeros((1, img_seq_local, 1, 1))
@@ -236,7 +244,7 @@ def test_allgather_kv_slices_rear_joint_dense_mask():
     key_chunks = [torch.zeros((1, img_seq_local, 1, 1)) for _ in range(2)]
     value_chunks = [torch.zeros_like(chunk) for chunk in key_chunks]
     strategy = AllGatherKVParallelAttention(
-        _MockAllGatherSPGroup(rank=rank, gather_chunks=[key_chunks, value_chunks]),
+        _MockAllGatherSPGroup(rank=rank, gather_chunks=_fused_kv_gather_chunks(key_chunks, value_chunks)),
     )
     query = torch.zeros((1, img_seq_local, 1, 1))
     joint = torch.ones((1, joint_len, 1, 1))
@@ -266,8 +274,11 @@ def test_allgather_kv_slices_rear_joint_dense_mask():
 
 
 def test_allgather_kv_rejects_invalid_joint_strategy():
-    chunks = [[torch.zeros((1, 2, 1, 1)) for _ in range(2)] for _ in range(2)]
-    strategy = AllGatherKVParallelAttention(_MockAllGatherSPGroup(rank=0, gather_chunks=chunks))
+    key_chunks = [torch.zeros((1, 2, 1, 1)) for _ in range(2)]
+    value_chunks = [torch.zeros_like(c) for c in key_chunks]
+    strategy = AllGatherKVParallelAttention(
+        _MockAllGatherSPGroup(rank=0, gather_chunks=_fused_kv_gather_chunks(key_chunks, value_chunks))
+    )
     joint = torch.ones((1, 1, 1, 1))
     metadata = AttentionMetadata(
         joint_query=joint,
@@ -277,17 +288,15 @@ def test_allgather_kv_rejects_invalid_joint_strategy():
     )
 
     with pytest.raises(ValueError, match="Unsupported joint_strategy"):
-        strategy.pre_attention(torch.zeros((1, 2, 1, 1)), chunks[0][0], chunks[1][0], metadata)
+        strategy.pre_attention(torch.zeros((1, 2, 1, 1)), key_chunks[0], value_chunks[0], metadata)
 
 
 def test_allgather_kv_preserves_global_spans_and_sets_query_ranges():
+    zeros = [torch.zeros((1, 2, 1, 1)), torch.zeros((1, 2, 1, 1))]
     strategy = AllGatherKVParallelAttention(
         _MockAllGatherSPGroup(
             rank=1,
-            gather_chunks=[
-                [torch.zeros((1, 2, 1, 1)), torch.zeros((1, 2, 1, 1))],
-                [torch.zeros((1, 2, 1, 1)), torch.zeros((1, 2, 1, 1))],
-            ],
+            gather_chunks=_fused_kv_gather_chunks(zeros, zeros),
         ),
     )
     query = torch.zeros((1, 2, 1, 1))
@@ -317,13 +326,11 @@ def test_allgather_kv_preserves_global_spans_and_sets_query_ranges():
 
 
 def test_allgather_kv_query_ranges_include_reused_prefix_offset():
+    zeros = [torch.zeros((1, 2, 1, 1)), torch.zeros((1, 2, 1, 1))]
     strategy = AllGatherKVParallelAttention(
         _MockAllGatherSPGroup(
             rank=1,
-            gather_chunks=[
-                [torch.zeros((1, 2, 1, 1)), torch.zeros((1, 2, 1, 1))],
-                [torch.zeros((1, 2, 1, 1)), torch.zeros((1, 2, 1, 1))],
-            ],
+            gather_chunks=_fused_kv_gather_chunks(zeros, zeros),
         ),
     )
     query = torch.zeros((1, 2, 1, 1))
@@ -355,13 +362,11 @@ def test_allgather_kv_query_ranges_include_reused_prefix_offset():
 
 
 def test_allgather_kv_allows_empty_full_attn_spans():
+    zeros = [torch.zeros((1, 2, 1, 1)), torch.zeros((1, 2, 1, 1))]
     strategy = AllGatherKVParallelAttention(
         _MockAllGatherSPGroup(
             rank=0,
-            gather_chunks=[
-                [torch.zeros((1, 2, 1, 1)), torch.zeros((1, 2, 1, 1))],
-                [torch.zeros((1, 2, 1, 1)), torch.zeros((1, 2, 1, 1))],
-            ],
+            gather_chunks=_fused_kv_gather_chunks(zeros, zeros),
         ),
     )
     query = torch.zeros((1, 2, 1, 1))
@@ -389,15 +394,16 @@ def test_allgather_kv_keeps_gathered_kv_compressed_for_gqa():
         ),
     ]
     value_chunks = [chunk + 1000 for chunk in key_chunks]
-    sp_group = _MockAllGatherSPGroup(rank=rank, gather_chunks=[key_chunks, value_chunks])
+    sp_group = _MockAllGatherSPGroup(
+        rank=rank, gather_chunks=_fused_kv_gather_chunks(key_chunks, value_chunks)
+    )
     strategy = AllGatherKVParallelAttention(sp_group)
 
     query = torch.zeros((1, img_seq_local, q_heads, 1))
     _, k_full, v_full, _, _ = strategy.pre_attention(query, key_chunks[rank], value_chunks[rank], AttentionMetadata())
 
     assert sp_group.gathered_input_shapes == [
-        (1, img_seq_local, kv_heads, 1),
-        (1, img_seq_local, kv_heads, 1),
+        (1, img_seq_local, kv_heads, 2),
     ]
     assert k_full.shape == (1, img_seq_local * 2, kv_heads, 1)
     assert v_full.shape == (1, img_seq_local * 2, kv_heads, 1)
