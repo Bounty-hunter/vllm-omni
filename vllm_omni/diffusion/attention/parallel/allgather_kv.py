@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
@@ -16,6 +17,11 @@ from vllm_omni.diffusion.distributed.group_coordinator import (
 
 if TYPE_CHECKING:
     from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata
+
+logger = logging.getLogger(__name__)
+
+# Print Q/K/V shapes once per process (first pre_attention) to compare SP volume.
+_AG_SHAPE_LOGGED = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,8 +74,24 @@ class AllGatherKVParallelAttention:
                 f"got key={tuple(key.shape)} value={tuple(value.shape)}."
             )
         head_dim = key.shape[-1]
+        kv_cat = torch.cat([key, value], dim=-1)
+        global _AG_SHAPE_LOGGED
+        if not _AG_SHAPE_LOGGED:
+            _AG_SHAPE_LOGGED = True
+            logger.warning(
+                "[SP-SHAPE][AG-KV] before all_gather rank=%s world=%s "
+                "q=%s k=%s v=%s kv_cat=%s numel_kv_cat=%s bytes=%s",
+                self._sp_rank,
+                self._sp_size,
+                tuple(query.shape),
+                tuple(key.shape),
+                tuple(value.shape),
+                tuple(kv_cat.shape),
+                kv_cat.numel(),
+                kv_cat.numel() * kv_cat.element_size(),
+            )
         kv_img_full = self._sp_group.all_gather(
-            torch.cat([key, value], dim=-1),
+            kv_cat,
             dim=1,
             group=self._allgather_group,
         )
