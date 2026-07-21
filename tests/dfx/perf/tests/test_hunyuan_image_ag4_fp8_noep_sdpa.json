@@ -19,7 +19,6 @@
       "model": "tencent/HunyuanImage-3.0-Instruct",
       "serve_args": {
         "deploy-config": "../vllm_omni/deploy/hunyuan_image3_dit_fp8_ag4_noep.yaml",
-        "diffusion-attention-backend": "TORCH_SDPA",
         "enable-diffusion-pipeline-profiler": true
       }
     },
