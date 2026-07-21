@@ -22,6 +22,33 @@ logger = logging.getLogger(__name__)
 _USP_SHAPE_LOGGED = False
 
 
+def _log_usp_shapes_once(
+    tag: str,
+    *,
+    rank: int,
+    world: int,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+) -> None:
+    global _USP_SHAPE_LOGGED
+    if _USP_SHAPE_LOGGED:
+        return
+    _USP_SHAPE_LOGGED = True
+    logger.warning(
+        "[SP-SHAPE][%s] before all_to_all rank=%s world=%s "
+        "q=%s k=%s v=%s numel_qkv=%s bytes_qkv=%s",
+        tag,
+        rank,
+        world,
+        tuple(query.shape),
+        tuple(key.shape),
+        tuple(value.shape),
+        query.numel() + key.numel() + value.numel(),
+        (query.numel() + key.numel() + value.numel()) * query.element_size(),
+    )
+
+
 def _ceil_div(n: int, d: int) -> int:
     return (n + d - 1) // d
 
@@ -317,20 +344,14 @@ class UlyssesParallelAttention:
                         "This typically means the input sequence was not evenly shardable across the ring. "
                         "Try setting ring_degree=1, or choose a sequence length divisible by ring_degree."
                     )
-            global _USP_SHAPE_LOGGED
-            if not _USP_SHAPE_LOGGED:
-                _USP_SHAPE_LOGGED = True
-                logger.warning(
-                    "[SP-SHAPE][USP-UAA] before all_to_all rank=%s world=%s "
-                    "q=%s k=%s v=%s numel_qkv=%s bytes_qkv=%s",
-                    self._sp_group.ulysses_rank,
-                    ulysses_world_size,
-                    tuple(query.shape),
-                    tuple(key.shape),
-                    tuple(value.shape),
-                    query.numel() + key.numel() + value.numel(),
-                    (query.numel() + key.numel() + value.numel()) * query.element_size(),
-                )
+            _log_usp_shapes_once(
+                "USP-UAA",
+                rank=self._sp_group.ulysses_rank,
+                world=ulysses_world_size,
+                query=query,
+                key=key,
+                value=value,
+            )
             query, orig_head_cnt = _ulysses_all_to_all_any_qkv(
                 self._ulysses_pg, query, seq_lens=seq_lens, use_sync=self._use_sync
             )
@@ -348,20 +369,14 @@ class UlyssesParallelAttention:
                         f"Try ulysses_degree in {supported}, or set ulysses_mode='advanced_uaa'."
                     )
 
-            global _USP_SHAPE_LOGGED
-            if not _USP_SHAPE_LOGGED:
-                _USP_SHAPE_LOGGED = True
-                logger.warning(
-                    "[SP-SHAPE][USP] before all_to_all rank=%s world=%s "
-                    "q=%s k=%s v=%s numel_qkv=%s bytes_qkv=%s",
-                    self._sp_group.ulysses_rank,
-                    ulysses_world_size,
-                    tuple(query.shape),
-                    tuple(key.shape),
-                    tuple(value.shape),
-                    query.numel() + key.numel() + value.numel(),
-                    (query.numel() + key.numel() + value.numel()) * query.element_size(),
-                )
+            _log_usp_shapes_once(
+                "USP",
+                rank=self._sp_group.ulysses_rank,
+                world=ulysses_world_size,
+                query=query,
+                key=key,
+                value=value,
+            )
             # (bs, seq_len/P, head_cnt, head_size) -> (bs, seq_len, head_cnt/P, head_size)
             query = SeqAllToAll4D.apply(self._ulysses_pg, query, self._scatter_idx, self._gather_idx, self._use_sync)
             key = SeqAllToAll4D.apply(self._ulysses_pg, key, self._scatter_idx, self._gather_idx, self._use_sync)
