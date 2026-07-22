@@ -190,6 +190,20 @@ def normalization(channels, **kwargs):
     return nn.GroupNorm(32, channels, **kwargs)
 
 
+def fused_norm_silu(channels, **kwargs):
+    """GroupNorm(32) + SiLU fused module (channels_last-friendly on CUDA)."""
+    from vllm_omni.diffusion.layers.vae import FusedGroupNormSiLU
+
+    return FusedGroupNormSiLU(num_channels=channels, num_groups=32, **kwargs)
+
+
+def fused_norm_ada_silu(channels, **kwargs):
+    """GroupNorm(32) + AdaGN scale/shift + SiLU fused module."""
+    from vllm_omni.diffusion.layers.vae import FusedGroupNormAdaSiLU
+
+    return FusedGroupNormAdaSiLU(num_channels=channels, num_groups=32, **kwargs)
+
+
 def linear(*args, **kwargs):
     """
     Create a linear module.
@@ -3331,9 +3345,13 @@ class ResBlock(nn.Module):
         self.out_channels = out_channels or self.in_channels
         self.use_conv = use_conv
 
+        # Keep Sequential indices compatible with HF weights:
+        # in_layers.{0=GN, 2=Conv}, out_layers.{0=GN, 3=Conv}.
+        # Slot 1 stays Identity (was SiLU); SiLU is folded into fused GN modules.
+        self.dims = dims
         self.in_layers = nn.Sequential(
-            normalization(self.in_channels, **factory_kwargs),
-            nn.SiLU(),
+            fused_norm_silu(self.in_channels, **factory_kwargs),
+            nn.Identity(),
             conv_nd(dims, self.in_channels, self.out_channels, 3, padding=1, **factory_kwargs),  # noqa: N802
         )
 
@@ -3343,8 +3361,8 @@ class ResBlock(nn.Module):
         self.emb_layers = nn.Sequential(nn.SiLU(), linear(emb_channels, 2 * self.out_channels, **factory_kwargs))
 
         self.out_layers = nn.Sequential(
-            normalization(self.out_channels, **factory_kwargs),
-            nn.SiLU(),
+            fused_norm_ada_silu(self.out_channels, **factory_kwargs),
+            nn.Identity(),
             nn.Dropout(p=dropout),
             zero_module(conv_nd(dims, self.out_channels, self.out_channels, 3, padding=1, **factory_kwargs)),  # noqa: N802
         )
@@ -3370,11 +3388,12 @@ class ResBlock(nn.Module):
         while len(emb_out.shape) < len(h.shape):
             emb_out = emb_out[..., None]
 
-        # Adaptive Group Normalization
-        out_norm, out_rest = self.out_layers[0], self.out_layers[1:]
+        # Adaptive Group Normalization + SiLU (fused); skip Identity at [1].
+        out_norm = self.out_layers[0]
         scale, shift = torch.chunk(emb_out, 2, dim=1)
-        h = out_norm(h) * (1.0 + scale) + shift
-        h = out_rest(h)
+        h = out_norm(h, scale, shift)
+        h = self.out_layers[2](h)  # Dropout
+        h = self.out_layers[3](h)  # Conv
 
         return self.skip_connection(x) + h
 
@@ -3477,10 +3496,11 @@ class UNetUp(nn.Module):
                 )
 
         if out_norm:
+            # Keep indices {0=GN(+SiLU), 2=Conv} for HF weight keys.
             self.model.append(
                 nn.Sequential(
-                    normalization(hidden_channels, **factory_kwargs),
-                    nn.SiLU(),
+                    fused_norm_silu(hidden_channels, **factory_kwargs),
+                    nn.Identity(),
                     conv_nd(
                         2,
                         in_channels=hidden_channels,

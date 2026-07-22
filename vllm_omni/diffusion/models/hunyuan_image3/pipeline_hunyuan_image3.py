@@ -459,7 +459,14 @@ class HunyuanImage3Pipeline(
             self,
             skip_prefixes=skip_prefixes,
         )
-        return loader.load_weights(weights)
+        loaded = loader.load_weights(weights)
+        # Keep UNet Conv2d weights in channels_last after load so cudnn NHWC
+        # path does not insert NCHW↔NHWC converts every ResBlock.
+        from vllm_omni.diffusion.layers.vae import convert_conv2d_to_channels_last
+
+        convert_conv2d_to_channels_last(self.patch_embed)
+        convert_conv2d_to_channels_last(self.final_layer)
+        return loaded
 
     def prepare_seed(self, seed=None, batch_size=1):
         # random seed
