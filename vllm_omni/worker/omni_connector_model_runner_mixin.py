@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import importlib
 import inspect
-import os
 import threading
 from collections import defaultdict, deque
 from typing import TYPE_CHECKING, Any
@@ -25,7 +24,15 @@ from vllm.logger import init_logger
 
 from vllm_omni.data_entry_keys import OmniPayload
 from vllm_omni.distributed.omni_connectors.factory import OmniConnectorFactory
-from vllm_omni.distributed.omni_connectors.utils.config import ConnectorSpec
+from vllm_omni.distributed.omni_connectors.utils.config import (
+    TRANSFER_ENGINE_CONNECTOR_NAMES,
+    ConnectorSpec,
+)
+from vllm_omni.distributed.omni_connectors.utils.env import expand_env_int
+from vllm_omni.distributed.omni_connectors.utils.kv_utils import (
+    get_local_tp_rank,
+    kv_zmq_port,
+)
 from vllm_omni.outputs import OmniConnectorOutput
 from vllm_omni.worker.payload_span import (
     get_tensor_span,
@@ -2084,6 +2091,19 @@ class OmniConnectorModelRunnerMixin:
         elif not isinstance(extra, dict):
             raise RuntimeError(f"Invalid extra config for connector {name}: expected dict, got {type(extra).__name__}")
 
+        if name in TRANSFER_ENGINE_CONNECTOR_NAMES:
+            extra = dict(extra)
+            base_port = expand_env_int(extra.get("zmq_port", 50051), "zmq_port")
+            try:
+                stage_int = int(extra.get("stage_id", getattr(model_config, "stage_id", 0)))
+            except (TypeError, ValueError):
+                stage_int = 0
+            extra["zmq_port"] = kv_zmq_port(
+                base_port,
+                stage_int,
+                get_local_tp_rank(),
+            )
+
         spec = ConnectorSpec(name=name, extra=extra)
         try:
             return OmniConnectorFactory.create_connector(spec)
@@ -2221,11 +2241,7 @@ class OmniConnectorModelRunnerMixin:
         from_tp = int(rank_mapping.get("from_tp", 1))
         to_tp = int(rank_mapping.get("to_tp", 1))
 
-        local_rank = 0
-        try:
-            local_rank = int(os.environ.get("LOCAL_RANK", "0"))
-        except (ValueError, TypeError):
-            pass
+        local_rank = get_local_tp_rank()
 
         return {"from_tp": from_tp, "to_tp": to_tp, "local_rank": local_rank}
 

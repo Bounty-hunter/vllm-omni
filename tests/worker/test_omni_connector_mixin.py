@@ -1190,6 +1190,26 @@ class TestRankAwareKVRouting(unittest.TestCase):
         host._local_rank = local_rank
         return host
 
+    def test_parse_rank_mapping_uses_tp_rank_not_local_rank_env(self):
+        model_config = SimpleNamespace(
+            stage_connector_config={
+                "rank_mapping": {
+                    "from_tp": 2,
+                    "to_tp": 2,
+                }
+            }
+        )
+        with (
+            patch.dict("os.environ", {"LOCAL_RANK": "0"}),
+            patch(
+                "vllm_omni.worker.omni_connector_model_runner_mixin.get_local_tp_rank",
+                return_value=1,
+            ),
+        ):
+            rank_cfg = OmniConnectorModelRunnerMixin._parse_rank_mapping(model_config)
+
+        self.assertEqual(rank_cfg, {"from_tp": 2, "to_tp": 2, "local_rank": 1})
+
     def test_recv_keys_use_remote_rank_as_from_rank(self):
         host = self._make_host(from_tp=4, to_tp=2, local_rank=1)
         self.assertEqual(
@@ -1264,6 +1284,31 @@ class TestConnectorConfigValidation(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "missing connector name"):
             host.init_omni_connectors(model_config=model_config)
+
+    def test_transfer_engine_connector_zmq_port_is_rank_offset(self):
+        model_config = _make_model_config(stage_id=0)
+        model_config.stage_connector_config = {
+            "name": "MooncakeTransferEngineConnector",
+            "extra": {
+                "stage_id": 0,
+                "zmq_port": 50051,
+            },
+        }
+
+        with (
+            patch(
+                "vllm_omni.worker.omni_connector_model_runner_mixin.get_local_tp_rank",
+                return_value=1,
+            ),
+            patch(
+                "vllm_omni.worker.omni_connector_model_runner_mixin.OmniConnectorFactory.create_connector",
+                return_value=MagicMock(),
+            ) as create_connector,
+        ):
+            OmniConnectorModelRunnerMixin._create_connector(model_config)
+
+        spec = create_connector.call_args.args[0]
+        self.assertEqual(spec.extra["zmq_port"], 50167)
 
 
 class _FailingConnector:
