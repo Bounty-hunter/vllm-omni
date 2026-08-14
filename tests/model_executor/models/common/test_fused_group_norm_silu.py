@@ -40,18 +40,32 @@ def test_fused_group_norm_silu_correctness(
     weight = torch.randn(channels, device=device, dtype=dtype)
     bias = torch.randn(channels, device=device, dtype=dtype)
     
-    # Reference implementation
-    ref_out = F.silu(F.group_norm(x, num_groups, weight, bias, eps))
-    
+    # Reference implementation, computed in fp32.
+    #
+    # A same-dtype reference is NOT usable here: GroupNorm's affine step
+    # ``(x - mean) * rstd * weight + bias`` adds two O(1) terms that can cancel
+    # down to ~1e-3. Rounding those terms to bf16 (ULP ~8e-3 near 1.0) destroys
+    # every remaining significant digit -- measured cases flip sign, e.g. a true
+    # +0.006136 comes out as -0.000471. The low-precision "reference" is then
+    # far less accurate than the kernel it is supposed to validate: the fused
+    # output matches the correctly-rounded fp32 result for 99.997% of elements,
+    # a bf16 reference for only 65.2%.
+    ref_out = F.silu(
+        F.group_norm(x.float(), num_groups, weight.float(), bias.float(), eps)
+    ).to(dtype)
+
     # Fused implementation
     fused_out = fused_group_norm_silu(x, weight, bias, num_groups, eps)
-    
+
     # Check correctness
-    # Use relaxed tolerance for fp16/bf16
+    # Tolerances are set from the measured worst case across this parameter
+    # sweep, leaving roughly 2x headroom for each dtype.
     if dtype == torch.float32:
         rtol, atol = 1e-5, 1e-6
-    else:
-        rtol, atol = 1e-2, 1e-3
+    elif dtype == torch.float16:
+        rtol, atol = 2e-3, 2e-3
+    else:  # bfloat16
+        rtol, atol = 1e-2, 1e-2
     
     torch.testing.assert_close(
         fused_out, ref_out, 
@@ -119,16 +133,52 @@ def test_edge_case_large_eps():
     torch.testing.assert_close(fused_out, ref_out, rtol=1e-4, atol=1e-5)
 
 
-def test_backward_compatibility():
-    """Test that output dtype matches input dtype."""
+def test_output_dtype_matches_eager():
+    """Output dtype must match what eager GroupNorm+SiLU would produce.
+
+    Outside autocast that means the input dtype; inside autocast it means fp32,
+    because group_norm is on autocast's fp32 cast policy. HunyuanImage3's VAE
+    runs fp32 weights under fp16 autocast, so getting this wrong would silently
+    downcast the post-norm activation.
+    """
     for dtype in [torch.float32, torch.float16, torch.bfloat16]:
         x = torch.randn(2, 64, 32, 32, device="cuda", dtype=dtype)
         weight = torch.randn(64, device="cuda", dtype=dtype)
         bias = torch.randn(64, device="cuda", dtype=dtype)
-        
+
+        eager_out = F.silu(F.group_norm(x, 32, weight, bias, 1e-6))
         out = fused_group_norm_silu(x, weight, bias, 32, 1e-6)
-        assert out.dtype == dtype, f"Output dtype {out.dtype} != input dtype {dtype}"
+
+        assert out.dtype == eager_out.dtype, (
+            f"Output dtype {out.dtype} != eager dtype {eager_out.dtype} "
+            f"for input dtype {dtype}"
+        )
         assert out.shape == x.shape, f"Output shape {out.shape} != input shape {x.shape}"
+
+
+@pytest.mark.parametrize("autocast_dtype", [torch.float16, torch.bfloat16])
+def test_autocast_matches_eager(autocast_dtype):
+    """Inside autocast the fused op must stay a drop-in replacement.
+
+    Mirrors the HunyuanImage3 VAE setup: fp32 module weights, activations
+    arriving as fp16/bf16 from an upstream conv, all under autocast.
+    """
+    x = torch.randn(2, 64, 32, 32, device="cuda", dtype=autocast_dtype)
+    weight = torch.randn(64, device="cuda", dtype=torch.float32)
+    bias = torch.randn(64, device="cuda", dtype=torch.float32)
+
+    with torch.autocast("cuda", dtype=autocast_dtype):
+        eager_out = F.silu(F.group_norm(x, 32, weight, bias, 1e-6))
+        fused_out = fused_group_norm_silu(x, weight, bias, 32, 1e-6)
+
+    assert eager_out.dtype == torch.float32, (
+        "sanity check: eager group_norm is expected to return fp32 under autocast"
+    )
+    assert fused_out.dtype == eager_out.dtype, (
+        f"Output dtype {fused_out.dtype} != eager dtype {eager_out.dtype} "
+        f"under autocast({autocast_dtype})"
+    )
+    torch.testing.assert_close(fused_out, eager_out, rtol=1e-5, atol=1e-5)
 
 
 def test_invalid_channels_not_divisible():

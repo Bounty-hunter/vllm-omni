@@ -14,6 +14,10 @@ Performance:
 import torch
 import torch.nn.functional as F
 
+from vllm_omni.model_executor.models.common.ops._dtype_utils import (
+    group_norm_output_dtype,
+)
+
 try:
     import triton
     import triton.language as tl
@@ -193,9 +197,10 @@ def fused_group_norm_silu(
         f"Bias shape {bias.shape} doesn't match channels {x.size(1)}"
     
     N, C, H, W = x.shape
-    
-    # Allocate output
-    out = torch.empty_like(x)
+
+    # Allocate output with the dtype eager GroupNorm would return, so that the
+    # fused path stays a drop-in replacement inside autocast regions.
+    out = torch.empty_like(x, dtype=group_norm_output_dtype(x))
     
     # Launch kernel
     # Each program handles one (batch, group) pair

@@ -14,6 +14,10 @@ import torch
 import triton
 import triton.language as tl
 
+from vllm_omni.model_executor.models.common.ops._dtype_utils import (
+    group_norm_output_dtype,
+)
+
 
 @triton.jit
 def _adaptive_group_norm_kernel(
@@ -91,7 +95,9 @@ def _adaptive_group_norm_kernel(
             # AdaGN: norm * (1 + scale) + shift
             out_val = norm_val * (1.0 + scale_val) + shift_val
 
-            tl.store(out_ptr + offset, out_val.to(x_val.dtype), mask=mask_c)
+            # ``tl.store`` casts to the output pointer's dtype, which is chosen
+            # by the caller to match eager GroupNorm's autocast behaviour.
+            tl.store(out_ptr + offset, out_val, mask=mask_c)
 
 
 def fused_adaptive_group_norm(
@@ -139,8 +145,9 @@ def fused_adaptive_group_norm(
     # Flatten x to (B, C, spatial)
     x_flat = x.view(B, C, -1)
 
-    # Prepare output tensor
-    out = torch.empty_like(x)
+    # Prepare output tensor with the dtype eager GroupNorm would return, so the
+    # fused path stays a drop-in replacement inside autocast regions.
+    out = torch.empty_like(x, dtype=group_norm_output_dtype(x))
     out_flat = out.view(B, C, -1)
 
     # Calculate group size
