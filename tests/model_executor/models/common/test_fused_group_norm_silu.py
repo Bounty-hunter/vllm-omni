@@ -234,6 +234,36 @@ def test_non_2d_spatial_matches_eager(dtype, shape):
     torch.testing.assert_close(fused_out, ref_out, rtol=rtol, atol=atol)
 
 
+@pytest.mark.parametrize(
+    "dtype", [torch.float32, torch.float16, torch.bfloat16]
+)
+def test_permuted_input_matches_eager(dtype):
+    """A permuted (channel-stride-1) activation must still be correct.
+
+    This is not a hypothetical layout: HunyuanImage3's ``UNetUp`` calls this op
+    on the output of ``rearrange(x, "b (h w) c -> b c h w")``. An earlier
+    version of the kernel indexed such inputs through their strides, which was
+    correct but uncoalesced enough to run at 0.44x of eager, so the wrapper now
+    materializes them first.
+    """
+    torch.manual_seed(0)
+    B, C, H, W = 2, 64, 16, 16
+    kw = dict(device="cuda", dtype=dtype)
+    x = torch.randn(B, H * W, C, **kw).permute(0, 2, 1).reshape(B, C, H, W)
+    assert not x.is_contiguous(), "test premise: input is strided"
+
+    weight = torch.randn(C, **kw)
+    bias = torch.randn(C, **kw)
+
+    fused_out = fused_group_norm_silu(x, weight, bias, num_groups=32, eps=1e-6)
+    ref_out = F.silu(
+        F.group_norm(x.float(), 32, weight.float(), bias.float(), 1e-6)
+    ).to(dtype)
+
+    rtol, atol = _tolerance(dtype)
+    torch.testing.assert_close(fused_out, ref_out, rtol=rtol, atol=atol)
+
+
 @pytest.mark.parametrize("batch_size", [1, 4])
 @pytest.mark.parametrize("channels", [64, 128])
 def test_hunyuan_vae_config(batch_size, channels):

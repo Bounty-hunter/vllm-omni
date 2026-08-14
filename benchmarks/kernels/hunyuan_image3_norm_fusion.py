@@ -48,9 +48,16 @@ def _check(fused, ref_fp32, dtype):
     torch.testing.assert_close(fused.float(), ref_fp32, rtol=tol, atol=tol)
 
 
-def bench_group_norm_silu(batch, channels, spatial, dtype):
+def bench_group_norm_silu(batch, channels, spatial, dtype, permuted=False):
     kw = dict(device="cuda", dtype=dtype)
-    x = torch.randn(batch, channels, spatial, spatial, **kw)
+    if permuted:
+        # The layout UNetUp produces: rearrange("b (h w) c -> b c h w"), i.e.
+        # a view whose channel stride is 1.
+        x = torch.randn(batch, spatial * spatial, channels, **kw)
+        x = x.permute(0, 2, 1).reshape(batch, channels, spatial, spatial)
+        assert not x.is_contiguous()
+    else:
+        x = torch.randn(batch, channels, spatial, spatial, **kw)
     weight = torch.randn(channels, **kw)
     bias = torch.randn(channels, **kw)
 
@@ -97,16 +104,16 @@ def main():
 
     # (batch, channels, spatial) triples.
     #
-    # The first group is the DiT ResBlock: UNetDown/UNetUp run at the latent
-    # resolution (64x64 for a 1024px image) with a few hundred channels.
+    # The first group is the DiT ResBlock at 1024px, where the latent is 64x64
+    # and the channel counts are patch_embed_hidden_dim (1024) and hidden_size
+    # (4096). UNetDown and UNetUp run the same two ops with C swapped.
     # The second group is the VAE ResnetBlock, which runs at decode resolution
     # and moves two orders of magnitude more data per call.
     configs = [
-        (1, 256, 32),
-        (1, 256, 64),
-        (2, 256, 64),
+        (1, 1024, 64),
+        (1, 4096, 64),
+        (2, 1024, 64),
         (1, 512, 64),
-        (2, 512, 32),
         (1, 512, 128),
         (1, 256, 256),
         (1, 128, 512),
@@ -132,6 +139,21 @@ def main():
                 f"{shape:>22} | {name:>18} | {eager_ms:9.3f} | {fused_ms:9.3f} | "
                 f"{eager_ms / fused_ms:6.2f}x | {batch * NUM_GROUPS:5d}"
             )
+
+    # UNetUp hands this op a permuted view rather than a dense block. The
+    # wrapper materializes it; without that the kernel's loads stride by C and
+    # the op lands well under 1x. Keep an eye on this row.
+    print()
+    for batch, channels, spatial in [(1, 4096, 64), (1, 1024, 64)]:
+        eager_ms, fused_ms = bench_group_norm_silu(
+            batch, channels, spatial, dtype, permuted=True
+        )
+        shape = f"({batch}, {channels}, {spatial}, {spatial})"
+        print(
+            f"{shape:>22} | {'gn_silu permuted':>18} | {eager_ms:9.3f} | "
+            f"{fused_ms:9.3f} | {eager_ms / fused_ms:6.2f}x | "
+            f"{batch * NUM_GROUPS:5d}"
+        )
 
 
 if __name__ == "__main__":
