@@ -3,11 +3,17 @@
 
 """Fused Adaptive Group Normalization (AdaGN) operator.
 
-This module implements the fused AdaGN pattern commonly used in Diffusion Transformers:
-    output = GroupNorm(x) * (1 + scale) + shift
+This module implements the fused AdaGN pattern commonly used in Diffusion
+Transformers::
 
-Where scale and shift are conditioning signals (e.g., from timestep embeddings).
-This fusion eliminates intermediate tensor materialization and reduces kernel launches.
+    output = GroupNorm(x, weight, bias) * (1 + scale) + shift
+
+where ``scale`` and ``shift`` are per-(batch, channel) conditioning signals
+derived from the timestep embedding. Eager PyTorch spends three kernels and two
+full-size intermediates on this; the fused version does it in one pass.
+
+Falls back to native PyTorch ops when Triton is unavailable (NPU, CPU, ...), so
+callers never need a platform check.
 """
 
 import torch
@@ -28,73 +34,72 @@ except ImportError:
 if HAS_TRITON:
     @triton.jit
     def _adaptive_group_norm_kernel(
-        x_ptr,
-        out_ptr,
-        weight_ptr,
-        bias_ptr,
-        scale_ptr,
-        shift_ptr,
-        stride_batch,
-        stride_channel,
-        stride_spatial,
-        num_channels: tl.constexpr,
+        # Input/output pointers
+        x_ptr, out_ptr,
+        # Affine parameters
+        weight_ptr, bias_ptr,
+        # Conditioning signals, both (B, C) contiguous
+        scale_ptr, shift_ptr,
+        # Shape info; x is contiguous (B, C, spatial_size)
+        C, spatial_size,
         num_groups: tl.constexpr,
-        group_size: tl.constexpr,
-        spatial_size: tl.constexpr,
         eps: tl.constexpr,
         BLOCK_SIZE: tl.constexpr,
     ):
-        """Fused Adaptive Group Normalization kernel.
+        """Fused AdaGN kernel: ``GroupNorm(x) * (1 + scale) + shift``.
 
-        Computes: GroupNorm(x, weight, bias) * (1 + scale) + shift in a single pass.
+        One program per (batch, group) pair. Channels within the group are
+        walked serially while the spatial axis is vectorized, which is the right
+        way round for diffusion workloads: a group holds at most a few hundred
+        channels but thousands of spatial positions.
+
+        Moments are accumulated in fp32 to match PyTorch's numeric behavior.
         """
-        # Get batch and group indices
-        batch_idx = tl.program_id(0)
-        group_idx = tl.program_id(1)
+        pid = tl.program_id(0)
 
-        # Calculate starting channel for this group
-        group_start_channel = group_idx * group_size
+        group_size = C // num_groups
+        n_idx = pid // num_groups
+        g_idx = pid % num_groups
 
-        # Compute mean and variance for this group (fp32 accumulation for stability)
+        # === Pass 1: mean and variance over the whole group (fp32) ===
         mean_acc = tl.zeros([1], dtype=tl.float32)
         var_acc = tl.zeros([1], dtype=tl.float32)
 
-        for c_offset in range(0, group_size, BLOCK_SIZE):
-            c_idx = group_start_channel + c_offset + tl.arange(0, BLOCK_SIZE)
-            mask_c = c_idx < group_start_channel + group_size
+        for c_offset in range(group_size):
+            c_idx = g_idx * group_size + c_offset
+            base = n_idx * C * spatial_size + c_idx * spatial_size
 
-            for s_idx in range(spatial_size):
-                offset = batch_idx * stride_batch + c_idx * stride_channel + s_idx * stride_spatial
-                x_val = tl.load(x_ptr + offset, mask=mask_c, other=0.0)
-                x_val_fp32 = x_val.to(tl.float32)
+            for s_start in range(0, spatial_size, BLOCK_SIZE):
+                offsets = s_start + tl.arange(0, BLOCK_SIZE)
+                mask = offsets < spatial_size
 
-                mean_acc += tl.sum(x_val_fp32, axis=0)
-                var_acc += tl.sum(x_val_fp32 * x_val_fp32, axis=0)
+                x_val = tl.load(x_ptr + base + offsets, mask=mask, other=0.0)
+                x_val = x_val.to(tl.float32)
 
-        # Finalize mean and variance
-        group_numel = tl.cast(group_size * spatial_size, tl.float32)
-        mean = mean_acc / group_numel
-        var = var_acc / group_numel - mean * mean
+                mean_acc += tl.sum(x_val, axis=0)
+                var_acc += tl.sum(x_val * x_val, axis=0)
+
+        group_total = group_size * spatial_size
+        mean = mean_acc / group_total
+        var = var_acc / group_total - mean * mean
         rstd = 1.0 / tl.sqrt(var + eps)
 
-        # Apply normalization, affine transform, and adaptive modulation
-        for c_offset in range(0, group_size, BLOCK_SIZE):
-            c_idx = group_start_channel + c_offset + tl.arange(0, BLOCK_SIZE)
-            mask_c = c_idx < group_start_channel + group_size
+        # === Pass 2: normalize, affine, then adaptive modulation ===
+        for c_offset in range(group_size):
+            c_idx = g_idx * group_size + c_offset
+            base = n_idx * C * spatial_size + c_idx * spatial_size
 
-            # Load weight and bias for affine transform
-            weight_val = tl.load(weight_ptr + c_idx, mask=mask_c, other=1.0).to(tl.float32)
-            bias_val = tl.load(bias_ptr + c_idx, mask=mask_c, other=0.0).to(tl.float32)
+            weight_val = tl.load(weight_ptr + c_idx).to(tl.float32)
+            bias_val = tl.load(bias_ptr + c_idx).to(tl.float32)
+            scale_val = tl.load(scale_ptr + n_idx * C + c_idx).to(tl.float32)
+            shift_val = tl.load(shift_ptr + n_idx * C + c_idx).to(tl.float32)
 
-            # Load scale and shift for adaptive modulation
-            scale_offset = batch_idx * num_channels + c_idx
-            shift_offset = batch_idx * num_channels + c_idx
-            scale_val = tl.load(scale_ptr + scale_offset, mask=mask_c, other=0.0).to(tl.float32)
-            shift_val = tl.load(shift_ptr + shift_offset, mask=mask_c, other=0.0).to(tl.float32)
+            for s_start in range(0, spatial_size, BLOCK_SIZE):
+                offsets = s_start + tl.arange(0, BLOCK_SIZE)
+                mask = offsets < spatial_size
 
-            for s_idx in range(spatial_size):
-                offset = batch_idx * stride_batch + c_idx * stride_channel + s_idx * stride_spatial
-                x_val = tl.load(x_ptr + offset, mask=mask_c, other=0.0).to(tl.float32)
+                x_val = tl.load(x_ptr + base + offsets, mask=mask, other=0.0)
+                x_val = x_val.to(tl.float32)
 
                 # GroupNorm: (x - mean) * rstd * weight + bias
                 norm_val = (x_val - mean) * rstd * weight_val + bias_val
@@ -102,9 +107,9 @@ if HAS_TRITON:
                 # AdaGN: norm * (1 + scale) + shift
                 out_val = norm_val * (1.0 + scale_val) + shift_val
 
-                # ``tl.store`` casts to the output pointer's dtype, which is chosen
-                # by the caller to match eager GroupNorm's autocast behaviour.
-                tl.store(out_ptr + offset, out_val, mask=mask_c)
+                # ``tl.store`` casts to the output pointer's dtype, which the
+                # caller picked to match eager GroupNorm's autocast behaviour.
+                tl.store(out_ptr + base + offsets, out_val, mask=mask)
 
 
 def fused_adaptive_group_norm(
@@ -116,28 +121,44 @@ def fused_adaptive_group_norm(
     num_groups: int,
     eps: float = 1e-6,
 ) -> torch.Tensor:
-    """Fused Adaptive Group Normalization with Triton kernel.
+    """Fused Adaptive Group Normalization.
 
-    Computes: GroupNorm(x, weight, bias) * (1 + scale) + shift
-
-    This fusion is commonly used in Diffusion Transformers for timestep conditioning.
+    Computes ``GroupNorm(x, num_groups, weight, bias, eps) * (1 + scale) + shift``,
+    which is mathematically equivalent to the eager sequence but avoids
+    materializing the two intermediates.
 
     Args:
-        x: Input tensor of shape (B, C, H, W) or (B, C, T, H, W)
-        weight: Affine weight of shape (C,)
-        bias: Affine bias of shape (C,)
-        scale: Adaptive scale of shape (B, C) or (B, C, 1, 1) or (B, C, 1, 1, 1)
-        shift: Adaptive shift of shape (B, C) or (B, C, 1, 1) or (B, C, 1, 1, 1)
-        num_groups: Number of groups for GroupNorm
-        eps: Epsilon for numerical stability
+        x: Input of shape ``(B, C, *spatial)``; any spatial rank >= 1 is
+            accepted, e.g. ``(B, C, H, W)`` for the 2D DiT blocks.
+        weight: Per-channel scale of shape ``(C,)``.
+        bias: Per-channel bias of shape ``(C,)``.
+        scale: Adaptive scale with ``B * C`` elements, in any shape that
+            broadcasts per channel -- ``(B, C)``, ``(B, C, 1, 1)``, etc.
+        shift: Adaptive shift, same shape rules as ``scale``.
+        num_groups: Number of groups for GroupNorm.
+        eps: Epsilon for numerical stability.
 
     Returns:
-        Output tensor of same shape as x
+        Tensor of the same shape as ``x``, with the dtype eager
+        ``F.group_norm`` would produce (see ``group_norm_output_dtype``).
+
+    Note:
+        Spatial axes are collapsed into one before the launch and restored
+        afterwards. GroupNorm reduces over the whole channel group and every
+        spatial position, so this is exact rather than an approximation.
     """
-    # Check input validity
-    assert x.ndim in [4, 5], f"Expected 4D or 5D input, got {x.ndim}D"
+    assert x.ndim >= 3, f"Expected at least 3D input (B, C, *spatial), got {x.ndim}D"
     B, C = x.shape[:2]
-    assert C % num_groups == 0, f"num_channels ({C}) must be divisible by num_groups ({num_groups})"
+    assert C % num_groups == 0, \
+        f"num_channels ({C}) must be divisible by num_groups ({num_groups})"
+    assert weight.ndim == 1 and weight.size(0) == C, \
+        f"Weight shape {tuple(weight.shape)} doesn't match channels {C}"
+    assert bias.ndim == 1 and bias.size(0) == C, \
+        f"Bias shape {tuple(bias.shape)} doesn't match channels {C}"
+    assert scale.numel() == B * C, \
+        f"scale has {scale.numel()} elements, expected B*C = {B * C}"
+    assert shift.numel() == B * C, \
+        f"shift has {shift.numel()} elements, expected B*C = {B * C}"
 
     # Fallback if Triton not available (NPU, CPU, ...)
     if not HAS_TRITON:
@@ -145,52 +166,39 @@ def fused_adaptive_group_norm(
         normed = F.group_norm(x, num_groups, weight, bias, eps)
         return normed * (1.0 + scale.reshape(broadcast)) + shift.reshape(broadcast)
 
-    # Flatten spatial dimensions
-    if x.ndim == 4:
-        spatial_size = x.shape[2] * x.shape[3]
-    else:  # 5D
-        spatial_size = x.shape[2] * x.shape[3] * x.shape[4]
+    orig_shape = x.shape
 
-    # Reshape scale and shift to (B, C) if needed
-    scale_2d = scale.view(B, C)
-    shift_2d = shift.view(B, C)
+    # The kernel indexes x as a dense (B, C, spatial) block, so normalize the
+    # layout here. ``reshape``/``contiguous`` are no-ops for the common case of
+    # a contiguous activation coming out of a conv.
+    x_flat = x.contiguous().reshape(B, C, -1)
+    spatial_size = x_flat.size(2)
 
-    # Flatten x to (B, C, spatial)
-    x_flat = x.view(B, C, -1)
+    # ``reshape`` rather than ``view``: scale/shift typically arrive as halves
+    # of a torch.chunk along dim 1, which is not contiguous when B > 1.
+    scale_2d = scale.reshape(B, C).contiguous()
+    shift_2d = shift.reshape(B, C).contiguous()
 
-    # Prepare output tensor with the dtype eager GroupNorm would return, so the
-    # fused path stays a drop-in replacement inside autocast regions.
-    out = torch.empty_like(x, dtype=group_norm_output_dtype(x))
-    out_flat = out.view(B, C, -1)
+    # Allocate with the dtype eager GroupNorm would return, so the fused path
+    # stays a drop-in replacement inside autocast regions.
+    out_flat = torch.empty_like(x_flat, dtype=group_norm_output_dtype(x))
 
-    # Calculate group size
-    group_size = C // num_groups
+    BLOCK_SIZE = min(1024, triton.next_power_of_2(spatial_size))
 
-    # Determine block size
-    BLOCK_SIZE = triton.next_power_of_2(min(group_size, 128))
-
-    # Launch kernel with grid (batch_size, num_groups)
-    grid = (B, num_groups)
+    # One program per (batch, group) pair.
+    grid = (B * num_groups,)
 
     _adaptive_group_norm_kernel[grid](
-        x_flat,
-        out_flat,
-        weight,
-        bias,
-        scale_2d,
-        shift_2d,
-        stride_batch=C * spatial_size,
-        stride_channel=spatial_size,
-        stride_spatial=1,
-        num_channels=C,
+        x_flat, out_flat,
+        weight, bias,
+        scale_2d, shift_2d,
+        C, spatial_size,
         num_groups=num_groups,
-        group_size=group_size,
-        spatial_size=spatial_size,
         eps=eps,
         BLOCK_SIZE=BLOCK_SIZE,
     )
 
-    return out
+    return out_flat.reshape(orig_shape)
 
 
 __all__ = ["fused_adaptive_group_norm"]

@@ -159,5 +159,99 @@ def test_invalid_channels_not_divisible():
         fused_adaptive_group_norm(x, weight, bias, scale, shift, 32, 1e-6)
 
 
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("shape", [(2, 64, 3, 16, 16), (1, 32, 8, 8), (2, 64, 128)])
+def test_non_2d_spatial_matches_eager(dtype, shape):
+    """Any spatial rank must work; the wrapper collapses the spatial axes.
+
+    GroupNorm reduces over the whole channel group and every spatial position,
+    so flattening is exact rather than an approximation.
+    """
+    torch.manual_seed(0)
+    B, C = shape[:2]
+    kw = dict(device="cuda", dtype=dtype)
+    x = torch.randn(*shape, **kw)
+    weight = torch.randn(C, **kw)
+    bias = torch.randn(C, **kw)
+    scale = torch.randn(B, C, **kw)
+    shift = torch.randn(B, C, **kw)
+
+    fused_out = fused_adaptive_group_norm(x, weight, bias, scale, shift, 32, 1e-6)
+    ref_out = _reference(x, weight, bias, scale, shift, 32, 1e-6).to(dtype)
+
+    assert fused_out.shape == x.shape
+    rtol, atol = _tolerance(dtype)
+    torch.testing.assert_close(fused_out, ref_out, rtol=rtol, atol=atol)
+
+
+@pytest.mark.parametrize("batch_size", [1, 2, 3])
+def test_scale_shift_from_chunk_are_not_contiguous(batch_size):
+    """Regression: scale/shift arrive as halves of a torch.chunk.
+
+    ResBlock builds them as ``torch.chunk(emb_out, 2, dim=1)`` where emb_out is
+    (B, 2C, 1, 1). For B > 1 each half is a strided view, so the wrapper must
+    ``reshape`` (which copies) instead of ``view`` (which raises).
+    """
+    C, H, W = 64, 16, 16
+    kw = dict(device="cuda", dtype=torch.float32)
+    x = torch.randn(batch_size, C, H, W, **kw)
+    weight = torch.randn(C, **kw)
+    bias = torch.randn(C, **kw)
+
+    emb_out = torch.randn(batch_size, 2 * C, 1, 1, **kw)
+    scale, shift = torch.chunk(emb_out, 2, dim=1)
+    if batch_size > 1:
+        assert not scale.is_contiguous(), "test premise: chunk half is strided"
+
+    fused_out = fused_adaptive_group_norm(x, weight, bias, scale, shift, 32, 1e-6)
+    ref_out = F.group_norm(x, 32, weight, bias, 1e-6) * (1.0 + scale) + shift
+
+    torch.testing.assert_close(fused_out, ref_out, rtol=1e-5, atol=1e-5)
+
+
+def test_non_contiguous_input_matches_eager():
+    """A channels-last / permuted activation must still be handled correctly."""
+    B, C, H, W = 2, 64, 16, 16
+    kw = dict(device="cuda", dtype=torch.float32)
+    x = torch.randn(B, H, W, C, **kw).permute(0, 3, 1, 2)
+    assert not x.is_contiguous(), "test premise: input is strided"
+    weight = torch.randn(C, **kw)
+    bias = torch.randn(C, **kw)
+    scale = torch.randn(B, C, **kw)
+    shift = torch.randn(B, C, **kw)
+
+    fused_out = fused_adaptive_group_norm(x, weight, bias, scale, shift, 32, 1e-6)
+    ref_out = (
+        F.group_norm(x, 32, weight, bias, 1e-6) * (1.0 + scale.view(B, C, 1, 1))
+        + shift.view(B, C, 1, 1)
+    )
+
+    torch.testing.assert_close(fused_out, ref_out, rtol=1e-5, atol=1e-5)
+
+
+@pytest.mark.parametrize("spatial", [32, 64])
+def test_dit_sized_activation(spatial):
+    """Shapes the HunyuanImage3 DiT actually sees.
+
+    The earlier kernel walked the spatial axis one position at a time with
+    ``spatial_size`` as a ``tl.constexpr``; at 64x64 that is 4096 serial steps
+    per pass. This test pins the realistic size so a regression to that layout
+    shows up as a timeout rather than silently costing throughput.
+    """
+    B, C = 2, 256
+    kw = dict(device="cuda", dtype=torch.bfloat16)
+    x = torch.randn(B, C, spatial, spatial, **kw)
+    weight = torch.randn(C, **kw)
+    bias = torch.randn(C, **kw)
+    scale = torch.randn(B, C, **kw)
+    shift = torch.randn(B, C, **kw)
+
+    fused_out = fused_adaptive_group_norm(x, weight, bias, scale, shift, 32, 1e-5)
+    ref_out = _reference(x, weight, bias, scale, shift, 32, 1e-5).to(torch.bfloat16)
+
+    rtol, atol = _tolerance(torch.bfloat16)
+    torch.testing.assert_close(fused_out, ref_out, rtol=rtol, atol=atol)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
