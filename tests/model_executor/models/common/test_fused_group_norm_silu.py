@@ -17,6 +17,15 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def _tolerance(dtype):
+    """Tolerance against an fp32 reference, rounded once to ``dtype``."""
+    if dtype == torch.float32:
+        return 1e-5, 1e-6
+    if dtype == torch.float16:
+        return 2e-3, 2e-3
+    return 1e-2, 1e-2  # bfloat16
+
+
 @pytest.mark.parametrize("batch_size", [1, 2, 4])
 @pytest.mark.parametrize("channels", [32, 64, 128])
 @pytest.mark.parametrize("spatial_size", [(16, 16), (32, 32), (64, 64)])
@@ -201,20 +210,28 @@ def test_invalid_weight_shape():
         fused_group_norm_silu(x, weight, bias, num_groups=32, eps=1e-6)
 
 
-def test_compile_fallback():
-    """Test that compile mode falls back to native ops."""
-    x = torch.randn(1, 32, 16, 16, device="cuda")
-    weight = torch.randn(32, device="cuda")
-    bias = torch.randn(32, device="cuda")
-    
-    # Compile the function
-    compiled_fn = torch.compile(fused_group_norm_silu)
-    
-    # Should still work (via fallback)
-    ref_out = F.silu(F.group_norm(x, 32, weight, bias, 1e-6))
-    compiled_out = compiled_fn(x, weight, bias, 32, 1e-6)
-    
-    torch.testing.assert_close(compiled_out, ref_out, rtol=1e-5, atol=1e-6)
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("shape", [(2, 64, 3, 16, 16), (1, 32, 1, 8, 8), (2, 64, 128)])
+def test_non_2d_spatial_matches_eager(dtype, shape):
+    """Spatial ranks other than 2 must work: the 3D VAE feeds (N, C, T, H, W).
+
+    GroupNorm reduces over the whole channel group and every spatial position,
+    so flattening the spatial axes inside the wrapper has to be exact.
+    """
+    torch.manual_seed(0)
+    C = shape[1]
+    x = torch.randn(*shape, device="cuda", dtype=dtype)
+    weight = torch.randn(C, device="cuda", dtype=dtype)
+    bias = torch.randn(C, device="cuda", dtype=dtype)
+
+    fused_out = fused_group_norm_silu(x, weight, bias, num_groups=32, eps=1e-6)
+    ref_out = F.silu(
+        F.group_norm(x.float(), 32, weight.float(), bias.float(), 1e-6)
+    ).to(dtype)
+
+    assert fused_out.shape == x.shape
+    rtol, atol = _tolerance(dtype)
+    torch.testing.assert_close(fused_out, ref_out, rtol=rtol, atol=atol)
 
 
 @pytest.mark.parametrize("batch_size", [1, 4])

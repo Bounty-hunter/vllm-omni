@@ -2,13 +2,12 @@
 
 This operator fuses GroupNorm followed by SiLU activation into a single kernel,
 reducing memory traffic and kernel launch overhead. The implementation uses
-Triton for CUDA/ROCm compatibility, with fallback to PyTorch native ops during
-torch.compile to avoid conflicts with inductor.
+Triton for CUDA/ROCm compatibility, and falls back to native PyTorch ops when
+Triton is unavailable (NPU, CPU, ...), so callers never need a platform check.
 
 Performance:
 - Saves ~3576 kernel launches in HunyuanImage3 VAE (6.32% GPU time + 7.7% launches)
 - Compatible across CUDA, ROCm via single Triton implementation
-- Falls back to native ops during compilation to avoid inductor conflicts
 """
 
 import torch
@@ -158,15 +157,17 @@ def fused_group_norm_silu(
     3. Maintain fp32 accumulation precision for numeric alignment
     
     Args:
-        x: Input tensor of shape (N, C, H, W)
+        x: Input tensor of shape (N, C, *spatial); any spatial rank is accepted,
+            e.g. (N, C, H, W) for the 2D case or (N, C, T, H, W) for the 3D VAE.
         weight: Per-channel scale of shape (C,)
         bias: Per-channel bias of shape (C,)
         num_groups: Number of groups for GroupNorm (default: 32)
         eps: Small constant for numerical stability (default: 1e-6)
-    
+
     Returns:
-        Output tensor of shape (N, C, H, W) with dtype matching input
-    
+        Output tensor of the same shape as ``x``, with the dtype eager
+        ``F.group_norm`` would produce (see ``group_norm_output_dtype``).
+
     Examples:
         >>> x = torch.randn(2, 64, 32, 32, device='cuda')
         >>> weight = torch.randn(64, device='cuda')
@@ -174,34 +175,38 @@ def fused_group_norm_silu(
         >>> out = fused_group_norm_silu(x, weight, bias, num_groups=32)
         >>> out.shape
         torch.Size([2, 64, 32, 32])
-    
+
     Note:
-        During torch.compile, this falls back to native PyTorch ops to avoid
-        conflicts with inductor's own fusion passes.
+        Inputs whose spatial rank is not 2 are flattened to (N, C, 1, -1)
+        before the launch and reshaped back afterwards. GroupNorm reduces over
+        the whole channel group and every spatial position, so collapsing the
+        spatial axes is exact, not an approximation.
     """
-    # Fallback during compilation (inductor conflict avoidance)
-    if torch.compiler.is_compiling():
-        return F.silu(F.group_norm(x, num_groups, weight, bias, eps))
-    
-    # Fallback if Triton not available
+    # Fallback if Triton not available (NPU, CPU, ...)
     if not HAS_TRITON:
         return F.silu(F.group_norm(x, num_groups, weight, bias, eps))
-    
+
     # Validate inputs
-    assert x.ndim == 4, f"Expected 4D input (N, C, H, W), got {x.ndim}D"
+    assert x.ndim >= 3, f"Expected at least 3D input (N, C, *spatial), got {x.ndim}D"
     assert x.size(1) % num_groups == 0, \
         f"Channels {x.size(1)} must be divisible by num_groups {num_groups}"
     assert weight.ndim == 1 and weight.size(0) == x.size(1), \
         f"Weight shape {weight.shape} doesn't match channels {x.size(1)}"
     assert bias.ndim == 1 and bias.size(0) == x.size(1), \
         f"Bias shape {bias.shape} doesn't match channels {x.size(1)}"
-    
+
+    # Collapse arbitrary spatial ranks into a single axis so one 4D kernel
+    # serves both the 2D DiT blocks and the 3D VAE blocks.
+    orig_shape = x.shape
+    if x.ndim != 4:
+        x = x.reshape(orig_shape[0], orig_shape[1], 1, -1)
+
     N, C, H, W = x.shape
 
     # Allocate output with the dtype eager GroupNorm would return, so that the
     # fused path stays a drop-in replacement inside autocast regions.
     out = torch.empty_like(x, dtype=group_norm_output_dtype(x))
-    
+
     # Launch kernel
     # Each program handles one (batch, group) pair
     grid = lambda meta: (N * num_groups,)
@@ -223,4 +228,4 @@ def fused_group_norm_silu(
         BLOCK_SIZE=BLOCK_SIZE,
     )
     
-    return out
+    return out.reshape(orig_shape)
