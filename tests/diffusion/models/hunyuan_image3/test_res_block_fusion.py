@@ -101,22 +101,33 @@ def test_res_block_matches_eager(factory, batch_size):
 
     block_fp64 = copy.deepcopy(block).double()
 
-    with torch.no_grad():
-        fused_out = block(x, emb)
-        eager_out = _eager_forward(block, x, emb)
-        # No fused op is reachable from _eager_forward, so this stays pure
-        # PyTorch and is a legitimate reference.
-        ref_out = _eager_forward(block_fp64, x.double(), emb.double())
+    # The convolutions run in TF32 by default (10-bit mantissa), which puts the
+    # fp32 block ~1e-3 away from an fp64 reference regardless of how the norms
+    # are computed. That would swamp the thing under test, so turn it off.
+    prev_cudnn = torch.backends.cudnn.allow_tf32
+    prev_matmul = torch.backends.cuda.matmul.allow_tf32
+    torch.backends.cudnn.allow_tf32 = False
+    torch.backends.cuda.matmul.allow_tf32 = False
+    try:
+        with torch.no_grad():
+            fused_out = block(x, emb)
+            eager_out = _eager_forward(block, x, emb)
+            # No fused op is reachable from _eager_forward, so this stays pure
+            # PyTorch and is a legitimate reference.
+            ref_out = _eager_forward(block_fp64, x.double(), emb.double())
+    finally:
+        torch.backends.cudnn.allow_tf32 = prev_cudnn
+        torch.backends.cuda.matmul.allow_tf32 = prev_matmul
 
     err_fused = (fused_out.double() - ref_out).abs().max().item()
     err_eager = (eager_out.double() - ref_out).abs().max().item()
+    detail = f"fused={err_fused:.3e} vs eager={err_eager:.3e}, both against fp64"
 
-    assert err_fused < 1e-3, (
-        f"fused block is inaccurate in absolute terms: {err_fused:.3e}"
+    assert err_fused <= 5 * err_eager + 1e-7, (
+        f"fused block is materially less accurate than eager: {detail}"
     )
-    assert err_fused <= 5 * err_eager + 1e-6, (
-        f"fused block is materially less accurate than eager: "
-        f"fused={err_fused:.3e} vs eager={err_eager:.3e} (fp64 reference)"
+    assert err_fused < 1e-4, (
+        f"fused block is inaccurate in absolute terms: {detail}"
     )
 
 
