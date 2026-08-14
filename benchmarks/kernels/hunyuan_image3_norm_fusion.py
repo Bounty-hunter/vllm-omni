@@ -95,15 +95,21 @@ def main():
 
     num_sms = torch.cuda.get_device_properties(0).multi_processor_count
 
-    # (batch, channels, spatial) triples spanning the ResBlock activations:
-    # UNetDown/UNetUp run at the latent resolution (64x64 for a 1024px image)
-    # with a few hundred channels.
+    # (batch, channels, spatial) triples.
+    #
+    # The first group is the DiT ResBlock: UNetDown/UNetUp run at the latent
+    # resolution (64x64 for a 1024px image) with a few hundred channels.
+    # The second group is the VAE ResnetBlock, which runs at decode resolution
+    # and moves two orders of magnitude more data per call.
     configs = [
         (1, 256, 32),
         (1, 256, 64),
         (2, 256, 64),
         (1, 512, 64),
         (2, 512, 32),
+        (1, 512, 128),
+        (1, 256, 256),
+        (1, 128, 512),
     ]
 
     header = (
