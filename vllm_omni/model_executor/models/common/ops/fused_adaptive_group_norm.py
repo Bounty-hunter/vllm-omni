@@ -14,6 +14,10 @@ full-size intermediates on this; the fused version does it in one pass.
 
 Falls back to native PyTorch ops when Triton is unavailable (NPU, CPU, ...), so
 callers never need a platform check.
+
+Measured against the eager sequence on one L20X, bf16, 32 groups
+(``benchmarks/kernels/hunyuan_image3_norm_fusion.py``): 1.6-1.9x at the DiT
+ResBlock's activation sizes and up to 4.4x at decode-resolution activations.
 """
 
 import torch
@@ -183,7 +187,13 @@ def fused_adaptive_group_norm(
     # stays a drop-in replacement inside autocast regions.
     out_flat = torch.empty_like(x_flat, dtype=group_norm_output_dtype(x))
 
-    BLOCK_SIZE = min(1024, triton.next_power_of_2(spatial_size))
+    BLOCK_SIZE = min(4096, triton.next_power_of_2(spatial_size))
+
+    # Only B*num_groups programs are launched, which is well under the SM count
+    # for typical diffusion batches. A memory-bound kernel can still saturate
+    # HBM from few CTAs, but only with enough loads in flight, so widen the CTA
+    # for the large activations instead of leaving it at the 4-warp default.
+    num_warps = 16 if BLOCK_SIZE >= 4096 else (8 if BLOCK_SIZE >= 2048 else 4)
 
     # One program per (batch, group) pair.
     grid = (B * num_groups,)
@@ -196,6 +206,7 @@ def fused_adaptive_group_norm(
         num_groups=num_groups,
         eps=eps,
         BLOCK_SIZE=BLOCK_SIZE,
+        num_warps=num_warps,
     )
 
     return out_flat.reshape(orig_shape)

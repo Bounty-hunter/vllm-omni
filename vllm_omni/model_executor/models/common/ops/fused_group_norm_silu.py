@@ -5,9 +5,11 @@ reducing memory traffic and kernel launch overhead. The implementation uses
 Triton for CUDA/ROCm compatibility, and falls back to native PyTorch ops when
 Triton is unavailable (NPU, CPU, ...), so callers never need a platform check.
 
-Performance:
-- Saves ~3576 kernel launches in HunyuanImage3 VAE (6.32% GPU time + 7.7% launches)
-- Compatible across CUDA, ROCm via single Triton implementation
+Measured against eager ``F.silu(F.group_norm(...))`` on one L20X, bf16, 32
+groups (``benchmarks/kernels/hunyuan_image3_norm_fusion.py``): 1.1-1.5x at the
+DiT ResBlock's activation sizes, where both paths are dominated by launch
+overhead, and 2.2-2.9x at the VAE's decode-resolution activations, where the
+saved memory traffic is what pays.
 """
 
 import torch
@@ -210,11 +212,15 @@ def fused_group_norm_silu(
     # Launch kernel
     # Each program handles one (batch, group) pair
     grid = lambda meta: (N * num_groups,)
-    
-    # Choose block size based on spatial dimensions
+
+    # Only N*num_groups programs are launched, which is well under the SM count
+    # for typical diffusion batches. A memory-bound kernel can still saturate
+    # HBM from few CTAs, but only with enough loads in flight, so widen the CTA
+    # for the large activations instead of leaving it at the 4-warp default.
     spatial_size = H * W
-    BLOCK_SIZE = min(1024, triton.next_power_of_2(spatial_size))
-    
+    BLOCK_SIZE = min(4096, triton.next_power_of_2(spatial_size))
+    num_warps = 16 if BLOCK_SIZE >= 4096 else (8 if BLOCK_SIZE >= 2048 else 4)
+
     _group_norm_silu_kernel[grid](
         x, out,
         weight, bias,
@@ -226,6 +232,7 @@ def fused_group_norm_silu(
         num_groups=num_groups,
         eps=eps,
         BLOCK_SIZE=BLOCK_SIZE,
+        num_warps=num_warps,
     )
-    
+
     return out.reshape(orig_shape)
