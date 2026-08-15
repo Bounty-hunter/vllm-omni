@@ -1,10 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-"""ResnetBlock for the HunyuanImage3 autoencoder — default fallback implementation.
+"""ResnetBlock for the HunyuanImage3 autoencoder — NVIDIA CUDA + Triton implementation.
 
-Uses native PyTorch F.group_norm + F.silu. Hardware-specific optimized versions
-live in subdirectories (e.g., nvidia/) and are selected via __init__.py dispatch.
+Split out from autoencoder.py because its ``GroupNorm -> SiLU`` pairs are served
+by :func:`fused_group_norm_silu`, a single Triton kernel that falls back to
+native ``F.silu(F.group_norm(...))`` when Triton is unavailable. The submodule
+layout is untouched, so state_dict keys are identical to the unfused version.
+
+``Conv3d`` is duplicated here rather than imported from autoencoder.py, which
+would make the two modules import each other.
 """
 
 import math
@@ -12,6 +17,8 @@ import math
 import torch
 import torch.nn.functional as F
 from torch import nn
+
+from vllm_omni.model_executor.models.common.ops import fused_group_norm_silu
 
 
 class Conv3d(nn.Conv3d):
@@ -70,12 +77,14 @@ class ResnetBlock(nn.Module):
 
     def forward(self, x):
         h = x
-        h = F.group_norm(h, self.norm1.num_groups, self.norm1.weight, self.norm1.bias, self.norm1.eps)
-        h = F.silu(h)
+        h = fused_group_norm_silu(
+            h, self.norm1.weight, self.norm1.bias, num_groups=self.norm1.num_groups, eps=self.norm1.eps
+        )
         h = self.conv1(h)
 
-        h = F.group_norm(h, self.norm2.num_groups, self.norm2.weight, self.norm2.bias, self.norm2.eps)
-        h = F.silu(h)
+        h = fused_group_norm_silu(
+            h, self.norm2.weight, self.norm2.bias, num_groups=self.norm2.num_groups, eps=self.norm2.eps
+        )
         h = self.conv2(h)
 
         if self.in_channels != self.out_channels:

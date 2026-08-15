@@ -15,9 +15,10 @@ from diffusers.utils.torch_utils import randn_tensor
 from einops import rearrange
 from torch import Tensor, nn
 
-# ResnetBlock lives in autoencoder_blocks.py because its GroupNorm+SiLU is
-# served by a fused Triton kernel; everything else here is unchanged.
-from vllm_omni.diffusion.models.hunyuan_image3.autoencoder_blocks import ResnetBlock
+# ResnetBlock is platform-dispatched (see blocks.py): CUDA gets a fused
+# GroupNorm+SiLU kernel, every other backend gets the plain PyTorch block.
+# Imported from blocks.py rather than the package __init__ to avoid a cycle.
+from vllm_omni.diffusion.models.hunyuan_image3.blocks import ResnetBlock
 
 
 class DiagonalGaussianDistribution:
