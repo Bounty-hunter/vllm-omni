@@ -1,12 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-import math
 from dataclasses import dataclass
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.models.modeling_outputs import AutoencoderKLOutput
 from diffusers.models.modeling_utils import ModelMixin
@@ -14,6 +12,11 @@ from diffusers.utils import BaseOutput
 from diffusers.utils.torch_utils import randn_tensor
 from einops import rearrange
 from torch import Tensor, nn
+
+# ResnetBlock is platform-dispatched in the package __init__: CUDA gets a fused
+# GroupNorm+SiLU kernel, every other backend gets the plain PyTorch block.
+from vllm_omni.diffusion.models.hunyuan_image3 import ResnetBlock
+from vllm_omni.diffusion.models.hunyuan_image3.autoencoder_blocks import Conv3d, swish
 
 
 class DiagonalGaussianDistribution:
@@ -53,10 +56,6 @@ class DecoderOutput(BaseOutput):
     posterior: DiagonalGaussianDistribution | None = None
 
 
-def swish(x: Tensor) -> Tensor:
-    return x * torch.sigmoid(x)
-
-
 def forward_with_checkpointing(module, *inputs, use_checkpointing=False):
     def create_custom_forward(module):
         def custom_forward(*inputs):
@@ -68,46 +67,6 @@ def forward_with_checkpointing(module, *inputs, use_checkpointing=False):
         return torch.utils.checkpoint.checkpoint(create_custom_forward(module), *inputs, use_reentrant=False)
     else:
         return module(*inputs)
-
-
-class Conv3d(nn.Conv3d):
-    """
-    Perform Conv3d on patches with numerical differences from nn.Conv3d within 1e-5.
-    Only symmetric padding is supported.
-    """
-
-    def forward(self, input):
-        B, C, T, H, W = input.shape
-        memory_count = (C * T * H * W) * 2 / 1024**3
-        if memory_count > 2:
-            n_split = math.ceil(memory_count / 2)
-            assert n_split >= 2
-            chunks = torch.chunk(input, chunks=n_split, dim=-3)
-            padded_chunks = []
-            for i in range(len(chunks)):
-                if self.padding[0] > 0:
-                    padded_chunk = F.pad(
-                        chunks[i],
-                        (0, 0, 0, 0, self.padding[0], self.padding[0]),
-                        mode="constant" if self.padding_mode == "zeros" else self.padding_mode,
-                        value=0,
-                    )
-                    if i > 0:
-                        padded_chunk[:, :, : self.padding[0]] = chunks[i - 1][:, :, -self.padding[0] :]
-                    if i < len(chunks) - 1:
-                        padded_chunk[:, :, -self.padding[0] :] = chunks[i + 1][:, :, : self.padding[0]]
-                else:
-                    padded_chunk = chunks[i]
-                padded_chunks.append(padded_chunk)
-            padding_bak = self.padding
-            self.padding = (0, self.padding[1], self.padding[2])
-            outputs = []
-            for i in range(len(padded_chunks)):
-                outputs.append(super().forward(padded_chunks[i]))
-            self.padding = padding_bak
-            return torch.cat(outputs, dim=-3)
-        else:
-            return super().forward(input)
 
 
 class AttnBlock(nn.Module):
@@ -140,35 +99,6 @@ class AttnBlock(nn.Module):
 
     def forward(self, x: Tensor) -> Tensor:
         return x + self.proj_out(self.attention(x))
-
-
-class ResnetBlock(nn.Module):
-    def __init__(self, in_channels: int, out_channels: int):
-        super().__init__()
-        self.in_channels = in_channels
-        out_channels = in_channels if out_channels is None else out_channels
-        self.out_channels = out_channels
-
-        self.norm1 = nn.GroupNorm(num_groups=32, num_channels=in_channels, eps=1e-6, affine=True)
-        self.conv1 = Conv3d(in_channels, out_channels, kernel_size=3, stride=1, padding=1)
-        self.norm2 = nn.GroupNorm(num_groups=32, num_channels=out_channels, eps=1e-6, affine=True)
-        self.conv2 = Conv3d(out_channels, out_channels, kernel_size=3, stride=1, padding=1)
-        if self.in_channels != self.out_channels:
-            self.nin_shortcut = Conv3d(in_channels, out_channels, kernel_size=1, stride=1, padding=0)
-
-    def forward(self, x):
-        h = x
-        h = self.norm1(h)
-        h = swish(h)
-        h = self.conv1(h)
-
-        h = self.norm2(h)
-        h = swish(h)
-        h = self.conv2(h)
-
-        if self.in_channels != self.out_channels:
-            x = self.nin_shortcut(x)
-        return x + h
 
 
 class DownsampleDCAE(nn.Module):
