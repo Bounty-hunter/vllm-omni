@@ -7,8 +7,9 @@ Two fusions over the default block:
 
 * ``in_layers``: ``GroupNorm -> SiLU`` becomes one :func:`fused_group_norm_silu`
   kernel instead of two ops.
-* ``out_layers``: the adaptive GroupNorm ``norm(h) * (1 + scale) + shift``
-  becomes one :func:`fused_adaptive_group_norm` kernel instead of three.
+* ``out_layers``: ``GroupNorm -> adaptive modulation -> SiLU`` (i.e.
+  ``SiLU(norm(h) * (1 + scale) + shift)``) becomes one
+  :func:`fused_adaptive_group_norm_silu` kernel instead of four.
 
 Only ``forward`` is overridden -- ``__init__`` is inherited, so the submodule
 layout and therefore every state_dict key (``in_layers.0/.2``,
@@ -22,7 +23,7 @@ import torch
 from torch import nn
 
 from vllm_omni.model_executor.models.common.ops import (
-    fused_adaptive_group_norm,
+    fused_adaptive_group_norm_silu,
     fused_group_norm_silu,
 )
 
@@ -147,11 +148,13 @@ class ResBlock(nn.Module):
             while len(emb_out.shape) < len(h.shape):
                 emb_out = emb_out[..., None]
     
-            # Adaptive Group Normalization: GroupNorm -> mul -> add, one kernel
-            # instead of three.
-            out_norm, out_rest = self.out_layers[0], self.out_layers[1:]
+            # Adaptive GroupNorm -> SiLU: GroupNorm -> mul -> add -> silu, one
+            # kernel instead of four. The ``nn.SiLU`` at ``out_layers[1]`` is
+            # skipped here but stays in the Sequential, so state_dict keys are
+            # unchanged.
+            out_norm, out_rest = self.out_layers[0], self.out_layers[2:]
             scale, shift = torch.chunk(emb_out, 2, dim=1)
-            h = fused_adaptive_group_norm(
+            h = fused_adaptive_group_norm_silu(
                 h,
                 out_norm.weight,
                 out_norm.bias,

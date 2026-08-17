@@ -13,13 +13,7 @@ activations, where the saved memory traffic is what pays.
 
 import torch
 import torch.nn.functional as F
-
-try:
-    import triton
-    import triton.language as tl
-    HAS_TRITON = True
-except ImportError:
-    HAS_TRITON = False
+from vllm.triton_utils import HAS_TRITON, tl, triton
 
 
 if HAS_TRITON:
@@ -36,16 +30,12 @@ if HAS_TRITON:
         # Block sizes
         BLOCK_SIZE: tl.constexpr,
     ):
-        """Fused GroupNorm + SiLU kernel.
-
-        Computes: SiLU(GroupNorm(x)) in a single pass.
-
-        One program per (batch, group) pair. Channels within the group are
-        walked serially while the spatial axis is vectorized, which is the right
-        way round for diffusion workloads: a group holds at most a few hundred
-        channels but thousands of spatial positions.
-
-        Uses fp32 accumulation for moments to match PyTorch's numeric behavior.
+        """
+        Fused GroupNorm + SiLU kernel.
+        Computes SiLU(GroupNorm(x)) in a single pass, avoiding intermediate tensors.
+        One program handles each (batch, group) pair. Channels are processed serially,
+        while spatial positions are vectorized for diffusion workloads.
+        Moments are accumulated in fp32 to match PyTorch numerics.
         """
         pid = tl.program_id(0)
 
@@ -109,45 +99,20 @@ def fused_group_norm_silu(
     num_groups: int = 32,
     eps: float = 1e-6,
 ) -> torch.Tensor:
-    """Fused GroupNorm + SiLU activation.
-    
-    Computes: SiLU(GroupNorm(x, num_groups, weight, bias, eps))
-    
-    This is mathematically equivalent to:
-        F.silu(F.group_norm(x, num_groups, weight, bias, eps))
-    
-    But fuses the operations into a single Triton kernel to:
-    1. Reduce memory traffic (no materialized intermediate tensors)
-    2. Reduce kernel launch overhead
-    3. Maintain fp32 accumulation precision for numeric alignment
-    
-    Args:
-        x: Input tensor of shape (N, C, *spatial); any spatial rank is accepted,
-            e.g. (N, C, H, W) for the 2D case or (N, C, T, H, W) for the 3D VAE.
-        weight: Per-channel scale of shape (C,)
-        bias: Per-channel bias of shape (C,)
-        num_groups: Number of groups for GroupNorm (default: 32)
-        eps: Small constant for numerical stability (default: 1e-6)
+    """
+    Fused GroupNorm + SiLU activation.
+    Computes SiLU(GroupNorm(x, num_groups, weight, bias, eps)) in a single Triton kernel,
+    avoiding intermediate tensors and reducing memory traffic and launch overhead.
 
-    Returns:
-        Output tensor of the same shape as ``x``, with the dtype eager
-        ``F.group_norm`` would produce: fp32 inside autocast, else the input
-        dtype.
-
-    Examples:
-        >>> x = torch.randn(2, 64, 32, 32, device='cuda')
-        >>> weight = torch.randn(64, device='cuda')
-        >>> bias = torch.randn(64, device='cuda')
-        >>> out = fused_group_norm_silu(x, weight, bias, num_groups=32)
-        >>> out.shape
-        torch.Size([2, 64, 32, 32])
-
-    Note:
-        Spatial axes are collapsed into one before the launch and restored
-        afterwards. GroupNorm reduces over the whole channel group and every
-        spatial position, so collapsing the spatial axes is exact, not an
-        approximation. Non-contiguous inputs are materialized first; see the
-        comment in the body for why that is a win rather than a cost.
+    - x: (N, C, *spatial), any spatial rank.
+    - weight, bias: per-channel parameters, shape (C,).
+    - num_groups: GroupNorm group count, default 32.
+    - eps: numerical stability epsilon, default 1e-6.
+    Uses fp32 accumulation for numeric alignment with PyTorch.
+    Returns the same shape and eager F.group_norm-compatible dtype.
+    Spatial dimensions are flattened during computation and restored afterward;
+    this is exact since GroupNorm reduces across each channel group and all spatial positions.
+    Non-contiguous inputs are materialized before launch.
     """
     # Fallback if Triton not available (NPU, CPU, ...)
     if not HAS_TRITON:

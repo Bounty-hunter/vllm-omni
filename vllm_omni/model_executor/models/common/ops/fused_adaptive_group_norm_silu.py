@@ -1,39 +1,28 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-"""Fused Adaptive Group Normalization (AdaGN) operator.
+"""Fused Adaptive Group Normalization (AdaGN) + SiLU operator.
 
-This module implements the fused AdaGN pattern commonly used in Diffusion
-Transformers::
+This module implements the fused AdaGN+SiLU pattern commonly used in Diffusion
+Transformer ResBlocks:
 
-    output = GroupNorm(x, weight, bias) * (1 + scale) + shift
+    output = SiLU(GroupNorm(x, weight, bias) * (1 + scale) + shift)
 
 where ``scale`` and ``shift`` are per-(batch, channel) conditioning signals
-derived from the timestep embedding. Eager PyTorch spends three kernels and two
+derived from the timestep embedding. Eager PyTorch spends four kernels and three
 full-size intermediates on this; the fused version does it in one pass.
 
-Falls back to native PyTorch ops when Triton is unavailable (NPU, CPU, ...), so
-callers never need a platform check.
-
-Measured against the eager sequence on one L20X, bf16, 32 groups: 1.6-1.9x at
-the DiT ResBlock's activation sizes and up to 4.4x at decode-resolution
-activations.
+Falls back to native PyTorch ops when Triton is unavailable.
 """
 
 import torch
 import torch.nn.functional as F
-
-try:
-    import triton
-    import triton.language as tl
-    HAS_TRITON = True
-except ImportError:
-    HAS_TRITON = False
+from vllm.triton_utils import HAS_TRITON, tl, triton
 
 
 if HAS_TRITON:
     @triton.jit
-    def _adaptive_group_norm_kernel(
+    def _adaptive_group_norm_silu_kernel(
         # Input/output pointers
         x_ptr, out_ptr,
         # Affine parameters
@@ -46,14 +35,11 @@ if HAS_TRITON:
         eps: tl.constexpr,
         BLOCK_SIZE: tl.constexpr,
     ):
-        """Fused AdaGN kernel: ``GroupNorm(x) * (1 + scale) + shift``.
-
-        One program per (batch, group) pair. Channels within the group are
-        walked serially while the spatial axis is vectorized, which is the right
-        way round for diffusion workloads: a group holds at most a few hundred
-        channels but thousands of spatial positions.
-
-        Moments are accumulated in fp32 to match PyTorch's numeric behavior.
+        """
+        Fused AdaGN + SiLU kernel: SiLU(GroupNorm(x) * (1 + scale) + shift).
+        One program handles each (batch, group) pair. Channels are processed serially,
+        while the spatial axis is vectorized for diffusion workloads.
+        Moments are accumulated in fp32 to match PyTorch numerics.
         """
         pid = tl.program_id(0)
 
@@ -107,12 +93,15 @@ if HAS_TRITON:
                 # AdaGN: norm * (1 + scale) + shift
                 out_val = norm_val * (1.0 + scale_val) + shift_val
 
+                # SiLU: out * sigmoid(out)
+                out_val = out_val * tl.sigmoid(out_val)
+
                 # ``tl.store`` casts to the output pointer's dtype, which the
                 # caller picked to match eager GroupNorm's autocast behaviour.
                 tl.store(out_ptr + base + offsets, out_val, mask=mask)
 
 
-def fused_adaptive_group_norm(
+def fused_adaptive_group_norm_silu(
     x: torch.Tensor,
     weight: torch.Tensor,
     bias: torch.Tensor,
@@ -121,32 +110,21 @@ def fused_adaptive_group_norm(
     num_groups: int,
     eps: float = 1e-6,
 ) -> torch.Tensor:
-    """Fused Adaptive Group Normalization.
+    """
+    Fused Adaptive GroupNorm + SiLU.
 
-    Computes ``GroupNorm(x, num_groups, weight, bias, eps) * (1 + scale) + shift``,
-    which is mathematically equivalent to the eager sequence but avoids
-    materializing the two intermediates.
+    Computes SiLU(GroupNorm(x) * (1 + scale) + shift) in one fused operation, avoiding intermediate tensors.
 
-    Args:
-        x: Input of shape ``(B, C, *spatial)``; any spatial rank >= 1 is
-            accepted, e.g. ``(B, C, H, W)`` for the 2D DiT blocks.
-        weight: Per-channel scale of shape ``(C,)``.
-        bias: Per-channel bias of shape ``(C,)``.
-        scale: Adaptive scale with ``B * C`` elements, in any shape that
-            broadcasts per channel -- ``(B, C)``, ``(B, C, 1, 1)``, etc.
-        shift: Adaptive shift, same shape rules as ``scale``.
-        num_groups: Number of groups for GroupNorm.
-        eps: Epsilon for numerical stability.
+    - x: (B, C, *spatial), any spatial rank ≥ 1.
+    - weight, bias: per-channel parameters, shape (C,).
+    - scale, shift: adaptive parameters with B * C elements, broadcastable per channel.
+    - num_groups: GroupNorm group count.
+    - eps: numerical stability epsilon.
 
-    Returns:
-        Tensor of the same shape as ``x``, with the dtype eager
-        ``F.group_norm`` would produce: fp32 inside autocast, else the input
-        dtype.
+    Returns a tensor with the same shape as x, matching eager F.group_norm dtype behavior.
 
-    Note:
-        Spatial axes are collapsed into one before the launch and restored
-        afterwards. GroupNorm reduces over the whole channel group and every
-        spatial position, so this is exact rather than an approximation.
+    Spatial dimensions are flattened during computation and restored afterward.
+    GroupNorm statistics cover each channel group across all spatial positions, so the result is exact.
     """
     assert x.ndim >= 3, f"Expected at least 3D input (B, C, *spatial), got {x.ndim}D"
     B, C = x.shape[:2]
@@ -165,7 +143,7 @@ def fused_adaptive_group_norm(
     if not HAS_TRITON:
         broadcast = (B, C) + (1,) * (x.ndim - 2)
         normed = F.group_norm(x, num_groups, weight, bias, eps)
-        return normed * (1.0 + scale.reshape(broadcast)) + shift.reshape(broadcast)
+        return F.silu(normed * (1.0 + scale.reshape(broadcast)) + shift.reshape(broadcast))
 
     orig_shape = x.shape
 
@@ -198,7 +176,7 @@ def fused_adaptive_group_norm(
     # One program per (batch, group) pair.
     grid = (B * num_groups,)
 
-    _adaptive_group_norm_kernel[grid](
+    _adaptive_group_norm_silu_kernel[grid](
         x_flat, out_flat,
         weight, bias,
         scale_2d, shift_2d,
@@ -212,4 +190,4 @@ def fused_adaptive_group_norm(
     return out_flat.reshape(orig_shape)
 
 
-__all__ = ["fused_adaptive_group_norm"]
+__all__ = ["fused_adaptive_group_norm_silu"]

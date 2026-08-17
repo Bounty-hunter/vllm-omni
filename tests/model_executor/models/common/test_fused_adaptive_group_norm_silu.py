@@ -1,14 +1,14 @@
-"""Unit tests for fused_adaptive_group_norm operator.
+"""Unit tests for fused_adaptive_group_norm_silu operator.
 
 Tests numeric correctness against PyTorch native implementation:
-    F.group_norm(x, num_groups, weight, bias, eps) * (1 + scale) + shift
+    F.silu(F.group_norm(x, num_groups, weight, bias, eps) * (1 + scale) + shift)
 """
 
 import pytest
 import torch
 import torch.nn.functional as F
 
-from vllm_omni.model_executor.models.common.ops import fused_adaptive_group_norm
+from vllm_omni.model_executor.models.common.ops import fused_adaptive_group_norm_silu
 
 # Skip tests if CUDA not available
 pytestmark = pytest.mark.skipif(
@@ -30,7 +30,7 @@ def _reference(x, weight, bias, scale, shift, num_groups, eps):
     )
     scale_b = scale.float().view(B, C, *([1] * (x.ndim - 2)))
     shift_b = shift.float().view(B, C, *([1] * (x.ndim - 2)))
-    return normed * (1 + scale_b) + shift_b
+    return F.silu(normed * (1 + scale_b) + shift_b)
 
 
 def _tolerance(dtype):
@@ -46,7 +46,7 @@ def _tolerance(dtype):
 @pytest.mark.parametrize("spatial_size", [(16, 16), (32, 32)])
 @pytest.mark.parametrize("num_groups", [8, 32])
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
-def test_fused_adaptive_group_norm_correctness(
+def test_fused_adaptive_group_norm_silu_correctness(
     batch_size, channels, spatial_size, num_groups, dtype
 ):
     """Test numeric correctness against PyTorch native ops."""
@@ -65,7 +65,7 @@ def test_fused_adaptive_group_norm_correctness(
     shift = torch.randn(batch_size, channels, **kw)
 
     ref_out = _reference(x, weight, bias, scale, shift, num_groups, eps).to(dtype)
-    fused_out = fused_adaptive_group_norm(
+    fused_out = fused_adaptive_group_norm_silu(
         x, weight, bias, scale, shift, num_groups, eps
     )
 
@@ -88,8 +88,8 @@ def test_broadcast_scale_shift_shapes():
     scale = torch.randn(B, C, **kw)
     shift = torch.randn(B, C, **kw)
 
-    flat = fused_adaptive_group_norm(x, weight, bias, scale, shift, 32, 1e-6)
-    expanded = fused_adaptive_group_norm(
+    flat = fused_adaptive_group_norm_silu(x, weight, bias, scale, shift, 32, 1e-6)
+    expanded = fused_adaptive_group_norm_silu(
         x, weight, bias, scale.view(B, C, 1, 1), shift.view(B, C, 1, 1), 32, 1e-6
     )
     torch.testing.assert_close(flat, expanded, rtol=0, atol=0)
@@ -106,8 +106,8 @@ def test_output_dtype_matches_eager():
         scale = torch.randn(B, C, **kw)
         shift = torch.randn(B, C, **kw)
 
-        eager_dtype = F.group_norm(x, 32, weight, bias, 1e-6).dtype
-        out = fused_adaptive_group_norm(x, weight, bias, scale, shift, 32, 1e-6)
+        eager_dtype = F.silu(F.group_norm(x, 32, weight, bias, 1e-6)).dtype
+        out = fused_adaptive_group_norm_silu(x, weight, bias, scale, shift, 32, 1e-6)
 
         assert out.dtype == eager_dtype, (
             f"Output dtype {out.dtype} != eager dtype {eager_dtype} "
@@ -139,11 +139,11 @@ def test_autocast_matches_eager(autocast_dtype, input_dtype):
     shift = torch.randn(B, C, device="cuda", dtype=torch.float32)
 
     with torch.autocast("cuda", dtype=autocast_dtype):
-        eager_out = (
+        eager_out = F.silu(
             F.group_norm(x, 32, weight, bias, 1e-6) * (1 + scale.view(B, C, 1, 1))
             + shift.view(B, C, 1, 1)
         )
-        fused_out = fused_adaptive_group_norm(
+        fused_out = fused_adaptive_group_norm_silu(
             x, weight, bias, scale, shift, 32, 1e-6
         )
 
@@ -168,7 +168,7 @@ def test_invalid_channels_not_divisible():
     shift = torch.randn(B, C, **kw)
 
     with pytest.raises(AssertionError, match="must be divisible by num_groups"):
-        fused_adaptive_group_norm(x, weight, bias, scale, shift, 32, 1e-6)
+        fused_adaptive_group_norm_silu(x, weight, bias, scale, shift, 32, 1e-6)
 
 
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
@@ -188,7 +188,7 @@ def test_non_2d_spatial_matches_eager(dtype, shape):
     scale = torch.randn(B, C, **kw)
     shift = torch.randn(B, C, **kw)
 
-    fused_out = fused_adaptive_group_norm(x, weight, bias, scale, shift, 32, 1e-6)
+    fused_out = fused_adaptive_group_norm_silu(x, weight, bias, scale, shift, 32, 1e-6)
     ref_out = _reference(x, weight, bias, scale, shift, 32, 1e-6).to(dtype)
 
     assert fused_out.shape == x.shape
@@ -215,8 +215,8 @@ def test_scale_shift_from_chunk_are_not_contiguous(batch_size):
     if batch_size > 1:
         assert not scale.is_contiguous(), "test premise: chunk half is strided"
 
-    fused_out = fused_adaptive_group_norm(x, weight, bias, scale, shift, 32, 1e-6)
-    ref_out = F.group_norm(x, 32, weight, bias, 1e-6) * (1.0 + scale) + shift
+    fused_out = fused_adaptive_group_norm_silu(x, weight, bias, scale, shift, 32, 1e-6)
+    ref_out = F.silu(F.group_norm(x, 32, weight, bias, 1e-6) * (1.0 + scale) + shift)
 
     torch.testing.assert_close(fused_out, ref_out, rtol=1e-5, atol=1e-5)
 
@@ -232,8 +232,8 @@ def test_non_contiguous_input_matches_eager():
     scale = torch.randn(B, C, **kw)
     shift = torch.randn(B, C, **kw)
 
-    fused_out = fused_adaptive_group_norm(x, weight, bias, scale, shift, 32, 1e-6)
-    ref_out = (
+    fused_out = fused_adaptive_group_norm_silu(x, weight, bias, scale, shift, 32, 1e-6)
+    ref_out = F.silu(
         F.group_norm(x, 32, weight, bias, 1e-6) * (1.0 + scale.view(B, C, 1, 1))
         + shift.view(B, C, 1, 1)
     )
@@ -258,7 +258,7 @@ def test_dit_sized_activation(spatial):
     scale = torch.randn(B, C, **kw)
     shift = torch.randn(B, C, **kw)
 
-    fused_out = fused_adaptive_group_norm(x, weight, bias, scale, shift, 32, 1e-5)
+    fused_out = fused_adaptive_group_norm_silu(x, weight, bias, scale, shift, 32, 1e-5)
     ref_out = _reference(x, weight, bias, scale, shift, 32, 1e-5).to(torch.bfloat16)
 
     rtol, atol = _tolerance(torch.bfloat16)
