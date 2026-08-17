@@ -21,9 +21,6 @@ without a working Triton.
 import torch
 from torch import nn
 
-from vllm_omni.diffusion.models.hunyuan_image3.transformer_blocks import (
-    ResBlock as _DefaultResBlock,
-)
 from vllm_omni.model_executor.models.common.ops import (
     fused_adaptive_group_norm,
     fused_group_norm_silu,
@@ -52,13 +49,6 @@ def normalization(channels, **kwargs):
     :return: a nn.Module for normalization.
     """
     return nn.GroupNorm(32, channels, **kwargs)
-
-
-def linear(*args, **kwargs):
-    """
-    Create a linear module.
-    """
-    return nn.Linear(*args, **kwargs)
 
 
 def zero_module(module):
@@ -122,7 +112,7 @@ class ResBlock(nn.Module):
         self.updown = up or down
         self.h_upd = self.x_upd = nn.Identity()
 
-        self.emb_layers = nn.Sequential(nn.SiLU(), linear(emb_channels, 2 * self.out_channels, **factory_kwargs))
+        self.emb_layers = nn.Sequential(nn.SiLU(), nn.Linear(emb_channels, 2 * self.out_channels, **factory_kwargs))
 
         self.out_layers = nn.Sequential(
             normalization(self.out_channels, **factory_kwargs),

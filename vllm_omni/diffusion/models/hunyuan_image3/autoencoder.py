@@ -18,6 +18,7 @@ from torch import Tensor, nn
 # ResnetBlock is platform-dispatched in the package __init__: CUDA gets a fused
 # GroupNorm+SiLU kernel, every other backend gets the plain PyTorch block.
 from vllm_omni.diffusion.models.hunyuan_image3 import ResnetBlock
+from vllm_omni.diffusion.models.hunyuan_image3.autoencoder_blocks import Conv3d, swish
 
 
 class DiagonalGaussianDistribution:
@@ -57,10 +58,6 @@ class DecoderOutput(BaseOutput):
     posterior: DiagonalGaussianDistribution | None = None
 
 
-def swish(x: Tensor) -> Tensor:
-    return x * torch.sigmoid(x)
-
-
 def forward_with_checkpointing(module, *inputs, use_checkpointing=False):
     def create_custom_forward(module):
         def custom_forward(*inputs):
@@ -72,46 +69,6 @@ def forward_with_checkpointing(module, *inputs, use_checkpointing=False):
         return torch.utils.checkpoint.checkpoint(create_custom_forward(module), *inputs, use_reentrant=False)
     else:
         return module(*inputs)
-
-
-class Conv3d(nn.Conv3d):
-    """
-    Perform Conv3d on patches with numerical differences from nn.Conv3d within 1e-5.
-    Only symmetric padding is supported.
-    """
-
-    def forward(self, input):
-        B, C, T, H, W = input.shape
-        memory_count = (C * T * H * W) * 2 / 1024**3
-        if memory_count > 2:
-            n_split = math.ceil(memory_count / 2)
-            assert n_split >= 2
-            chunks = torch.chunk(input, chunks=n_split, dim=-3)
-            padded_chunks = []
-            for i in range(len(chunks)):
-                if self.padding[0] > 0:
-                    padded_chunk = F.pad(
-                        chunks[i],
-                        (0, 0, 0, 0, self.padding[0], self.padding[0]),
-                        mode="constant" if self.padding_mode == "zeros" else self.padding_mode,
-                        value=0,
-                    )
-                    if i > 0:
-                        padded_chunk[:, :, : self.padding[0]] = chunks[i - 1][:, :, -self.padding[0] :]
-                    if i < len(chunks) - 1:
-                        padded_chunk[:, :, -self.padding[0] :] = chunks[i + 1][:, :, : self.padding[0]]
-                else:
-                    padded_chunk = chunks[i]
-                padded_chunks.append(padded_chunk)
-            padding_bak = self.padding
-            self.padding = (0, self.padding[1], self.padding[2])
-            outputs = []
-            for i in range(len(padded_chunks)):
-                outputs.append(super().forward(padded_chunks[i]))
-            self.padding = padding_bak
-            return torch.cat(outputs, dim=-3)
-        else:
-            return super().forward(input)
 
 
 class AttnBlock(nn.Module):
