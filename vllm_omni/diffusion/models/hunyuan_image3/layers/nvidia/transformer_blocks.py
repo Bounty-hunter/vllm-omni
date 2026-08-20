@@ -16,7 +16,6 @@ import torch
 from torch import nn
 
 from vllm_omni.diffusion.models.hunyuan_image3.layers.common import conv_nd, normalization, zero_module
-from vllm_omni.diffusion.models.hunyuan_image3.layers.nvidia._cudnn import cudnn_settings
 from vllm_omni.model_executor.models.common.ops import (
     fused_adaptive_group_norm_silu,
     fused_group_norm_silu,
@@ -92,47 +91,41 @@ class ResBlock(nn.Module):
             self.skip_connection = conv_nd(dims, self.in_channels, self.out_channels, 1, **factory_kwargs)  # noqa: N802
 
     def forward(self, x, emb) -> torch.Tensor:
-        # cuDNN autotune is scoped to this block rather than set at import time.
-        # The benchmark=True win is concentrated in the convolutions right here:
-        # this ResBlock sits inside UNetDown/UNetUp (patch_embed / final_layer),
-        # the heaviest conv users in the DiT. A process-wide flag would instead
-        # silently change every other model's conv behaviour in the same process.
-        with cudnn_settings(benchmark=True, deterministic=True):
-            # ``in_layers``/``out_layers`` stay nn.Sequential and are indexed into
-            # rather than unpacked into named submodules -- that is what keeps the
-            # state_dict keys (``in_layers.0/.2``, ``out_layers.0/.3``) identical to
-            # the unfused block, so checkpoints load unchanged.
-            in_norm, in_conv = self.in_layers[0], self.in_layers[-1]
+        # ``in_layers``/``out_layers`` stay nn.Sequential and are indexed into
+        # rather than unpacked into named submodules -- that is what keeps the
+        # state_dict keys (``in_layers.0/.2``, ``out_layers.0/.3``) identical to
+        # the unfused block, so checkpoints load unchanged.
+        in_norm, in_conv = self.in_layers[0], self.in_layers[-1]
 
-            # GroupNorm -> SiLU, one kernel instead of two.
-            h = fused_group_norm_silu(x, in_norm.weight, in_norm.bias, num_groups=in_norm.num_groups, eps=in_norm.eps)
-            if self.updown:
-                h = self.h_upd(h)
-                x = self.x_upd(x)
-            h = in_conv(h)
+        # GroupNorm -> SiLU, one kernel instead of two.
+        h = fused_group_norm_silu(x, in_norm.weight, in_norm.bias, num_groups=in_norm.num_groups, eps=in_norm.eps)
+        if self.updown:
+            h = self.h_upd(h)
+            x = self.x_upd(x)
+        h = in_conv(h)
 
-            emb_out = self.emb_layers(emb)
-            while len(emb_out.shape) < len(h.shape):
-                emb_out = emb_out[..., None]
+        emb_out = self.emb_layers(emb)
+        while len(emb_out.shape) < len(h.shape):
+            emb_out = emb_out[..., None]
 
-            # Adaptive GroupNorm -> SiLU: GroupNorm -> mul -> add -> silu, one
-            # kernel instead of four. The ``nn.SiLU`` at ``out_layers[1]`` is
-            # skipped here but stays in the Sequential, so state_dict keys are
-            # unchanged.
-            out_norm, out_rest = self.out_layers[0], self.out_layers[2:]
-            scale, shift = torch.chunk(emb_out, 2, dim=1)
-            h = fused_adaptive_group_norm_silu(
-                h,
-                out_norm.weight,
-                out_norm.bias,
-                scale,
-                shift,
-                num_groups=out_norm.num_groups,
-                eps=out_norm.eps,
-            )
-            h = out_rest(h)
+        # Adaptive GroupNorm -> SiLU: GroupNorm -> mul -> add -> silu, one
+        # kernel instead of four. The ``nn.SiLU`` at ``out_layers[1]`` is
+        # skipped here but stays in the Sequential, so state_dict keys are
+        # unchanged.
+        out_norm, out_rest = self.out_layers[0], self.out_layers[2:]
+        scale, shift = torch.chunk(emb_out, 2, dim=1)
+        h = fused_adaptive_group_norm_silu(
+            h,
+            out_norm.weight,
+            out_norm.bias,
+            scale,
+            shift,
+            num_groups=out_norm.num_groups,
+            eps=out_norm.eps,
+        )
+        h = out_rest(h)
 
-            return self.skip_connection(x) + h
+        return self.skip_connection(x) + h
 
 
 __all__ = ["ResBlock"]
