@@ -8,6 +8,7 @@ by :func:`fused_group_norm_silu`, a single Triton kernel that falls back to
 native ``F.silu(F.group_norm(...))`` when Triton is unavailable.
 """
 
+import torch
 from torch import nn
 
 from vllm_omni.model_executor.models.common.ops import fused_group_norm_silu
@@ -32,15 +33,16 @@ class ResnetBlock(nn.Module):
         h = fused_group_norm_silu(
             h, self.norm1.weight, self.norm1.bias, num_groups=self.norm1.num_groups, eps=self.norm1.eps
         )
-        h = self.conv1(h)
+        # cuDNN conv prefers channels_last; convert around the conv only.
+        h = self.conv1(h.to(memory_format=torch.channels_last_3d)).to(memory_format=torch.contiguous_format)
 
         h = fused_group_norm_silu(
             h, self.norm2.weight, self.norm2.bias, num_groups=self.norm2.num_groups, eps=self.norm2.eps
         )
-        h = self.conv2(h)
+        h = self.conv2(h.to(memory_format=torch.channels_last_3d)).to(memory_format=torch.contiguous_format)
 
         if self.in_channels != self.out_channels:
-            x = self.nin_shortcut(x)
+            x = self.nin_shortcut(x.to(memory_format=torch.channels_last_3d)).to(memory_format=torch.contiguous_format)
         return x + h
 
 

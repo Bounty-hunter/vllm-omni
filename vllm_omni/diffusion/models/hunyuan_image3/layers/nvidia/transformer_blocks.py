@@ -97,12 +97,14 @@ class ResBlock(nn.Module):
         # the unfused block, so checkpoints load unchanged.
         in_norm, in_conv = self.in_layers[0], self.in_layers[-1]
 
-        # GroupNorm -> SiLU, one kernel instead of two.
+        # GroupNorm -> SiLU, one kernel instead of two (NCHW for the fused kernel).
         h = fused_group_norm_silu(x, in_norm.weight, in_norm.bias, num_groups=in_norm.num_groups, eps=in_norm.eps)
         if self.updown:
             h = self.h_upd(h)
             x = self.x_upd(x)
-        h = in_conv(h)
+        # cuDNN conv prefers channels_last; convert around the conv only.
+        h = in_conv(h.to(memory_format=torch.channels_last))
+        h = h.to(memory_format=torch.contiguous_format)
 
         emb_out = self.emb_layers(emb)
         while len(emb_out.shape) < len(h.shape):
@@ -123,9 +125,15 @@ class ResBlock(nn.Module):
             num_groups=out_norm.num_groups,
             eps=out_norm.eps,
         )
-        h = out_rest(h)
+        # out_rest = Dropout, conv -> channels_last for the conv, back for the residual.
+        h = out_rest(h.to(memory_format=torch.channels_last)).to(memory_format=torch.contiguous_format)
 
-        return self.skip_connection(x) + h
+        # skip_connection may be a 1x1 conv when channels change; run it NHWC too.
+        if isinstance(self.skip_connection, nn.Conv2d):
+            x = self.skip_connection(x.to(memory_format=torch.channels_last)).to(memory_format=torch.contiguous_format)
+        else:
+            x = self.skip_connection(x)
+        return x + h
 
 
 __all__ = ["ResBlock"]
