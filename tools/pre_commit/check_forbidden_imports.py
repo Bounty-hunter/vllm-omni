@@ -53,6 +53,7 @@ CHECK_IMPORTS = {
         allowed_files={
             # STOP AND READ BEFORE YOU ADD ANYTHING ELSE TO THIS LIST:
             # pickle/cloudpickle are unsafe when deserializing untrusted data.
+            "benchmarks/diffusion/bench_ulysses_cp_topology.py",
             "tests/diffusion/attention/test_attention_sp.py",
             "tests/helpers/process.py",
             "vllm_omni/diffusion/distributed/group_coordinator.py",
