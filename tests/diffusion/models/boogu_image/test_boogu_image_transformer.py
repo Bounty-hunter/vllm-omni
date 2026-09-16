@@ -555,6 +555,36 @@ def test_transformer_load_weights_round_trip():
         assert torch.allclose(reloaded[native_name], expected[native_name])
 
 
+def test_transformer_load_weights_rejects_partial_fused_params():
+    """A fused parameter must not count as loaded until all its shards arrive.
+
+    The loader compares parameter *names*, so reporting ``to_qkv`` complete
+    after a single ``to_q`` would let a checkpoint carrying only ``to_q`` start
+    up with the ``k``/``v`` slices left uninitialized.
+    """
+    from vllm_omni.diffusion.models.boogu_image.boogu_image_transformer import (
+        BooguImageTransformer2DModel,
+    )
+
+    model = BooguImageTransformer2DModel(od_config=_tiny_od_config())
+    native_params = dict(model.named_parameters())
+
+    complete_name = "noise_refiner.0.attn.to_qkv.weight"
+    partial_name = "noise_refiner.0.feed_forward.gate_up_proj.weight"
+    assert complete_name in native_params
+    assert partial_name in native_params
+
+    weights = list(_native_to_checkpoint_weights(complete_name, native_params[complete_name]))
+    # Only the gate half of the FFN, so its fused parameter stays incomplete.
+    gate_ckpt, gate_value = _native_to_checkpoint_weights(partial_name, native_params[partial_name])[0]
+    weights.append((gate_ckpt, gate_value))
+
+    loaded = model.load_weights(weights)
+
+    assert complete_name in loaded
+    assert partial_name not in loaded
+
+
 def test_transformer_load_weights_warns_for_unexpected_and_unloaded():
     from vllm_omni.diffusion.models.boogu_image.boogu_image_transformer import (
         BooguImageTransformer2DModel,
@@ -575,8 +605,9 @@ def test_transformer_load_weights_warns_for_unexpected_and_unloaded():
     try:
         model = BooguImageTransformer2DModel(od_config=_tiny_od_config())
         native_params = dict(model.named_parameters())
-        loaded_name = next(iter(native_params))
-        # For fused projections, load just one of the fan-out checkpoint matrices.
+        # A non-fused parameter, so one checkpoint entry loads it completely.
+        loaded_name = "x_embedder.weight"
+        assert loaded_name in native_params
         (checkpoint_name, checkpoint_value), *_ = _native_to_checkpoint_weights(loaded_name, native_params[loaded_name])
         checkpoint_value = torch.randn_like(checkpoint_value)
 

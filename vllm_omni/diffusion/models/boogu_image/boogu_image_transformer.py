@@ -15,6 +15,7 @@
 #     inference caches (TeaCache/TaylorSeer) are not ported.
 
 import itertools
+from collections import defaultdict
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
@@ -1731,10 +1732,24 @@ class BooguImageTransformer2DModel(nn.Module):
         ``QKVParallelLinear`` / ``MergedColumnParallelLinear`` parameters using
         :attr:`stacked_params_mapping` — the same mapping loader consumers such
         as LoRA discovery and quantized weight loaders read.
+
+        A fused parameter is only reported as loaded once *every* one of its
+        source matrices has arrived. The caller compares parameter names, so
+        reporting e.g. ``to_qkv`` complete after the first shard would let a
+        checkpoint carrying only ``to_q`` start up with the ``k``/``v`` slices
+        left uninitialized.
         """
         stacked_params_mapping = self.stacked_params_mapping
+        # The shard ids each fused parameter is assembled from, keyed by the
+        # mapping entry that produces it.
+        expected_shards: dict[str, set[str | int]] = defaultdict(set)
+        for param_name, _weight_name, packed_shard_id in stacked_params_mapping:
+            expected_shards[param_name].add(packed_shard_id)
+
         params_dict = dict(self.named_parameters())
         loaded_params: set[str] = set()
+        # Fused parameter -> (mapping entry that produced it, shards received).
+        fused_params: dict[str, tuple[str, set[str | int]]] = {}
 
         for name, loaded_weight in weights:
             original_name = name
@@ -1744,10 +1759,12 @@ class BooguImageTransformer2DModel(nn.Module):
                 name = name.replace(".to_out.0.", ".to_out.")
 
             shard_id: str | int | None = None
+            matched_entry: str | None = None
             for param_name, weight_name, packed_shard_id in stacked_params_mapping:
                 if weight_name in name:
                     name = name.replace(weight_name, param_name)
                     shard_id = packed_shard_id
+                    matched_entry = param_name
                     break
 
             if name not in params_dict:
@@ -1756,11 +1773,20 @@ class BooguImageTransformer2DModel(nn.Module):
 
             param = params_dict[name]
             weight_loader = getattr(param, "weight_loader", default_weight_loader)
-            if shard_id is not None:
-                weight_loader(param, loaded_weight, shard_id)
-            else:
+            if matched_entry is None:
                 weight_loader(param, loaded_weight)
+            else:
+                weight_loader(param, loaded_weight, shard_id)
+                _, received = fused_params.setdefault(name, (matched_entry, set()))
+                received.add(shard_id)
             loaded_params.add(name)
+
+        # Withdraw any fused parameter that only received part of its source
+        # matrices, so the caller's "not initialized from checkpoint" check
+        # reports it as missing instead of accepting a half-filled parameter.
+        for name, (matched_entry, received) in fused_params.items():
+            if received != expected_shards[matched_entry]:
+                loaded_params.discard(name)
 
         unloaded_params = sorted(params_dict.keys() - loaded_params)
         if unloaded_params:
