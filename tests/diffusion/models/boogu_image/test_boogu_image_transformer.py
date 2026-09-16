@@ -494,6 +494,34 @@ def _native_to_checkpoint_weights(name: str, param: torch.Tensor) -> list[tuple[
     return [(name, param)]
 
 
+def test_transformer_exposes_stacked_params_mapping():
+    """The packed -> sub-layer mapping must be discoverable from the module tree.
+
+    ``diffusion/lora/loader.py`` and the quantized weight loaders read
+    ``stacked_params_mapping`` off the model, so it has to exist before (and
+    independently of) ``load_weights``.
+    """
+    from vllm_omni.diffusion.models.boogu_image.boogu_image_transformer import (
+        _BOOGU_STACKED_PARAMS_MAPPING,
+        BooguImageTransformer2DModel,
+    )
+
+    model = BooguImageTransformer2DModel(od_config=_tiny_od_config())
+
+    assert tuple(model.stacked_params_mapping) == _BOOGU_STACKED_PARAMS_MAPPING
+    # A per-instance copy, so consumers cannot mutate the module constant.
+    assert model.stacked_params_mapping is not _BOOGU_STACKED_PARAMS_MAPPING
+
+    # Every entry is a (param, shard, shard_id) triple.
+    for param_name, shard_name, shard_id in model.stacked_params_mapping:
+        assert param_name.startswith(".") and shard_name.startswith(".")
+        assert shard_id in {"q", "k", "v", 0, 1}
+
+    # The mapping targets exactly the fused projections this port creates.
+    mapped_leaves = {param.strip(".").split(".")[-1] for param, _, _ in model.stacked_params_mapping}
+    assert mapped_leaves == {"to_qkv", "img_to_qkv", "instruct_to_qkv", "gate_up_proj"}
+
+
 def test_transformer_load_weights_round_trip():
     from vllm_omni.diffusion.models.boogu_image.boogu_image_transformer import (
         BooguImageTransformer2DModel,

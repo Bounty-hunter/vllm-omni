@@ -42,12 +42,12 @@ from vllm_omni.diffusion.layers.fused_qk_norm_rope import (
     fused_qk_norm_rope,
     fused_qk_norm_rope_min_tokens,
 )
+from vllm_omni.diffusion.layers.norm import RMSNorm
 from vllm_omni.diffusion.models.utils import make_attention_mask
 from vllm_omni.platforms import current_omni_platform
 
 if TYPE_CHECKING:
     from vllm.model_executor.layers.quantization.base_config import QuantizationConfig
-from vllm_omni.diffusion.layers.norm import RMSNorm
 
 logger = init_logger(__name__)
 
@@ -1100,45 +1100,42 @@ def _cal_preprocessed_instruction_feat_dim(instruction_feature_configs: dict) ->
         raise ValueError(f"Invalid reduce_type: {reduce_type}")
 
 
-_QKV_PROJ_MERGES: dict[str, tuple[str, str]] = {
-    "img_to_q": ("img_to_qkv", "q"),
-    "img_to_k": ("img_to_qkv", "k"),
-    "img_to_v": ("img_to_qkv", "v"),
-    "instruct_to_q": ("instruct_to_qkv", "q"),
-    "instruct_to_k": ("instruct_to_qkv", "k"),
-    "instruct_to_v": ("instruct_to_qkv", "v"),
-    "to_q": ("to_qkv", "q"),
-    "to_k": ("to_qkv", "k"),
-    "to_v": ("to_qkv", "v"),
-}
-
-
-def _remap_fused_weight(name: str) -> tuple[str, str | int | None]:
-    """Map a diffusers checkpoint weight name onto the fused native parameter.
-
-    The diffusers checkpoint stores Q/K/V and FFN gate/input projections as
-    separate matrices; the native port fuses them into ``QKVParallelLinear``
-    and ``MergedColumnParallelLinear``. Returns ``(param_name, shard_id)`` where
-    ``shard_id`` is the shard the fused weight loader uses to place the matrix
-    (``"q"/"k"/"v"`` for QKV, ``0/1`` for gate/up), or ``(name, None)`` when the
-    weight is not fused.
-    """
-    parts = name.split(".")
-    leaf = parts[-2] if len(parts) >= 2 else ""
-    parent = parts[-3] if len(parts) >= 3 else ""
-
-    if leaf in _QKV_PROJ_MERGES:
-        new_leaf, shard_id = _QKV_PROJ_MERGES[leaf]
-        parts[-2] = new_leaf
-        return ".".join(parts), shard_id
-
-    # FFN gate/input: ``feed_forward`` / ``img_feed_forward`` /
-    # ``instruct_feed_forward`` all share the same fused ``gate_up_proj``.
-    if leaf in ("linear_1", "linear_3") and parent.endswith("feed_forward"):
-        parts[-2] = "gate_up_proj"
-        return ".".join(parts), 0 if leaf == "linear_1" else 1
-
-    return name, None
+# Packed (fused) projections vs. the logical sub-projections the diffusers
+# checkpoint stores, in the ``(param_name, shard_name, shard_id)`` form used
+# across vllm-omni. ``load_weights`` consumes it directly, and loader consumers
+# that discover it via ``stacked_params_mapping`` (LoRA, quantized loaders) get
+# the packed -> sub-layer relationship for free.
+#
+# The QKV entries stay leaf-scoped: each fused source (``to_q`` on the
+# self-attention module, ``img_to_q`` / ``instruct_to_q`` on the joint
+# attention) has a distinct leaf, and ``.to_q.`` cannot collide with
+# ``.img_to_q.`` because the preceding character is ``_`` rather than ``.``.
+# The FFN entries are path-qualified instead: ``linear_1`` also names the
+# timestep embedder and the ``norm_out`` projections, which must load 1:1 and
+# are not fused.
+_BOOGU_STACKED_PARAMS_MAPPING = (
+    # self-attention: noise / reference-image / context refiners, the
+    # single-stream blocks, and the double-stream image self-attention.
+    (".to_qkv.", ".to_q.", "q"),
+    (".to_qkv.", ".to_k.", "k"),
+    (".to_qkv.", ".to_v.", "v"),
+    # joint (instruction + image) attention of the double-stream blocks.
+    (".img_to_qkv.", ".img_to_q.", "q"),
+    (".img_to_qkv.", ".img_to_k.", "k"),
+    (".img_to_qkv.", ".img_to_v.", "v"),
+    (".instruct_to_qkv.", ".instruct_to_q.", "q"),
+    (".instruct_to_qkv.", ".instruct_to_k.", "k"),
+    (".instruct_to_qkv.", ".instruct_to_v.", "v"),
+    # feed-forward gate/up: ``linear_1`` is the gate (shard 0) and
+    # ``linear_3`` the input (shard 1), matching the packed order the SwiGLU
+    # activation consumes.
+    (".feed_forward.gate_up_proj.", ".feed_forward.linear_1.", 0),
+    (".feed_forward.gate_up_proj.", ".feed_forward.linear_3.", 1),
+    (".img_feed_forward.gate_up_proj.", ".img_feed_forward.linear_1.", 0),
+    (".img_feed_forward.gate_up_proj.", ".img_feed_forward.linear_3.", 1),
+    (".instruct_feed_forward.gate_up_proj.", ".instruct_feed_forward.linear_1.", 0),
+    (".instruct_feed_forward.gate_up_proj.", ".instruct_feed_forward.linear_3.", 1),
+)
 
 
 class BooguImageTransformer2DModel(nn.Module):
@@ -1166,6 +1163,10 @@ class BooguImageTransformer2DModel(nn.Module):
         prefix: str = "",
     ) -> None:
         super().__init__()
+        # Published here rather than in ``load_weights`` so loader consumers
+        # that only inspect the module tree (LoRA discovery, quantized weight
+        # loaders) always see the packed -> sub-layer relationship.
+        self.stacked_params_mapping = list(_BOOGU_STACKED_PARAMS_MAPPING)
         self.od_config = od_config
         cfg = od_config.tf_model_config
 
@@ -1725,10 +1726,13 @@ class BooguImageTransformer2DModel(nn.Module):
         - ``*.to_out.0.weight`` -> ``*.to_out.weight`` (diffusers wraps the
           output projection in a ``ModuleList``; the native module uses a plain
           linear).
-        - Separate Q/K/V and FFN gate/input matrices are fused into
-          ``QKVParallelLinear`` / ``MergedColumnParallelLinear`` (handled by
-          :func:`_remap_fused_weight`).
+
+        Packed Q/K/V and FFN gate/input matrices are folded onto the fused
+        ``QKVParallelLinear`` / ``MergedColumnParallelLinear`` parameters using
+        :attr:`stacked_params_mapping` — the same mapping loader consumers such
+        as LoRA discovery and quantized weight loaders read.
         """
+        stacked_params_mapping = self.stacked_params_mapping
         params_dict = dict(self.named_parameters())
         loaded_params: set[str] = set()
 
@@ -1739,7 +1743,12 @@ class BooguImageTransformer2DModel(nn.Module):
             if ".to_out.0." in name:
                 name = name.replace(".to_out.0.", ".to_out.")
 
-            name, shard_id = _remap_fused_weight(name)
+            shard_id: str | int | None = None
+            for param_name, weight_name, packed_shard_id in stacked_params_mapping:
+                if weight_name in name:
+                    name = name.replace(weight_name, param_name)
+                    shard_id = packed_shard_id
+                    break
 
             if name not in params_dict:
                 logger.warning("Skipping unexpected checkpoint weight %s", original_name)
