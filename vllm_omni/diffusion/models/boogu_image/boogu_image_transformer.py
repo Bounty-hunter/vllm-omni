@@ -24,9 +24,9 @@ import torch.nn.functional as F
 from diffusers.models.embeddings import Timesteps, get_1d_rotary_pos_embed
 from einops import rearrange, repeat
 from vllm.logger import init_logger
-from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.linear import (
-    ColumnParallelLinear,
+    MergedColumnParallelLinear,
+    QKVParallelLinear,
     ReplicatedLinear,
     RowParallelLinear,
 )
@@ -47,6 +47,7 @@ from vllm_omni.platforms import current_omni_platform
 
 if TYPE_CHECKING:
     from vllm.model_executor.layers.quantization.base_config import QuantizationConfig
+from vllm_omni.diffusion.layers.norm import RMSNorm
 
 logger = init_logger(__name__)
 
@@ -260,7 +261,14 @@ class LuminaLayerNormContinuous(nn.Module):
 
 
 class LuminaFeedForward(nn.Module):
-    """SwiGLU feed-forward with tensor-parallel projections."""
+    """SwiGLU feed-forward with tensor-parallel projections.
+
+    The ``gate`` and ``input`` projections are fused into a single
+    ``MergedColumnParallelLinear`` (one GEMM instead of two), matching the
+    ``gate_up_proj`` convention used by the Hunyuan Image 3 port. The SwiGLU
+    activation keeps its float32 computation for numerical parity with
+    upstream.
+    """
 
     def __init__(
         self,
@@ -276,20 +284,13 @@ class LuminaFeedForward(nn.Module):
             inner_dim = int(ffn_dim_multiplier * inner_dim)
         inner_dim = multiple_of * ((inner_dim + multiple_of - 1) // multiple_of)
 
-        self.linear_1 = ColumnParallelLinear(
-            dim,
-            inner_dim,
+        self.gate_up_proj = MergedColumnParallelLinear(
+            input_size=dim,
+            output_sizes=[inner_dim, inner_dim],
             bias=False,
             quant_config=quant_config,
-            prefix=_join_prefix(prefix, "linear_1"),
-        )  # gate
-        self.linear_3 = ColumnParallelLinear(
-            dim,
-            inner_dim,
-            bias=False,
-            quant_config=quant_config,
-            prefix=_join_prefix(prefix, "linear_3"),
-        )  # input
+            prefix=_join_prefix(prefix, "gate_up_proj"),
+        )
         self.linear_2 = RowParallelLinear(
             inner_dim,
             dim,
@@ -299,8 +300,8 @@ class LuminaFeedForward(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        h1, _ = self.linear_1(x)
-        h2, _ = self.linear_3(x)
+        gate_up, _ = self.gate_up_proj(x)
+        h1, h2 = gate_up.chunk(2, dim=-1)
         out, _ = self.linear_2(swiglu(h1, h2))
         return out
 
@@ -593,28 +594,15 @@ class BooguImageSelfAttention(nn.Module):
     ) -> None:
         super().__init__()
         self.head_dim = dim // num_attention_heads
-        kv_dim = self.head_dim * num_kv_heads
 
-        self.to_q = ColumnParallelLinear(
-            dim,
-            dim,
+        self.to_qkv = QKVParallelLinear(
+            hidden_size=dim,
+            head_size=self.head_dim,
+            total_num_heads=num_attention_heads,
+            total_num_kv_heads=num_kv_heads,
             bias=False,
             quant_config=quant_config,
-            prefix=_join_prefix(prefix, "to_q"),
-        )
-        self.to_k = ColumnParallelLinear(
-            dim,
-            kv_dim,
-            bias=False,
-            quant_config=quant_config,
-            prefix=_join_prefix(prefix, "to_k"),
-        )
-        self.to_v = ColumnParallelLinear(
-            dim,
-            kv_dim,
-            bias=False,
-            quant_config=quant_config,
-            prefix=_join_prefix(prefix, "to_v"),
+            prefix=_join_prefix(prefix, "to_qkv"),
         )
         self.norm_q = RMSNorm(self.head_dim, eps=1e-5)
         self.norm_k = RMSNorm(self.head_dim, eps=1e-5)
@@ -626,8 +614,10 @@ class BooguImageSelfAttention(nn.Module):
             prefix=_join_prefix(prefix, "to_out"),
         )
 
-        self.num_local_heads = self.to_q.output_size_per_partition // self.head_dim
-        self.num_local_kv_heads = self.to_k.output_size_per_partition // self.head_dim
+        self.num_local_heads = self.to_qkv.num_heads
+        self.num_local_kv_heads = self.to_qkv.num_kv_heads
+        self.q_size = self.num_local_heads * self.head_dim
+        self.kv_size = self.num_local_kv_heads * self.head_dim
 
         self.attn = Attention(
             num_heads=self.num_local_heads,
@@ -645,9 +635,8 @@ class BooguImageSelfAttention(nn.Module):
     ) -> torch.Tensor:
         dtype = hidden_states.dtype
 
-        query, _ = self.to_q(hidden_states)
-        key, _ = self.to_k(hidden_states)
-        value, _ = self.to_v(hidden_states)
+        qkv, _ = self.to_qkv(hidden_states)
+        query, key, value = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
 
         query = query.unflatten(-1, (self.num_local_heads, self.head_dim))
         key = key.unflatten(-1, (self.num_local_kv_heads, self.head_dim))
@@ -683,50 +672,24 @@ class BooguImageJointAttention(nn.Module):
     ) -> None:
         super().__init__()
         self.head_dim = dim // num_attention_heads
-        kv_dim = self.head_dim * num_kv_heads
 
-        self.img_to_q = ColumnParallelLinear(
-            dim,
-            dim,
+        self.img_to_qkv = QKVParallelLinear(
+            hidden_size=dim,
+            head_size=self.head_dim,
+            total_num_heads=num_attention_heads,
+            total_num_kv_heads=num_kv_heads,
             bias=False,
             quant_config=quant_config,
-            prefix=_join_prefix(prefix, "img_to_q"),
+            prefix=_join_prefix(prefix, "img_to_qkv"),
         )
-        self.img_to_k = ColumnParallelLinear(
-            dim,
-            kv_dim,
+        self.instruct_to_qkv = QKVParallelLinear(
+            hidden_size=dim,
+            head_size=self.head_dim,
+            total_num_heads=num_attention_heads,
+            total_num_kv_heads=num_kv_heads,
             bias=False,
             quant_config=quant_config,
-            prefix=_join_prefix(prefix, "img_to_k"),
-        )
-        self.img_to_v = ColumnParallelLinear(
-            dim,
-            kv_dim,
-            bias=False,
-            quant_config=quant_config,
-            prefix=_join_prefix(prefix, "img_to_v"),
-        )
-
-        self.instruct_to_q = ColumnParallelLinear(
-            dim,
-            dim,
-            bias=False,
-            quant_config=quant_config,
-            prefix=_join_prefix(prefix, "instruct_to_q"),
-        )
-        self.instruct_to_k = ColumnParallelLinear(
-            dim,
-            kv_dim,
-            bias=False,
-            quant_config=quant_config,
-            prefix=_join_prefix(prefix, "instruct_to_k"),
-        )
-        self.instruct_to_v = ColumnParallelLinear(
-            dim,
-            kv_dim,
-            bias=False,
-            quant_config=quant_config,
-            prefix=_join_prefix(prefix, "instruct_to_v"),
+            prefix=_join_prefix(prefix, "instruct_to_qkv"),
         )
 
         self.norm_q = RMSNorm(self.head_dim, eps=1e-5)
@@ -757,8 +720,10 @@ class BooguImageJointAttention(nn.Module):
             prefix=_join_prefix(prefix, "to_out"),
         )
 
-        self.num_local_heads = self.img_to_q.output_size_per_partition // self.head_dim
-        self.num_local_kv_heads = self.img_to_k.output_size_per_partition // self.head_dim
+        self.num_local_heads = self.img_to_qkv.num_heads
+        self.num_local_kv_heads = self.img_to_qkv.num_kv_heads
+        self.q_size = self.num_local_heads * self.head_dim
+        self.kv_size = self.num_local_kv_heads * self.head_dim
 
         self.attn = Attention(
             num_heads=self.num_local_heads,
@@ -780,13 +745,13 @@ class BooguImageJointAttention(nn.Module):
         dtype = img_hidden_states.dtype
         batch_size = img_hidden_states.shape[0]
 
-        img_query, _ = self.img_to_q(img_hidden_states)
-        img_key, _ = self.img_to_k(img_hidden_states)
-        img_value, _ = self.img_to_v(img_hidden_states)
+        img_qkv, _ = self.img_to_qkv(img_hidden_states)
+        img_query, img_key, img_value = img_qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
 
-        instruct_query, _ = self.instruct_to_q(instruct_hidden_states)
-        instruct_key, _ = self.instruct_to_k(instruct_hidden_states)
-        instruct_value, _ = self.instruct_to_v(instruct_hidden_states)
+        instruct_qkv, _ = self.instruct_to_qkv(instruct_hidden_states)
+        instruct_query, instruct_key, instruct_value = instruct_qkv.split(
+            [self.q_size, self.kv_size, self.kv_size], dim=-1
+        )
 
         query, key, value = _concat_instruction_image_features(
             [img_query, img_key, img_value],
@@ -1133,6 +1098,47 @@ def _cal_preprocessed_instruction_feat_dim(instruction_feature_configs: dict) ->
         return instruction_feat_dim
     else:
         raise ValueError(f"Invalid reduce_type: {reduce_type}")
+
+
+_QKV_PROJ_MERGES: dict[str, tuple[str, str]] = {
+    "img_to_q": ("img_to_qkv", "q"),
+    "img_to_k": ("img_to_qkv", "k"),
+    "img_to_v": ("img_to_qkv", "v"),
+    "instruct_to_q": ("instruct_to_qkv", "q"),
+    "instruct_to_k": ("instruct_to_qkv", "k"),
+    "instruct_to_v": ("instruct_to_qkv", "v"),
+    "to_q": ("to_qkv", "q"),
+    "to_k": ("to_qkv", "k"),
+    "to_v": ("to_qkv", "v"),
+}
+
+
+def _remap_fused_weight(name: str) -> tuple[str, str | int | None]:
+    """Map a diffusers checkpoint weight name onto the fused native parameter.
+
+    The diffusers checkpoint stores Q/K/V and FFN gate/input projections as
+    separate matrices; the native port fuses them into ``QKVParallelLinear``
+    and ``MergedColumnParallelLinear``. Returns ``(param_name, shard_id)`` where
+    ``shard_id`` is the shard the fused weight loader uses to place the matrix
+    (``"q"/"k"/"v"`` for QKV, ``0/1`` for gate/up), or ``(name, None)`` when the
+    weight is not fused.
+    """
+    parts = name.split(".")
+    leaf = parts[-2] if len(parts) >= 2 else ""
+    parent = parts[-3] if len(parts) >= 3 else ""
+
+    if leaf in _QKV_PROJ_MERGES:
+        new_leaf, shard_id = _QKV_PROJ_MERGES[leaf]
+        parts[-2] = new_leaf
+        return ".".join(parts), shard_id
+
+    # FFN gate/input: ``feed_forward`` / ``img_feed_forward`` /
+    # ``instruct_feed_forward`` all share the same fused ``gate_up_proj``.
+    if leaf in ("linear_1", "linear_3") and parent.endswith("feed_forward"):
+        parts[-2] = "gate_up_proj"
+        return ".".join(parts), 0 if leaf == "linear_1" else 1
+
+    return name, None
 
 
 class BooguImageTransformer2DModel(nn.Module):
@@ -1710,7 +1716,7 @@ class BooguImageTransformer2DModel(nn.Module):
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         """Load diffusers-named checkpoint weights into the native module.
 
-        Two name promotions relative to upstream (see step 8/10 findings):
+        Name promotions relative to upstream (see step 8/10 findings):
 
         - ``*.img_instruct_attn.processor.{img,instruct}_{to_q,to_k,to_v}`` /
           ``{instruct,img}_out`` -> drop ``.processor`` (upstream keeps the
@@ -1719,6 +1725,9 @@ class BooguImageTransformer2DModel(nn.Module):
         - ``*.to_out.0.weight`` -> ``*.to_out.weight`` (diffusers wraps the
           output projection in a ``ModuleList``; the native module uses a plain
           linear).
+        - Separate Q/K/V and FFN gate/input matrices are fused into
+          ``QKVParallelLinear`` / ``MergedColumnParallelLinear`` (handled by
+          :func:`_remap_fused_weight`).
         """
         params_dict = dict(self.named_parameters())
         loaded_params: set[str] = set()
@@ -1730,13 +1739,18 @@ class BooguImageTransformer2DModel(nn.Module):
             if ".to_out.0." in name:
                 name = name.replace(".to_out.0.", ".to_out.")
 
+            name, shard_id = _remap_fused_weight(name)
+
             if name not in params_dict:
                 logger.warning("Skipping unexpected checkpoint weight %s", original_name)
                 continue
 
             param = params_dict[name]
             weight_loader = getattr(param, "weight_loader", default_weight_loader)
-            weight_loader(param, loaded_weight)
+            if shard_id is not None:
+                weight_loader(param, loaded_weight, shard_id)
+            else:
+                weight_loader(param, loaded_weight)
             loaded_params.add(name)
 
         unloaded_params = sorted(params_dict.keys() - loaded_params)
