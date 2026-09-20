@@ -1972,7 +1972,7 @@ class BooguImageTransformer2DModel(nn.Module):
                 # itself (the name already carries the .weight/.bias suffix).
                 param = params_dict[fused_name]
                 with torch.no_grad():
-                    param[rows] = loaded_weight.to(param.dtype, param.device)
+                    param[rows] = loaded_weight.to(device=param.device, dtype=param.dtype)
                 received = ds_fold_progress.setdefault(fused_name, {"weight": set(), "bias": set()})
                 received[kind].add(site_idx)
                 loaded_params.add(fused_name)
