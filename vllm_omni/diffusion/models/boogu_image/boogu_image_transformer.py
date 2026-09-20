@@ -15,7 +15,7 @@
 #     inference caches (TeaCache/TaylorSeer) are not ported.
 
 import itertools
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
@@ -1331,6 +1331,44 @@ class BooguImageTransformer2DModel(nn.Module):
         # Distinguish multiple reference images (max 5).
         self.image_index_embedding = nn.Parameter(torch.randn(5, hidden_size))
 
+        # Step-invariant layout artifacts (rotary tables, their packed fused-op
+        # variants, padding masks), keyed by batch geometry signature; see
+        # ``_layout_signature``. The denoise loop calls ``forward`` once per
+        # step (per CFG branch) on unchanged geometry, so the tables are
+        # bit-identical every step. Capacity 2 covers the alternating
+        # cond/uncond branches of the sequential CFG executor.
+        self._layout_cache_capacity = 2
+        self._layout_cache: OrderedDict[tuple, tuple] = OrderedDict()
+
+    def _layout_signature(
+        self,
+        freqs_real: RotaryFrequencyTables,
+        instruction_attention_mask: torch.Tensor,
+        l_effective_ref_img_len: list[list[int]],
+        l_effective_img_len: list[int],
+        ref_img_sizes: list[list[tuple[int, int]] | None],
+        img_sizes: list[tuple[int, int]],
+        device: torch.device,
+    ) -> tuple:
+        """Hashable key covering every input of the step-invariant layout
+        artifacts: the rotary tables depend only on the frequency-table
+        geometry (config constants) and the batch's effective sequence
+        lengths/sizes, and the padding masks only on those lengths. Values
+        (not tensor identities) are hashed so a freed tensor whose id gets
+        reused by a different request cannot produce a stale hit."""
+        return (
+            tuple((t.shape, t.dtype) for pair in freqs_real for t in pair),
+            tuple(instruction_attention_mask.shape),
+            tuple(instruction_attention_mask.sum(dim=1).tolist()),
+            tuple(tuple(lengths) for lengths in l_effective_ref_img_len),
+            tuple(l_effective_img_len),
+            tuple(
+                tuple((h, w) for h, w in sizes) if sizes is not None else None for sizes in ref_img_sizes
+            ),
+            tuple(img_sizes),
+            str(device),
+        )
+
     def preprocess_instruction_hidden_states(self, raw_instruction_hidden_states):
         """Reduce the raw MLLM hidden states to the transformer feature dim.
 
@@ -1597,7 +1635,84 @@ class BooguImageTransformer2DModel(nn.Module):
             img_sizes,
         ) = self.flat_and_pad_to_seq(hidden_states, ref_image_hidden_states)
 
-        # Build rotary embeddings and sequence lengths.
+        # Rotary embeddings, sequence lengths, and padding masks are pure
+        # functions of the batch geometry: across the denoise loop's steps
+        # (and between the CFG branches' otherwise-identical shapes) they
+        # recompute bit-identical tensors. Build them once per geometry and
+        # reuse; every consumer treats them as read-only. Skipped under grad
+        # so tensors created in one no-grad context can never leak into a
+        # grad-recording one.
+        signature = self._layout_signature(
+            freqs_real,
+            instruction_attention_mask,
+            l_effective_ref_img_len,
+            l_effective_img_len,
+            ref_img_sizes,
+            img_sizes,
+            device,
+        )
+        layout = None
+        if not torch.is_grad_enabled():
+            layout = self._layout_cache.get(signature)
+            if layout is not None:
+                self._layout_cache.move_to_end(signature)
+
+        if layout is None:
+            (
+                context_rotary_emb,
+                ref_img_rotary_emb,
+                noise_rotary_emb,
+                rotary_emb,
+                encoder_seq_lengths,
+                seq_lengths,
+                combined_img_rotary_emb,
+                combined_img_seq_lengths,
+            ) = self.rope_embedder(
+                freqs_real,
+                instruction_attention_mask,
+                l_effective_ref_img_len,
+                l_effective_img_len,
+                ref_img_sizes,
+                img_sizes,
+                device,
+            )
+
+            if _FUSED_QK_NORM_ROPE:
+                # One packed [cos|sin] table per rotary embedding that reaches
+                # an attention, built once per geometry; the tuples grow a
+                # third element that the fused path consumes and the eager
+                # path ignores. (ref_img_rotary_emb is packed inside
+                # img_patch_embed_and_refine, on the rebuilt per-reference-image
+                # batch tuple.)
+                context_rotary_emb = _with_packed_rope_table(context_rotary_emb)
+                noise_rotary_emb = _with_packed_rope_table(noise_rotary_emb)
+                rotary_emb = _with_packed_rope_table(rotary_emb)
+                combined_img_rotary_emb = _with_packed_rope_table(combined_img_rotary_emb)
+
+            joint_attention_mask = make_attention_mask(hidden_states, seq_lengths)
+            img_attention_mask = (
+                make_attention_mask(hidden_states, combined_img_seq_lengths)
+                if self.num_double_stream_layers > 0
+                else None
+            )
+
+            layout = (
+                context_rotary_emb,
+                ref_img_rotary_emb,
+                noise_rotary_emb,
+                rotary_emb,
+                encoder_seq_lengths,
+                seq_lengths,
+                combined_img_rotary_emb,
+                combined_img_seq_lengths,
+                joint_attention_mask,
+                img_attention_mask,
+            )
+            if not torch.is_grad_enabled():
+                self._layout_cache[signature] = layout
+                while len(self._layout_cache) > self._layout_cache_capacity:
+                    self._layout_cache.popitem(last=False)
+
         (
             context_rotary_emb,
             ref_img_rotary_emb,
@@ -1607,26 +1722,9 @@ class BooguImageTransformer2DModel(nn.Module):
             seq_lengths,
             combined_img_rotary_emb,
             combined_img_seq_lengths,
-        ) = self.rope_embedder(
-            freqs_real,
-            instruction_attention_mask,
-            l_effective_ref_img_len,
-            l_effective_img_len,
-            ref_img_sizes,
-            img_sizes,
-            device,
-        )
-
-        if _FUSED_QK_NORM_ROPE:
-            # One packed [cos|sin] table per rotary embedding that reaches an
-            # attention, built once per forward; the tuples grow a third
-            # element that the fused path consumes and the eager path ignores.
-            # (ref_img_rotary_emb is packed inside img_patch_embed_and_refine,
-            # on the rebuilt per-reference-image batch tuple.)
-            context_rotary_emb = _with_packed_rope_table(context_rotary_emb)
-            noise_rotary_emb = _with_packed_rope_table(noise_rotary_emb)
-            rotary_emb = _with_packed_rope_table(rotary_emb)
-            combined_img_rotary_emb = _with_packed_rope_table(combined_img_rotary_emb)
+            joint_attention_mask,
+            img_attention_mask,
+        ) = layout
 
         # Context refinement.
         for layer in self.context_refiner:
@@ -1648,13 +1746,8 @@ class BooguImageTransformer2DModel(nn.Module):
         instruct_hidden_states = instruction_hidden_states
         img_hidden_states = combined_img_hidden_states
 
-        # Joint mask for [instruct + image].
-        joint_attention_mask = make_attention_mask(hidden_states, seq_lengths)
-
         # Dual-stream (double-stream) stage.
         if self.num_double_stream_layers > 0:
-            img_attention_mask = make_attention_mask(hidden_states, combined_img_seq_lengths)
-
             for layer in self.double_stream_layers:
                 img_hidden_states, instruct_hidden_states = layer(
                     img_hidden_states,
