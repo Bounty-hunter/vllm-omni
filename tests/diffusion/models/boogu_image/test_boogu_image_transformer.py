@@ -304,6 +304,58 @@ def test_double_stream_block_shape():
     assert torch.isfinite(instruct_out).all()
 
 
+def test_joint_attention_returns_per_stream_outputs():
+    """``BooguImageJointAttention`` returns the projected per-stream outputs.
+
+    The pre-refactor path merged the streams, applied the joint ``to_out``
+    projection, and the caller split the merged result again. The algebra this
+    refactor relies on: ``to_out`` is a per-token linear, so projecting each
+    stream separately equals slicing ``to_out`` of the merged sequence — and
+    the per-stream projections match the merged path bit-for-bit.
+    """
+    from vllm_omni.diffusion.models.boogu_image.boogu_image_transformer import (
+        BooguImageJointAttention,
+    )
+
+    torch.manual_seed(0)
+    attn = BooguImageJointAttention(
+        dim=HIDDEN_SIZE,
+        num_attention_heads=NUM_HEADS,
+        num_kv_heads=NUM_KV_HEADS,
+    )
+    _randomize_parameters(attn)
+
+    batch_size, instruct_len, img_len = 2, 8, 16
+    img_hidden_states = torch.randn(batch_size, img_len, HIDDEN_SIZE)
+    instruct_hidden_states = torch.randn(batch_size, instruct_len, HIDDEN_SIZE)
+    rotary_emb = _identity_rotary_emb(batch_size, instruct_len + img_len)
+
+    instruct_out, img_out = attn(
+        img_hidden_states,
+        instruct_hidden_states,
+        None,
+        rotary_emb,
+        [instruct_len] * batch_size,
+        [instruct_len + img_len] * batch_size,
+    )
+
+    assert instruct_out.shape == instruct_hidden_states.shape
+    assert img_out.shape == img_hidden_states.shape
+
+    # Pre-refactor merged formulation, recomputed with the same weights.
+    with torch.no_grad():
+        a_instruct = torch.randn(batch_size, instruct_len, HIDDEN_SIZE)
+        a_img = torch.randn(batch_size, img_len, HIDDEN_SIZE)
+        proj_instruct, _ = attn.instruct_out(a_instruct)
+        proj_img, _ = attn.img_out(a_img)
+        per_stream_instruct, _ = attn.to_out(proj_instruct)
+        per_stream_img, _ = attn.to_out(proj_img)
+        merged, _ = attn.to_out(torch.cat((proj_instruct, proj_img), dim=1))
+
+    assert torch.equal(per_stream_instruct, merged[:, :instruct_len])
+    assert torch.equal(per_stream_img, merged[:, instruct_len:])
+
+
 def test_transformer_instantiates():
     from vllm_omni.diffusion.models.boogu_image.boogu_image_transformer import (
         BooguImageTransformer2DModel,

@@ -660,7 +660,7 @@ class BooguImageJointAttention(nn.Module):
     projections on the attention *processor*
     (`BooguImageDoubleStreamSelfAttnProcessor*`); here they are promoted onto
     this module. The final joint output projection corresponds to the upstream
-    `img_instruct_attn.to_out[0]`.
+    `img_instruct_attn.to_out[0]`; it is applied per stream (see ``forward``).
     """
 
     def __init__(
@@ -742,7 +742,15 @@ class BooguImageJointAttention(nn.Module):
         rotary_emb: RotaryEmbedding | None,
         encoder_seq_lengths: list[int],
         seq_lengths: list[int],
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Run the joint attention and return the projected per-stream outputs.
+
+        The merged ``to_out`` projection upstream applies to the concatenated
+        sequence is applied per stream instead: it is a per-token linear, so
+        ``to_out`` of a stream equals the corresponding slice of ``to_out`` of
+        the merged sequence. Returning the streams directly avoids materializing
+        the merged sequence, which every caller would immediately split again.
+        """
         dtype = img_hidden_states.dtype
         batch_size = img_hidden_states.shape[0]
 
@@ -776,12 +784,9 @@ class BooguImageJointAttention(nn.Module):
         )
         instruct_projected, _ = self.instruct_out(instruct_attn_out)
         img_projected, _ = self.img_out(img_attn_out)
-
-        merged = _concat_instruction_image_features(
-            [img_projected], [instruct_projected], encoder_seq_lengths, seq_lengths
-        )[0]
-        merged, _ = self.to_out(merged)
-        return merged
+        instruct_projected, _ = self.to_out(instruct_projected)
+        img_projected, _ = self.to_out(img_projected)
+        return instruct_projected, img_projected
 
 
 class BooguImageTransformerBlock(nn.Module):
@@ -997,10 +1002,6 @@ class BooguImageDoubleStreamTransformerBlock(nn.Module):
         if self.modulation and temb is None:
             raise ValueError("temb must be provided when modulation is enabled")
 
-        batch_size = img_hidden_states.shape[0]
-        L_instruct = instruct_hidden_states.shape[1]
-        L_img = img_hidden_states.shape[1]
-
         if self.modulation:
             img_norm1_out, img_gate_msa, img_scale_mlp, img_gate_mlp = self.img_norm1(img_hidden_states, temb)
             img_norm2_out, img_shift_mlp, _, _ = self.img_norm2(img_hidden_states, temb)
@@ -1014,7 +1015,7 @@ class BooguImageDoubleStreamTransformerBlock(nn.Module):
             ) = self.instruct_norm1(instruct_hidden_states, temb)
             instruct_norm2_out, instruct_shift_mlp, _, _ = self.instruct_norm2(instruct_hidden_states, temb)
 
-            joint_attn_out = self.img_instruct_attn(
+            instruct_attn_out, img_attn_out = self.img_instruct_attn(
                 img_norm1_out,
                 instruct_norm1_out,
                 joint_attention_mask,
@@ -1022,13 +1023,6 @@ class BooguImageDoubleStreamTransformerBlock(nn.Module):
                 encoder_seq_lengths,
                 seq_lengths,
             )
-
-            # Split the joint output back into instruction/image segments.
-            instruct_attn_out = instruct_hidden_states.new_zeros(batch_size, L_instruct, self.hidden_size)
-            img_attn_out = img_hidden_states.new_zeros(batch_size, L_img, self.hidden_size)
-            for i, (encoder_seq_len, seq_len) in enumerate(zip(encoder_seq_lengths, seq_lengths)):
-                instruct_attn_out[i, :encoder_seq_len] = joint_attn_out[i, :encoder_seq_len]
-                img_attn_out[i, : seq_len - encoder_seq_len] = joint_attn_out[i, encoder_seq_len:seq_len]
 
             img_self_attn_out = self.img_self_attn(img_norm3_out, img_attention_mask, image_rotary_emb)
 
@@ -1058,7 +1052,7 @@ class BooguImageDoubleStreamTransformerBlock(nn.Module):
             img_norm3_out = self.img_norm3(img_hidden_states)
             instruct_norm1_out = self.instruct_norm1(instruct_hidden_states)
 
-            joint_attn_out = self.img_instruct_attn(
+            instruct_attn_out, img_attn_out = self.img_instruct_attn(
                 img_norm1_out,
                 instruct_norm1_out,
                 joint_attention_mask,
@@ -1066,12 +1060,6 @@ class BooguImageDoubleStreamTransformerBlock(nn.Module):
                 encoder_seq_lengths,
                 seq_lengths,
             )
-
-            instruct_attn_out = instruct_hidden_states.new_zeros(batch_size, L_instruct, self.hidden_size)
-            img_attn_out = img_hidden_states.new_zeros(batch_size, L_img, self.hidden_size)
-            for i, (encoder_seq_len, seq_len) in enumerate(zip(encoder_seq_lengths, seq_lengths)):
-                instruct_attn_out[i, :encoder_seq_len] = joint_attn_out[i, :encoder_seq_len]
-                img_attn_out[i, : seq_len - encoder_seq_len] = joint_attn_out[i, encoder_seq_len:seq_len]
 
             img_self_attn_out = self.img_self_attn(img_norm3_out, img_attention_mask, image_rotary_emb)
 
