@@ -25,7 +25,7 @@ import torch.nn.functional as F
 from diffusers.models.embeddings import Timesteps, get_1d_rotary_pos_embed
 from einops import rearrange, repeat
 from vllm.logger import init_logger
-from vllm.model_executor.layers.activation import SiluAndMul
+from vllm_omni.diffusion.layers.activation import SiluAndMul
 from vllm.model_executor.layers.linear import (
     MergedColumnParallelLinear,
     QKVParallelLinear,

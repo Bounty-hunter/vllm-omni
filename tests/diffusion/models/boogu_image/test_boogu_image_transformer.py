@@ -374,7 +374,7 @@ def test_feed_forward_activation_matches_eager_swiglu():
     exactly; bf16 CUDA tolerates single-rounding differences."""
     import torch.nn.functional as F
 
-    from vllm.model_executor.layers.activation import SiluAndMul
+    from vllm_omni.diffusion.layers.activation import SiluAndMul
 
     torch.manual_seed(0)
     gate = torch.randn(4, 37, 96)
