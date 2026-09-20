@@ -1897,7 +1897,7 @@ class BooguImageTransformer2DModel(nn.Module):
         import re as _re
 
         match = _re.fullmatch(
-            r"(?P<parent>.+\.double_stream_layers\.\d+)\.(?P<site>"
+            r"(?P<parent>(?:.+\.)*double_stream_layers\.\d+)\.(?P<site>"
             + "|".join(_DS_MODULATION_SITES)
             + r")\.linear\.(?P<kind>weight|bias)",
             name,

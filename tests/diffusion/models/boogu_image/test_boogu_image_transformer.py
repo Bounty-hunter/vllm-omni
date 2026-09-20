@@ -677,7 +677,7 @@ def _native_to_checkpoint_weights(name: str, param: torch.Tensor) -> list[tuple[
     # checkpoint matrices in ``_DS_MODULATION_SITES`` order.
     import re as _re
 
-    m = _re.fullmatch(r"(?P<parent>.+\.double_stream_layers\.\d+)\.ds_modulation\.(?P<kind>weight|bias)", name)
+    m = _re.fullmatch(r"(?P<parent>(?:.+\.)*double_stream_layers\.\d+)\.ds_modulation\.(?P<kind>weight|bias)", name)
     if m:
         from vllm_omni.diffusion.models.boogu_image.boogu_image_transformer import (
             _DS_MODULATION_SITES,
