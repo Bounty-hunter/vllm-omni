@@ -1050,7 +1050,7 @@ class BooguImageDoubleStreamTransformerBlock(nn.Module):
             raise ValueError("temb must be provided when modulation is enabled")
 
         if self.modulation:
-            fused, _ = self.ds_modulation(silu_temb if silu_temb is not None else F.silu(temb))
+            fused = self.ds_modulation(silu_temb if silu_temb is not None else F.silu(temb))
             img_mod1, img_mod2, img_mod3, instruct_mod1, instruct_mod2 = fused.split(
                 4 * self.hidden_size, dim=1
             )

@@ -412,7 +412,7 @@ def test_double_stream_modulation_fold_matches_five_linears():
 
     temb = torch.randn(2, min(HIDDEN_SIZE, 1024))
     silu = torch.nn.functional.silu(temb)
-    fused, _ = block.ds_modulation(silu)
+    fused = block.ds_modulation(silu)
     per_site = 4 * HIDDEN_SIZE
     for i, site in enumerate(_DS_MODULATION_SITES):
         # Reference: the checkpoint weight/bias for this site were folded into
