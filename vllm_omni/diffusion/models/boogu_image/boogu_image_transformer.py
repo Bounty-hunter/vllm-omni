@@ -1973,7 +1973,8 @@ class BooguImageTransformer2DModel(nn.Module):
                 param = params_dict[fused_name]
                 with torch.no_grad():
                     param[rows] = loaded_weight.to(device=param.device, dtype=param.dtype)
-                received = ds_fold_progress.setdefault(fused_name, {"weight": set(), "bias": set()})
+                base_name = fused_name.rsplit(".", 1)[0]
+                received = ds_fold_progress.setdefault(base_name, {"weight": set(), "bias": set()})
                 received[kind].add(site_idx)
                 loaded_params.add(fused_name)
                 continue
@@ -2009,11 +2010,13 @@ class BooguImageTransformer2DModel(nn.Module):
                 loaded_params.discard(name)
         # Same contract for the folded ds_modulation parameters: report the
         # fused parameter only when all five sites arrived for both weight and
-        # bias.
+        # bias. Progress is keyed by the module base name so the weight and
+        # bias tensors of one ds_modulation accumulate together.
         all_sites = set(range(len(_DS_MODULATION_SITES)))
-        for name, received in ds_fold_progress.items():
+        for base_name, received in ds_fold_progress.items():
             if received.get("weight", set()) != all_sites or received.get("bias", set()) != all_sites:
-                loaded_params.discard(name)
+                loaded_params.discard(f"{base_name}.weight")
+                loaded_params.discard(f"{base_name}.bias")
 
         unloaded_params = sorted(params_dict.keys() - loaded_params)
         if unloaded_params:
