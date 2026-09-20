@@ -304,6 +304,88 @@ def test_double_stream_block_shape():
     assert torch.isfinite(instruct_out).all()
 
 
+def _seeded_tiny_model():
+    """Two constructions under the same seed yield bit-identical parameters."""
+    from vllm_omni.diffusion.models.boogu_image.boogu_image_transformer import (
+        BooguImageTransformer2DModel,
+    )
+
+    torch.manual_seed(0)
+    model = BooguImageTransformer2DModel(od_config=_tiny_od_config())
+    _randomize_parameters(model)
+    return model.eval()
+
+
+def test_layout_cache_skips_step_invariant_recompute():
+    """Across denoise steps the batch geometry is unchanged, so the rotary
+    tables and padding masks must be built once and reused; a geometry change
+    must rebuild them."""
+    from vllm_omni.diffusion.models.boogu_image.boogu_image_transformer import (
+        BooguImageDoubleStreamRotaryPosEmbed,
+    )
+
+    model = _seeded_tiny_model()
+    calls = {"n": 0}
+    orig = model.rope_embedder.forward
+
+    def counting(*args, **kwargs):
+        calls["n"] += 1
+        return orig(*args, **kwargs)
+
+    model.rope_embedder.forward = counting
+
+    batch, in_ch, lh, lw, ilen, feat = 1, 4, 8, 8, 8, 32
+    mask = torch.ones(batch, ilen, dtype=torch.bool)
+    freqs = BooguImageDoubleStreamRotaryPosEmbed.get_freqs_real(model.axes_dim_rope, model.axes_lens, theta=10000)
+
+    def run(timestep, seq_len=ilen, seq_mask=None):
+        with torch.no_grad():
+            return model(
+                torch.randn(batch, in_ch, lh, lw),
+                torch.full((batch,), timestep),
+                torch.randn(batch, seq_len, feat),
+                freqs,
+                seq_mask if seq_mask is not None else mask,
+            )
+
+    run(0.5)
+    run(0.7)
+    assert calls["n"] == 1, "second step on identical geometry must hit the layout cache"
+
+    run(0.5, seq_len=ilen + 2, seq_mask=torch.ones(batch, ilen + 2, dtype=torch.bool))
+    assert calls["n"] == 2, "a geometry change must invalidate the layout cache"
+
+
+def test_layout_cache_bit_exact_vs_fresh_compute():
+    """A cached-layout forward must produce bit-identical outputs to one that
+    rebuilds the layout every step, across the multi-step denoise pattern."""
+    from vllm_omni.diffusion.models.boogu_image.boogu_image_transformer import (
+        BooguImageDoubleStreamRotaryPosEmbed,
+    )
+
+    fresh = _seeded_tiny_model()
+    fresh._layout_cache_capacity = 0  # never retain: recompute every step
+    cached = _seeded_tiny_model()
+
+    batch, in_ch, lh, lw, ilen, feat = 2, 4, 8, 8, 8, 32
+    mask = torch.ones(batch, ilen, dtype=torch.bool)
+    mask[0, : 6] = False  # heterogeneous effective lengths
+    freqs = BooguImageDoubleStreamRotaryPosEmbed.get_freqs_real(
+        cached.axes_dim_rope, cached.axes_lens, theta=10000
+    )
+    ref = [[torch.randn(in_ch, 6, 10)]] * batch  # editing path, constant ref
+
+    for step, timestep in enumerate((0.9, 0.5, 0.1)):
+        gen = torch.Generator().manual_seed(100 + step)
+        latents = torch.randn(batch, in_ch, lh, lw, generator=gen)
+        instruct = torch.randn(batch, ilen, feat, generator=gen)
+        t = torch.full((batch,), timestep)
+        with torch.no_grad():
+            out_fresh = fresh(latents, t, instruct, freqs, mask, ref_image_hidden_states=ref)
+            out_cached = cached(latents, t, instruct, freqs, mask, ref_image_hidden_states=ref)
+        assert torch.equal(out_fresh, out_cached), f"step {step} diverged"
+
+
 def test_transformer_instantiates():
     from vllm_omni.diffusion.models.boogu_image.boogu_image_transformer import (
         BooguImageTransformer2DModel,
