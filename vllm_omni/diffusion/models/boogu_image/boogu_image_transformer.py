@@ -1968,10 +1968,11 @@ class BooguImageTransformer2DModel(nn.Module):
                 if fused_name not in params_dict:
                     logger.warning("Skipping unexpected checkpoint weight %s", original_name)
                     continue
+                # params_dict[fused_name] is the weight/bias Parameter
+                # itself (the name already carries the .weight/.bias suffix).
                 param = params_dict[fused_name]
-                target = param.bias if kind == "bias" else param.weight
                 with torch.no_grad():
-                    target[rows] = loaded_weight.to(target.dtype, target.device)
+                    param[rows] = loaded_weight.to(param.dtype, param.device)
                 received = ds_fold_progress.setdefault(fused_name, {"weight": set(), "bias": set()})
                 received[kind].add(site_idx)
                 loaded_params.add(fused_name)
