@@ -368,6 +368,62 @@ def _seeded_tiny_model():
     return model.eval()
 
 
+def test_feed_forward_activation_matches_eager_swiglu():
+    """SiluAndMul replaces the eager ``F.silu(x.float()).to(dtype) * y``
+    chain. On CPU (native fallback) at fp32 the two formulations agree
+    exactly; bf16 CUDA tolerates single-rounding differences."""
+    import torch.nn.functional as F
+
+    from vllm.model_executor.layers.activation import SiluAndMul
+
+    torch.manual_seed(0)
+    gate = torch.randn(4, 37, 96)
+    up = torch.randn(4, 37, 96)
+    act = SiluAndMul()
+    fused = act(torch.cat((gate, up), dim=-1))
+    eager = F.silu(gate) * up
+    torch.testing.assert_close(fused, eager)
+
+    bf = act(torch.cat((gate, up), dim=-1).to(torch.bfloat16)).float()
+    eager_bf = (F.silu(gate.to(torch.bfloat16).float()).to(torch.bfloat16) * up.to(torch.bfloat16)).float()
+    torch.testing.assert_close(bf, eager_bf, rtol=1e-2, atol=1e-2)
+
+
+def test_double_stream_modulation_fold_matches_five_linears():
+    """The fused ds_modulation GEMM produces the same per-site vectors as the
+    five checkpoint matrices applied separately (row-block concatenation is
+    exact; only the GEMM's internal tiling can differ)."""
+    from vllm_omni.diffusion.models.boogu_image.boogu_image_transformer import (
+        _DS_MODULATION_SITES,
+        BooguImageDoubleStreamTransformerBlock,
+    )
+
+    torch.manual_seed(0)
+    block = BooguImageDoubleStreamTransformerBlock(
+        dim=HIDDEN_SIZE,
+        num_attention_heads=NUM_HEADS,
+        num_kv_heads=NUM_KV_HEADS,
+        multiple_of=MULTIPLE_OF,
+        ffn_dim_multiplier=None,
+        norm_eps=NORM_EPS,
+        modulation=True,
+    )
+    _randomize_parameters(block)
+
+    temb = torch.randn(2, min(HIDDEN_SIZE, 1024))
+    silu = torch.nn.functional.silu(temb)
+    fused, _ = block.ds_modulation(silu)
+    per_site = 4 * HIDDEN_SIZE
+    for i, site in enumerate(_DS_MODULATION_SITES):
+        # Reference: the checkpoint weight/bias for this site were folded into
+        # rows [i*per_site, (i+1)*per_site) by load_weights; applying the same
+        # rows directly must give the same slice.
+        w = block.ds_modulation.weight[i * per_site : (i + 1) * per_site]
+        b = block.ds_modulation.bias[i * per_site : (i + 1) * per_site]
+        expected = torch.nn.functional.linear(silu, w, b)
+        torch.testing.assert_close(fused[:, i * per_site : (i + 1) * per_site], expected)
+
+
 def test_layout_cache_skips_step_invariant_recompute():
     """Across denoise steps the batch geometry is unchanged, so the rotary
     tables and padding masks must be built once and reused; a geometry change
@@ -615,6 +671,22 @@ def _native_to_checkpoint_weights(name: str, param: torch.Tensor) -> list[tuple[
         return [
             (name.replace(".gate_up_proj.", ".linear_1."), param[:inner]),
             (name.replace(".gate_up_proj.", ".linear_3."), param[inner:]),
+        ]
+
+    # Fused double-stream modulation fans out into the five per-site
+    # checkpoint matrices in ``_DS_MODULATION_SITES`` order.
+    import re as _re
+
+    m = _re.fullmatch(r"(?P<parent>.+\.double_stream_layers\.\d+)\.ds_modulation\.(?P<kind>weight|bias)", name)
+    if m:
+        from vllm_omni.diffusion.models.boogu_image.boogu_image_transformer import (
+            _DS_MODULATION_SITES,
+        )
+
+        per_site = param.shape[0] // len(_DS_MODULATION_SITES)
+        return [
+            (f"{m.group('parent')}.{site}.linear.{m.group('kind')}", param[i * per_site : (i + 1) * per_site])
+            for i, site in enumerate(_DS_MODULATION_SITES)
         ]
 
     # Default: 1:1 with the existing diffusers name promotions.

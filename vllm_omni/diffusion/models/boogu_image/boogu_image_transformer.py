@@ -25,6 +25,7 @@ import torch.nn.functional as F
 from diffusers.models.embeddings import Timesteps, get_1d_rotary_pos_embed
 from einops import rearrange, repeat
 from vllm.logger import init_logger
+from vllm.model_executor.layers.activation import SiluAndMul
 from vllm.model_executor.layers.linear import (
     MergedColumnParallelLinear,
     QKVParallelLinear,
@@ -169,10 +170,6 @@ def _qk_norm_rope(
     return query.to(dtype), key.to(dtype)
 
 
-def swiglu(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-    return F.silu(x.float(), inplace=False).to(x.dtype) * y
-
-
 class TimestepEmbedding(nn.Module):
     def __init__(self, in_channels: int, time_embed_dim: int) -> None:
         super().__init__()
@@ -185,7 +182,15 @@ class TimestepEmbedding(nn.Module):
 
 
 class LuminaRMSNormZero(nn.Module):
-    """AdaRMS modulation: projects `temb` into scale/gate terms."""
+    """AdaRMS modulation: projects `temb` into scale/gate terms.
+
+    The projection input is always ``silu(temb)``; callers that share one
+    ``silu(temb)`` across a stack of blocks pass it as ``silu_emb`` instead of
+    the raw embedding. ``mod_vector`` bypasses the projection entirely with an
+    externally computed ``[B, 4*dim]`` slice (the double-stream blocks project
+    all five modulation sites with one fused GEMM, see
+    ``BooguImageDoubleStreamTransformerBlock``).
+    """
 
     def __init__(
         self,
@@ -193,23 +198,38 @@ class LuminaRMSNormZero(nn.Module):
         norm_eps: float,
         quant_config: "QuantizationConfig | None" = None,
         prefix: str = "",
+        with_linear: bool = True,
     ) -> None:
         super().__init__()
         self.silu = nn.SiLU()
-        self.linear = ReplicatedLinear(
-            min(embedding_dim, 1024),
-            4 * embedding_dim,
-            bias=True,
-            return_bias=False,
-            quant_config=quant_config,
-            prefix=_join_prefix(prefix, "linear"),
+        self.with_linear = with_linear
+        self.linear = (
+            ReplicatedLinear(
+                min(embedding_dim, 1024),
+                4 * embedding_dim,
+                bias=True,
+                return_bias=False,
+                quant_config=quant_config,
+                prefix=_join_prefix(prefix, "linear"),
+            )
+            if with_linear
+            else None
         )
         self.norm = RMSNorm(embedding_dim, eps=norm_eps)
 
     def forward(
-        self, x: torch.Tensor, emb: torch.Tensor
+        self,
+        x: torch.Tensor,
+        emb: torch.Tensor | None,
+        silu_emb: torch.Tensor | None = None,
+        mod_vector: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        emb = self.linear(self.silu(emb))
+        if mod_vector is None:
+            if not self.with_linear:
+                raise ValueError("linear-free LuminaRMSNormZero requires mod_vector")
+            emb = self.linear(silu_emb if silu_emb is not None else self.silu(emb))
+        else:
+            emb = mod_vector
         scale_msa, gate_msa, scale_mlp, gate_mlp = emb.chunk(4, dim=1)
         x = self.norm(x) * (1 + scale_msa[:, None])
         return x, gate_msa, scale_mlp, gate_mlp
@@ -267,8 +287,10 @@ class LuminaFeedForward(nn.Module):
     The ``gate`` and ``input`` projections are fused into a single
     ``MergedColumnParallelLinear`` (one GEMM instead of two), matching the
     ``gate_up_proj`` convention used by the Hunyuan Image 3 port. The SwiGLU
-    activation keeps its float32 computation for numerical parity with
-    upstream.
+    activation uses vLLM's fused ``SiluAndMul`` (one kernel, no fp32 cast
+    round-trip); the previous eager chain ``F.silu(x.float()).to(x.dtype)*y``
+    cost four kernels and two full-width dtype casts per call, which the
+    28-step denoise loop paid in every FFN of every block.
     """
 
     def __init__(
@@ -292,6 +314,7 @@ class LuminaFeedForward(nn.Module):
             quant_config=quant_config,
             prefix=_join_prefix(prefix, "gate_up_proj"),
         )
+        self.act = SiluAndMul()
         self.linear_2 = RowParallelLinear(
             inner_dim,
             dim,
@@ -302,8 +325,7 @@ class LuminaFeedForward(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         gate_up, _ = self.gate_up_proj(x)
-        h1, h2 = gate_up.chunk(2, dim=-1)
-        out, _ = self.linear_2(swiglu(h1, h2))
+        out, _ = self.linear_2(self.act(gate_up))
         return out
 
 
@@ -844,11 +866,14 @@ class BooguImageTransformerBlock(nn.Module):
         attention_mask: torch.Tensor | None,
         image_rotary_emb: RotaryEmbedding | None,
         temb: torch.Tensor | None = None,
+        silu_temb: torch.Tensor | None = None,
     ) -> torch.Tensor:
         if self.modulation:
             if temb is None:
                 raise ValueError("temb must be provided when modulation is enabled")
-            norm_hidden_states, gate_msa, scale_mlp, gate_mlp = self.norm1(hidden_states, temb)
+            norm_hidden_states, gate_msa, scale_mlp, gate_mlp = self.norm1(
+                hidden_states, temb, silu_emb=silu_temb
+            )
             attn_output = self.attn(norm_hidden_states, attention_mask, image_rotary_emb)
             hidden_states = hidden_states + gate_msa.unsqueeze(1).tanh() * self.norm2(attn_output)
             mlp_output = self.feed_forward(self.ffn_norm1(hidden_states) * (1 + scale_mlp.unsqueeze(1)))
@@ -927,24 +952,42 @@ class BooguImageDoubleStreamTransformerBlock(nn.Module):
         )
 
         if modulation:
-            # Image modulation terms: cross-attn, MLP, self-attn.
+            # Image modulation terms: cross-attn, MLP, self-attn. Linear-free:
+            # all five sites share one fused projection (``ds_modulation``)
+            # computed once per block from ``silu(temb)`` — five separate
+            # [1024 -> 4*dim] GEMMs each contributed a host-bound launch per
+            # denoise step.
             self.img_norm1 = LuminaRMSNormZero(
                 embedding_dim=dim,
                 norm_eps=norm_eps,
                 quant_config=quant_config,
                 prefix=_join_prefix(prefix, "img_norm1"),
+                with_linear=False,
             )
             self.img_norm2 = LuminaRMSNormZero(
                 embedding_dim=dim,
                 norm_eps=norm_eps,
                 quant_config=quant_config,
                 prefix=_join_prefix(prefix, "img_norm2"),
+                with_linear=False,
             )
             self.img_norm3 = LuminaRMSNormZero(
                 embedding_dim=dim,
                 norm_eps=norm_eps,
                 quant_config=quant_config,
                 prefix=_join_prefix(prefix, "img_norm3"),
+                with_linear=False,
+            )
+            # One GEMM producing every modulation vector of this block, in the
+            # fixed site order of ``_DS_MODULATION_SITES`` (consumed by
+            # ``load_weights`` to fold the five checkpoint matrices in).
+            self.ds_modulation = ReplicatedLinear(
+                min(dim, 1024),
+                5 * 4 * dim,
+                bias=True,
+                return_bias=False,
+                quant_config=quant_config,
+                prefix=_join_prefix(prefix, "ds_modulation"),
             )
         else:
             self.img_norm1 = RMSNorm(dim, eps=norm_eps)
@@ -966,18 +1009,21 @@ class BooguImageDoubleStreamTransformerBlock(nn.Module):
         )
 
         if modulation:
-            # Instruction modulation terms: cross-attn, MLP.
+            # Instruction modulation terms: cross-attn, MLP. Linear-free like
+            # the image sites above.
             self.instruct_norm1 = LuminaRMSNormZero(
                 embedding_dim=dim,
                 norm_eps=norm_eps,
                 quant_config=quant_config,
                 prefix=_join_prefix(prefix, "instruct_norm1"),
+                with_linear=False,
             )
             self.instruct_norm2 = LuminaRMSNormZero(
                 embedding_dim=dim,
                 norm_eps=norm_eps,
                 quant_config=quant_config,
                 prefix=_join_prefix(prefix, "instruct_norm2"),
+                with_linear=False,
             )
         else:
             self.instruct_norm1 = RMSNorm(dim, eps=norm_eps)
@@ -996,6 +1042,7 @@ class BooguImageDoubleStreamTransformerBlock(nn.Module):
         image_rotary_emb: RotaryEmbedding | None,  # Each tensor is [B, L_img, head_dim].
         rotary_emb: RotaryEmbedding | None,  # Each tensor is [B, L_total, head_dim].
         temb: torch.Tensor | None = None,
+        silu_temb: torch.Tensor | None = None,
         encoder_seq_lengths: list[int] | None = None,
         seq_lengths: list[int] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -1003,17 +1050,25 @@ class BooguImageDoubleStreamTransformerBlock(nn.Module):
             raise ValueError("temb must be provided when modulation is enabled")
 
         if self.modulation:
-            img_norm1_out, img_gate_msa, img_scale_mlp, img_gate_mlp = self.img_norm1(img_hidden_states, temb)
-            img_norm2_out, img_shift_mlp, _, _ = self.img_norm2(img_hidden_states, temb)
-            img_norm3_out, img_gate_self, _, _ = self.img_norm3(img_hidden_states, temb)
+            fused, _ = self.ds_modulation(silu_temb if silu_temb is not None else F.silu(temb))
+            img_mod1, img_mod2, img_mod3, instruct_mod1, instruct_mod2 = fused.split(
+                4 * self.hidden_size, dim=1
+            )
+            img_norm1_out, img_gate_msa, img_scale_mlp, img_gate_mlp = self.img_norm1(
+                img_hidden_states, None, mod_vector=img_mod1
+            )
+            img_norm2_out, img_shift_mlp, _, _ = self.img_norm2(img_hidden_states, None, mod_vector=img_mod2)
+            img_norm3_out, img_gate_self, _, _ = self.img_norm3(img_hidden_states, None, mod_vector=img_mod3)
 
             (
                 instruct_norm1_out,
                 instruct_gate_msa,
                 instruct_scale_mlp,
                 instruct_gate_mlp,
-            ) = self.instruct_norm1(instruct_hidden_states, temb)
-            instruct_norm2_out, instruct_shift_mlp, _, _ = self.instruct_norm2(instruct_hidden_states, temb)
+            ) = self.instruct_norm1(instruct_hidden_states, None, mod_vector=instruct_mod1)
+            instruct_norm2_out, instruct_shift_mlp, _, _ = self.instruct_norm2(
+                instruct_hidden_states, None, mod_vector=instruct_mod2
+            )
 
             instruct_attn_out, img_attn_out = self.img_instruct_attn(
                 img_norm1_out,
@@ -1124,6 +1179,19 @@ _BOOGU_STACKED_PARAMS_MAPPING = (
     (".img_feed_forward.gate_up_proj.", ".img_feed_forward.linear_3.", 1),
     (".instruct_feed_forward.gate_up_proj.", ".instruct_feed_forward.linear_1.", 0),
     (".instruct_feed_forward.gate_up_proj.", ".instruct_feed_forward.linear_3.", 1),
+)
+
+# Site order of the double-stream blocks' fused modulation projection
+# (``ds_modulation``): site i owns output rows [i*4*dim, (i+1)*4*dim).
+# ``load_weights`` folds the five checkpoint matrices into the fused
+# parameter in this order; ``BooguImageDoubleStreamTransformerBlock`` splits
+# the fused output in the same order.
+_DS_MODULATION_SITES = (
+    "img_norm1",
+    "img_norm2",
+    "img_norm3",
+    "instruct_norm1",
+    "instruct_norm2",
 )
 
 
@@ -1498,6 +1566,7 @@ class BooguImageTransformer2DModel(nn.Module):
         l_effective_ref_img_len: list[list[int]],
         l_effective_img_len: list[int],
         temb: torch.Tensor,
+        silu_temb: torch.Tensor | None = None,
     ):
         """Embed image patches and run the refiner blocks.
 
@@ -1523,7 +1592,7 @@ class BooguImageTransformer2DModel(nn.Module):
                 shift += ref_img_len
 
         for layer in self.noise_refiner:
-            hidden_states = layer(hidden_states, padded_img_mask, noise_rotary_emb, temb)
+            hidden_states = layer(hidden_states, padded_img_mask, noise_rotary_emb, temb, silu_temb=silu_temb)
 
         flat_l_effective_ref_img_len = list(itertools.chain(*l_effective_ref_img_len))
         num_ref_images = len(flat_l_effective_ref_img_len)
@@ -1550,6 +1619,15 @@ class BooguImageTransformer2DModel(nn.Module):
             )
             batch_temb = temb.new_zeros(num_ref_images, *temb.shape[1:], dtype=temb.dtype)
 
+            # The model-level silu_temb is reusable only when the flattened
+            # per-reference batch expands temb one-to-one (exactly one
+            # reference per sample); otherwise recompute on the expanded rows.
+            one_ref_per_sample = all(len(refs) == 1 for refs in l_effective_ref_img_len)
+            if silu_temb is not None and one_ref_per_sample and num_ref_images == silu_temb.shape[0]:
+                batch_silu_temb = silu_temb
+            else:
+                batch_silu_temb = F.silu(batch_temb)
+
             # Flatten reference images into a temporary batch.
             idx = 0
             for i in range(batch_size):
@@ -1572,7 +1650,11 @@ class BooguImageTransformer2DModel(nn.Module):
 
             for layer in self.ref_image_refiner:
                 batch_ref_image_hidden_states = layer(
-                    batch_ref_image_hidden_states, batch_ref_img_mask, batch_ref_img_rotary_emb, batch_temb
+                    batch_ref_image_hidden_states,
+                    batch_ref_img_mask,
+                    batch_ref_img_rotary_emb,
+                    batch_temb,
+                    silu_temb=batch_silu_temb,
                 )
 
             # Restore reference-image sequence layout.
@@ -1618,10 +1700,13 @@ class BooguImageTransformer2DModel(nn.Module):
 
         device = hidden_states[0].device
 
-        # Timestep and instruction embedding.
+        # Timestep and instruction embedding. ``silu(temb)`` is the input of
+        # every modulation projection in the stack; compute it once instead of
+        # once per block.
         temb, instruction_hidden_states = self.time_caption_embed(
             timestep, instruction_hidden_states, hidden_states[0].dtype
         )
+        silu_temb = F.silu(temb)
 
         # Flatten and pad token sequences.
         (
@@ -1741,6 +1826,7 @@ class BooguImageTransformer2DModel(nn.Module):
             l_effective_ref_img_len,
             l_effective_img_len,
             temb,
+            silu_temb,
         )
 
         instruct_hidden_states = instruction_hidden_states
@@ -1757,8 +1843,9 @@ class BooguImageTransformer2DModel(nn.Module):
                     combined_img_rotary_emb,
                     rotary_emb,
                     temb,
-                    encoder_seq_lengths,
-                    seq_lengths,
+                    silu_temb=silu_temb,
+                    encoder_seq_lengths=encoder_seq_lengths,
+                    seq_lengths=seq_lengths,
                 )
 
         # Fuse streams to joint sequence.
@@ -1770,7 +1857,9 @@ class BooguImageTransformer2DModel(nn.Module):
         # Single-stream stage.
         hidden_states = joint_hidden_states
         for layer in self.single_stream_layers:
-            hidden_states = layer(hidden_states, joint_attention_mask, rotary_emb, temb)
+            hidden_states = layer(
+                hidden_states, joint_attention_mask, rotary_emb, temb, silu_temb=silu_temb
+            )
 
         # Output projection.
         hidden_states = self.norm_out(hidden_states, temb)
@@ -1795,6 +1884,32 @@ class BooguImageTransformer2DModel(nn.Module):
             output = torch.stack(output, dim=0)
 
         return output
+
+    def _match_ds_modulation_site(
+        self, name: str
+    ) -> tuple[str, slice, str, int] | None:
+        """Map a per-site modulation checkpoint name onto its fused slice.
+
+        Returns ``(fused_param_name, row_slice, "weight"|"bias", site_idx)``
+        for ``<parent>.{img,instruct}_norm{1,2,3}.linear.{weight,bias}`` names
+        under a ``double_stream_layers.<i>`` parent, else ``None``.
+        """
+        import re as _re
+
+        match = _re.fullmatch(
+            r"(?P<parent>.+\.double_stream_layers\.\d+)\.(?P<site>"
+            + "|".join(_DS_MODULATION_SITES)
+            + r")\.linear\.(?P<kind>weight|bias)",
+            name,
+        )
+        if match is None:
+            return None
+        site = match.group("site")
+        kind = match.group("kind")
+        site_idx = _DS_MODULATION_SITES.index(site)
+        rows_per_site = 4 * self.hidden_size
+        rows = slice(site_idx * rows_per_site, (site_idx + 1) * rows_per_site)
+        return f"{match.group('parent')}.ds_modulation.{kind}", rows, kind, site_idx
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         """Load diffusers-named checkpoint weights into the native module.
@@ -1831,6 +1946,8 @@ class BooguImageTransformer2DModel(nn.Module):
         loaded_params: set[str] = set()
         # Fused parameter -> (mapping entry that produced it, shards received).
         fused_params: dict[str, tuple[str, set[str | int]]] = {}
+        # ds_modulation fused params -> per-kind site indices received.
+        ds_fold_progress: dict[str, dict[str, set[int]]] = {}
 
         for name, loaded_weight in weights:
             original_name = name
@@ -1838,6 +1955,27 @@ class BooguImageTransformer2DModel(nn.Module):
                 name = name.replace(".img_instruct_attn.processor.", ".img_instruct_attn.")
             if ".to_out.0." in name:
                 name = name.replace(".to_out.0.", ".to_out.")
+
+            # Double-stream modulation fold: the five per-site checkpoint
+            # matrices (``{img,instruct}_norm{1,2,3}.linear.*``) assemble the
+            # fused ``ds_modulation`` parameter, each site owning one
+            # ``[4*dim]`` row block in the fixed ``_DS_MODULATION_SITES``
+            # order. Handled before the stacked mapping (whose shard-id
+            # contract covers only q/k/v and gate/up).
+            ds_fold = self._match_ds_modulation_site(name)
+            if ds_fold is not None:
+                fused_name, rows, kind, site_idx = ds_fold
+                if fused_name not in params_dict:
+                    logger.warning("Skipping unexpected checkpoint weight %s", original_name)
+                    continue
+                param = params_dict[fused_name]
+                target = param.bias if kind == "bias" else param.weight
+                with torch.no_grad():
+                    target[rows] = loaded_weight.to(target.dtype, target.device)
+                received = ds_fold_progress.setdefault(fused_name, {"weight": set(), "bias": set()})
+                received[kind].add(site_idx)
+                loaded_params.add(fused_name)
+                continue
 
             shard_id: str | int | None = None
             matched_entry: str | None = None
@@ -1867,6 +2005,13 @@ class BooguImageTransformer2DModel(nn.Module):
         # reports it as missing instead of accepting a half-filled parameter.
         for name, (matched_entry, received) in fused_params.items():
             if received != expected_shards[matched_entry]:
+                loaded_params.discard(name)
+        # Same contract for the folded ds_modulation parameters: report the
+        # fused parameter only when all five sites arrived for both weight and
+        # bias.
+        all_sites = set(range(len(_DS_MODULATION_SITES)))
+        for name, received in ds_fold_progress.items():
+            if received.get("weight", set()) != all_sites or received.get("bias", set()) != all_sites:
                 loaded_params.discard(name)
 
         unloaded_params = sorted(params_dict.keys() - loaded_params)
