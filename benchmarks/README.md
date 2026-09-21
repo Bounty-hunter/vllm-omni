@@ -4,6 +4,11 @@ This directory contains benchmark suites for evaluating different model families
 
 ## Benchmark families
 
+### [Qwen2.5-Omni](qwen2_5_omni/README.md) — Embedding Wrapper Latency
+
+CPU-observed A/B timings for redundant text embedding removal, with real checkpoint
+embeddings, warmup, paired blocks, and embedding call-count validation.
+
 ### [TTS](tts/README.md) — Text-to-Speech
 
 Model-agnostic serving benchmarks for TTS models, including Qwen3-TTS and VoxCPM2.
@@ -27,6 +32,14 @@ Benchmarks for GLM-Image performance across HuggingFace baseline, vLLM-Omni offl
 - **Layout**: `glm_image/huggingface/` (HF baseline), `glm_image/vllm-omni/` (offline inference), `glm_image/benchmark_glm_image.py` (online serving)
 - **Tasks**: text-to-image and image-to-image
 - **Key metrics**: request/image throughput, latency percentiles, optional per-stage pipeline timings
+
+### [LingBot-Video](lingbot_video/README.md) — Dense and MoE Parity
+
+Manual cross-runtime validation for the dense LingBot-Video pipeline and the
+LingBot-Video MoE transformer.
+
+- **Dense pipeline**: decoded-video MAE, MSE, PSNR, latency, and optional steady-state timings
+- **MoE transformer**: bitwise router, sparse-block, shared-expert, and full-transformer parity
 
 ### [Distributed](distributed/omni_connectors/README.md) — RDMA Connector Testing
 

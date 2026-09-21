@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 
 """
 Unit tests for WorkerWrapperBase class.
@@ -12,6 +12,7 @@ This module tests the WorkerWrapperBase implementation:
 - Dynamic worker class extension
 """
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -99,6 +100,28 @@ class TestWorkerWrapperBaseInitialization:
             skip_load_model=False,
         )
 
+    def test_custom_pipeline_args_without_pipeline_class_loads_normally(self, mocker: MockerFixture, mock_od_config):
+        """Test native pipeline args do not trigger custom pipeline re-initialization."""
+        custom_args = {"components_path": "/tmp/anima-components"}
+        mock_worker_init = mocker.patch.object(DiffusionWorker, "__init__", return_value=None)
+
+        wrapper = WorkerWrapperBase(
+            gpu_id=0,
+            od_config=mock_od_config,
+            base_worker_class=DiffusionWorker,
+            custom_pipeline_args=custom_args,
+        )
+
+        assert wrapper.worker_extension_cls is None
+        assert CustomPipelineWorkerExtension not in wrapper.worker.__class__.__bases__
+        assert not hasattr(wrapper.worker, "re_init_pipeline")
+        mock_worker_init.assert_called_once_with(
+            local_rank=0,
+            rank=0,
+            od_config=mock_od_config,
+            skip_load_model=False,
+        )
+
 
 # -------------------------------------------------------------------------
 # Tests: Worker Extension Functionality
@@ -161,19 +184,6 @@ class TestWorkerWrapperBaseExtension:
 class TestWorkerWrapperBaseDelegation:
     """Test WorkerWrapperBase delegation to wrapped worker."""
 
-    def test_generate_delegation(self, mocker: MockerFixture, mock_od_config):
-        """Test that generate() delegates to worker.generate()."""
-        mocker.patch.object(DiffusionWorker, "__init__", return_value=None)
-        wrapper = WorkerWrapperBase(gpu_id=0, od_config=mock_od_config, base_worker_class=DiffusionWorker)
-        mock_output = mocker.Mock()
-        wrapper.worker.generate = mocker.Mock(return_value=mock_output)
-
-        mock_requests = [mocker.Mock()]
-        result = wrapper.generate(mock_requests)
-
-        wrapper.worker.generate.assert_called_once_with(mock_requests)
-        assert result == mock_output
-
     def test_execute_model_delegation(self, mocker: MockerFixture, mock_od_config):
         """Test that execute_model() delegates to worker.execute_model()."""
         mocker.patch.object(DiffusionWorker, "__init__", return_value=None)
@@ -181,24 +191,11 @@ class TestWorkerWrapperBaseDelegation:
         mock_output = mocker.Mock()
         wrapper.worker.execute_model = mocker.Mock(return_value=mock_output)
 
-        mock_reqs = [mocker.Mock()]
-        result = wrapper.execute_model(mock_reqs, mock_od_config)
+        mock_req = mocker.Mock()
+        result = wrapper.execute_model(mock_req, mock_od_config)
 
-        wrapper.worker.execute_model.assert_called_once_with(mock_reqs, mock_od_config, kv_prefetch_jobs=None)
+        wrapper.worker.execute_model.assert_called_once_with(mock_req, mock_od_config, kv_prefetch_job=None)
         assert result == mock_output
-
-    def test_load_weights_delegation(self, mocker: MockerFixture, mock_od_config):
-        """Test that load_weights() delegates to worker.load_weights()."""
-        mocker.patch.object(DiffusionWorker, "__init__", return_value=None)
-        wrapper = WorkerWrapperBase(gpu_id=0, od_config=mock_od_config, base_worker_class=DiffusionWorker)
-        expected_result = {"weight1", "weight2"}
-        wrapper.worker.load_weights = mocker.Mock(return_value=expected_result)
-
-        mock_weights = [("weight1", mocker.Mock()), ("weight2", mocker.Mock())]
-        result = wrapper.load_weights(mock_weights)
-
-        wrapper.worker.load_weights.assert_called_once_with(mock_weights)
-        assert result == expected_result
 
     def test_sleep_delegation(self, mocker: MockerFixture, mock_od_config):
         """Test that sleep() delegates to worker.sleep()."""
@@ -229,6 +226,27 @@ class TestWorkerWrapperBaseDelegation:
         result = wrapper.shutdown()
         wrapper.worker.shutdown.assert_called_once()
         assert result is None
+
+    def test_worker_shutdown_disables_offloader_before_distributed_teardown(self, mocker: MockerFixture):
+        events: list[str] = []
+        offload_backend = mocker.Mock()
+        offload_backend.disable.side_effect = lambda: events.append("offload")
+        kv_manager = mocker.Mock()
+        kv_manager.shutdown_prefetch.side_effect = lambda: events.append("kv")
+        destroy = mocker.patch(
+            "vllm_omni.diffusion.worker.diffusion_worker.destroy_distributed_env",
+            side_effect=lambda: events.append("distributed"),
+        )
+        worker = DiffusionWorker.__new__(DiffusionWorker)
+        worker.model_runner = SimpleNamespace(
+            offload_backend=offload_backend,
+            kv_transfer_manager=kv_manager,
+        )
+
+        worker.shutdown()
+
+        assert events == ["offload", "kv", "distributed"]
+        destroy.assert_called_once_with()
 
 
 # -------------------------------------------------------------------------
@@ -480,6 +498,12 @@ class TestCustomPipelineWorkerExtension:
             custom_pipeline_args=custom_args,
         )
 
+        mock_worker_class.assert_called_once_with(
+            local_rank=0,
+            rank=0,
+            od_config=mock_od_config,
+            skip_load_model=True,
+        )
         # Verify re_init_pipeline was called with custom_pipeline_args
         mock_worker_instance.re_init_pipeline.assert_called_once_with(custom_args)
 

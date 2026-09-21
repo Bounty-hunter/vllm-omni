@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 #
 # Shared helpers for tools/run_*_jobs.sh (source this file; do not execute).
 #
@@ -15,7 +15,7 @@
 # metadata.
 
 if [[ -n "${_RUN_JOBS_COMMON_LOADED:-}" ]]; then
-  return 0 2>/dev/null || exit 0
+  return 0
 fi
 _RUN_JOBS_COMMON_LOADED=1
 
@@ -181,7 +181,7 @@ _run_jobs_print_timing_summary() {
 # tools/run_merge_jobs.sh). Nightly does not use this entrypoint.
 #
 # Entry scripts must set before calling run_yaml_ci_jobs_main:
-#   BUILDKITE_REL      - e.g. .buildkite/test-ready.yml
+#   BUILDKITE_REL      - e.g. .buildkite/cuda/test-ready.yml
 #   DEFAULT_LOG_SUBDIR - e.g. ready_jobs
 # ---------------------------------------------------------------------------
 
@@ -246,8 +246,14 @@ _run_jobs_derive_repo_root_from_yml() {
   local yml="$1"
   local d
   d="$(cd "$(dirname "${yml}")" && pwd)"
-  [[ "$(basename "${d}")" == ".buildkite" ]] || return 1
-  printf '%s\n' "$(dirname "${d}")"
+  while [[ "${d}" != "/" ]]; do
+    if [[ "$(basename "${d}")" == ".buildkite" ]]; then
+      printf '%s\n' "$(dirname "${d}")"
+      return 0
+    fi
+    d="$(dirname "${d}")"
+  done
+  return 1
 }
 
 run_yaml_ci_jobs_main() {
