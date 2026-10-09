@@ -516,24 +516,51 @@ def test_composed_strategy_orders_ulysses_before_allgather(monkeypatch):
     assert strategy.name == "ulysses_allgather_kv"
 
 
-def test_composed_strategy_rejects_2d_key_mask():
-    sp_group = _MockComposedSPGroup(
-        rank=0,
-        allgather_world_size=2,
-        gather_chunks=[[torch.zeros(1, 2, 1, 1)] * 2, [torch.zeros(1, 2, 1, 1)] * 2],
-    )
-    strategy = UlyssesAllGatherKVParallelAttention(sp_group, scatter_idx=2, gather_idx=1, use_sync=False)
-    metadata = AttentionMetadata(attn_mask=torch.ones(1, 8, dtype=torch.bool))
+def test_composed_strategy_normalizes_image_only_mask(monkeypatch):
+    """A 2D image-only mask must cover the gathered *global* image keys.
 
-    with pytest.raises(NotImplementedError, match="2D image key mask"):
-        strategy.pre_attention(torch.zeros(1, 2, 4, 1), torch.zeros(1, 2, 4, 1), torch.zeros(1, 2, 4, 1), metadata)
+    With ``_merge_joint_attn_mask`` owning all 2D key-mask handling there is
+    no blanket 2D rejection anymore: the mask is validated against the
+    rebuilt global image layout and normalized in place. A shard-local or
+    stale-length mask fails closed.
+    """
+    region = 4
+    make = _composed_mask_mocks(monkeypatch, region=region, joint_len=1, joint_fields=())
+    query = torch.zeros(1, 2, 4, 1)
+
+    img_mask = torch.tensor([[True, True, False, True, True, True, True, True]])
+    _, strategy = make()
+    _, k_out, _, merged, _ = strategy.pre_attention(query, query, query, AttentionMetadata(attn_mask=img_mask))
+
+    assert k_out.shape[1] == 2 * region
+    assert merged.attn_mask is not None
+    assert merged.attn_mask.shape == (1, 2 * region)
+    assert merged.attn_mask.dtype == torch.bool
+    torch.testing.assert_close(merged.attn_mask, img_mask)
+
+    _, strategy = make()
+    with pytest.raises(ValueError, match="global image keys"):
+        strategy.pre_attention(
+            query, query, query, AttentionMetadata(attn_mask=torch.ones(1, 2 * region - 1, dtype=torch.bool))
+        )
 
 
-def _composed_mask_mocks(monkeypatch, *, rank: int = 1, region: int = 4, heads_local: int = 2, joint_len: int = 1):
+def _composed_mask_mocks(
+    monkeypatch,
+    *,
+    rank: int = 1,
+    region: int = 4,
+    heads_local: int = 2,
+    joint_len: int = 1,
+    joint_fields: tuple[str, ...] = ("query", "key", "value"),
+):
     """Wire the composed strategy to a fake Ulysses half and mocked gathers.
 
     Returns a factory building a fresh (sp_group, strategy) pair; each
     ``pre_attention`` call consumes one key-chunks and one value-chunks list.
+    ``joint_fields`` picks which joint tensors the deferred Ulysses records:
+    the default records all three, ``("key", "value")`` mimics cached-KV reuse
+    (empty joint query), and ``()`` records none.
     """
     head_dim = 1
 
@@ -544,11 +571,14 @@ def _composed_mask_mocks(monkeypatch, *, rank: int = 1, region: int = 4, heads_l
         return sp_group, UlyssesAllGatherKVParallelAttention(sp_group, scatter_idx=2, gather_idx=1, use_sync=False)
 
     def fake_pre_attention(self, query, key, value, attn_metadata, defer_joint=False):
-        joint = torch.ones(1, joint_len, heads_local, head_dim)
-        if attn_metadata is not None:
-            attn_metadata.joint_query = joint
-            attn_metadata.joint_key = joint
-            attn_metadata.joint_value = joint
+        if attn_metadata is not None and joint_fields:
+            joint = torch.ones(1, joint_len, heads_local, head_dim)
+            if "query" in joint_fields:
+                attn_metadata.joint_query = joint
+            if "key" in joint_fields:
+                attn_metadata.joint_key = joint
+            if "value" in joint_fields:
+                attn_metadata.joint_value = joint
         return (
             torch.zeros(1, region, heads_local, head_dim),
             torch.full((1, region, heads_local, head_dim), 10.0 + rank),
@@ -596,6 +626,102 @@ def test_composed_strategy_merges_joint_only_mask(monkeypatch):
     )
     assert not merged_rear.attn_mask[0, -1], "padding column must stay masked at the rear joint offset"
     assert bool(merged_rear.attn_mask[0, :-1].all())
+
+
+def test_composed_strategy_merges_joint_and_image_masks(monkeypatch):
+    """Both 2D masks merge in ``joint_strategy`` order, preserving both contents."""
+    region, joint_len = 4, 1
+    make = _composed_mask_mocks(monkeypatch, region=region, joint_len=joint_len)
+    query = torch.zeros(1, 2, 4, 1)
+    joint_mask = torch.tensor([[False]])  # one padded text token
+    img_mask = torch.ones(1, 2 * region, dtype=torch.bool)
+    img_mask[0, 3] = False  # one masked image key
+
+    _, strategy = make()
+    _, _, _, merged_front, _ = strategy.pre_attention(
+        query,
+        query,
+        query,
+        AttentionMetadata(attn_mask=img_mask.clone(), joint_attn_mask=joint_mask.clone(), joint_strategy="front"),
+    )
+    assert merged_front.attn_mask.shape == (1, joint_len + 2 * region)
+    torch.testing.assert_close(merged_front.attn_mask, torch.cat([joint_mask, img_mask], dim=1))
+
+    _, strategy = make()
+    _, _, _, merged_rear, _ = strategy.pre_attention(
+        query,
+        query,
+        query,
+        AttentionMetadata(attn_mask=img_mask.clone(), joint_attn_mask=joint_mask.clone(), joint_strategy="rear"),
+    )
+    torch.testing.assert_close(merged_rear.attn_mask, torch.cat([img_mask, joint_mask], dim=1))
+
+
+def test_composed_strategy_sizes_joint_mask_from_joint_key(monkeypatch):
+    """Cached-KV reuse: ``joint_query`` may be empty, but joint K/V still gather.
+
+    The joint mask segment must be sized from ``joint_key`` (1 key here), not
+    from the absent joint query, and the image side must be True-filled to the
+    gathered global image length.
+    """
+    region, joint_len = 4, 1
+    make = _composed_mask_mocks(monkeypatch, region=region, joint_len=joint_len, joint_fields=("key", "value"))
+    query = torch.zeros(1, 2, 4, 1)
+    joint_mask = torch.tensor([[False]])
+
+    _, strategy = make()
+    q_out, k_out, _, merged, _ = strategy.pre_attention(
+        query, query, query, AttentionMetadata(attn_mask=None, joint_attn_mask=joint_mask, joint_strategy="front")
+    )
+    assert q_out.shape[1] == region, "no joint query rows when joint_query is absent"
+    assert k_out.shape[1] == joint_len + 2 * region, "joint keys still participate as keys"
+    assert merged.attn_mask is not None
+    assert merged.attn_mask.shape == (1, joint_len + 2 * region)
+    assert not merged.attn_mask[0, 0]
+    assert bool(merged.attn_mask[0, 1:].all())
+
+
+def test_composed_strategy_rejects_inconsistent_2d_masks(monkeypatch):
+    """Shape mismatches fail closed with the expected layout in the message."""
+    region, joint_len = 4, 1
+    make = _composed_mask_mocks(monkeypatch, region=region, joint_len=joint_len)
+    query = torch.zeros(1, 2, 4, 1)
+
+    # Image mask shorter than the gathered global image keys (e.g. a stale
+    # shard-local mask covering only this rank's own region).
+    _, strategy = make()
+    with pytest.raises(ValueError, match="global image keys"):
+        strategy.pre_attention(
+            query, query, query, AttentionMetadata(attn_mask=torch.ones(1, region, dtype=torch.bool))
+        )
+
+    # Joint mask length must match the joint keys.
+    _, strategy = make()
+    with pytest.raises(ValueError, match="joint_attn_mask inconsistent"):
+        strategy.pre_attention(
+            query,
+            query,
+            query,
+            AttentionMetadata(attn_mask=None, joint_attn_mask=torch.ones(1, joint_len + 1, dtype=torch.bool)),
+        )
+
+    # Batch dimension must match the keys.
+    _, strategy = make()
+    with pytest.raises(ValueError, match="global image keys"):
+        strategy.pre_attention(
+            query, query, query, AttentionMetadata(attn_mask=torch.ones(2, 2 * region, dtype=torch.bool))
+        )
+
+
+def test_composed_strategy_rejects_joint_mask_without_joint_kv(monkeypatch):
+    """A joint mask without joint K/V describes keys that never gather."""
+    make = _composed_mask_mocks(monkeypatch, region=4, joint_len=1, joint_fields=())
+    _, strategy = make()
+    query = torch.zeros(1, 2, 4, 1)
+    metadata = AttentionMetadata(attn_mask=None, joint_attn_mask=torch.ones(1, 1, dtype=torch.bool))
+
+    with pytest.raises(ValueError, match="without joint K/V"):
+        strategy.pre_attention(query, query, query, metadata)
 
 
 def test_composed_strategy_rejects_4d_mask_with_joint_mask(monkeypatch):

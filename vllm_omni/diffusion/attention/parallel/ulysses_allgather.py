@@ -48,11 +48,13 @@ class UlyssesAllGatherKVParallelAttention(AllGatherKVParallelAttention):
     re-attaches the joint tensors -- attaching them before the gather would
     replicate them once per AllGather rank.
 
-    Fails closed on: ``ring_degree > 1``, causal attention, 2D image key
-    masks, a 2D ``joint_attn_mask`` combined with a non-2D ``attn_mask``, and
-    uneven per-rank region lengths. A 2D ``joint_attn_mask`` (text padding,
-    e.g. Qwen-Image with unequal prompt lengths) is merged into the key mask
-    after the gather, in ``_merge_joint_attn_mask``.
+    Fails closed on: ``ring_degree > 1``, causal attention, a non-2D
+    ``joint_attn_mask``, a 2D ``joint_attn_mask`` combined with a 4D
+    ``attn_mask``, 2D key masks that do not cover the gathered global image
+    keys, and uneven per-rank region lengths. All 2D key-mask merging (image
+    and joint) is owned by ``_merge_joint_attn_mask`` against the final,
+    post-gather key layout; 4D masks keep the inherited AllGather query-range
+    slicing.
     """
 
     def __init__(
@@ -118,49 +120,89 @@ class UlyssesAllGatherKVParallelAttention(AllGatherKVParallelAttention):
 
     @staticmethod
     def _merge_joint_attn_mask(attn_metadata: AttentionMetadata | None, key: torch.Tensor):
-        """Merge a 2D ``joint_attn_mask`` into the post-gather key mask.
+        """Merge 2D key masks against the final, post-gather key layout.
 
-        ``defer_joint=True`` skips the Ulysses mask merge, and the AllGather
-        path only consumes ``attn_mask``: without this merge, models that
-        carry text padding solely in ``joint_attn_mask`` (e.g. Qwen-Image with
-        unequal prompt lengths, where ``attn_mask`` can be ``None``) would
-        attend over unmasked padding K/V. The merge mirrors the non-deferred
-        Ulysses one, but is defined against the final (gathered) key layout,
-        so it must run after the AllGather concatenation.
+        ``defer_joint=True`` skips the Ulysses mask merge and the AllGather
+        path passes 2D masks through untouched, so this strategy owns all 2D
+        key-mask handling here, after the joint K/V have been attached and the
+        image K/V gathered (the gathered regions rebuild the global image
+        sequence in order):
+
+        * a provided 2D ``attn_mask`` must cover the gathered *global* image
+          keys -- the same contract as plain AllGather-KV;
+        * a missing side is filled with ``True``: the joint side is sized from
+          ``joint_key`` (``joint_query`` can be empty during cached-KV reuse),
+          the image side from the remaining keys;
+        * ``front``/``rear`` ordering follows ``joint_strategy``, mirroring
+          the non-deferred Ulysses merge;
+        * the result is validated against ``key`` and normalized to a
+          ``[B, K_final]`` bool mask.
+
+        4D masks keep the inherited AllGather query-range slicing and cannot
+        be merged with a 2D ``joint_attn_mask``; that combination, non-2D
+        joint masks, and shape mismatches fail closed.
         """
-        if attn_metadata is None or attn_metadata.joint_attn_mask is None:
+        if attn_metadata is None:
             return attn_metadata
         joint_mask = attn_metadata.joint_attn_mask
-        if joint_mask.ndim != 2:
+        img_mask = attn_metadata.attn_mask
+        if joint_mask is None and img_mask is None:
+            return attn_metadata
+        if img_mask is not None and img_mask.ndim == 4:
+            if joint_mask is not None:
+                raise NotImplementedError(
+                    "Ulysses x AllGather-KV cannot merge a 2D joint_attn_mask with a "
+                    f"{img_mask.ndim}D attn_mask: the merged key mask is 2D. Move the "
+                    "padding into a single mask, or disable the composed topology by "
+                    "setting allgather_degree=1."
+                )
+            # The inherited query-range slicing owns 4D masks.
+            return attn_metadata
+        if joint_mask is not None and joint_mask.ndim != 2:
             raise NotImplementedError(
                 f"Ulysses x AllGather-KV only supports a 2D joint_attn_mask (got ndim={joint_mask.ndim})."
             )
-        img_mask = attn_metadata.attn_mask
         if img_mask is not None and img_mask.ndim != 2:
             raise NotImplementedError(
-                "Ulysses x AllGather-KV cannot merge a 2D joint_attn_mask with a "
-                f"{img_mask.ndim}D attn_mask: the merged key mask is 2D. Move the padding "
-                "into a single mask, or disable the composed topology by setting "
-                "allgather_degree=1."
+                f"Ulysses x AllGather-KV only supports 2D or 4D attn_mask (got ndim={img_mask.ndim})."
             )
-        if img_mask is None:
-            img_mask = torch.ones(
-                [key.shape[0], key.shape[1] - joint_mask.shape[1]],
-                dtype=torch.bool,
-                device=key.device,
+        joint_k = attn_metadata.joint_key
+        if joint_mask is not None and joint_k is None:
+            raise ValueError(
+                "Ulysses x AllGather-KV got a joint_attn_mask without joint K/V: the joint "
+                "mask describes joint keys that would never be gathered."
             )
+        batch = key.shape[0]
+        joint_len = joint_k.shape[1] if joint_k is not None else 0
+        img_len = key.shape[1] - joint_len
+        if img_mask is not None and (img_mask.shape[0] != batch or img_mask.shape[1] != img_len):
+            raise ValueError(
+                "Ulysses x AllGather-KV expects a 2D attn_mask covering the gathered "
+                f"global image keys [batch={batch}, keys={img_len}], got "
+                f"{tuple(img_mask.shape)}. The mask must describe the full image key "
+                "sequence replicated across SP ranks, not the local shard."
+            )
+        if joint_mask is not None and (joint_mask.shape[0] != batch or joint_mask.shape[1] != joint_len):
+            raise ValueError(
+                "Ulysses x AllGather-KV got a joint_attn_mask inconsistent with the joint "
+                f"keys: mask={tuple(joint_mask.shape)}, expected [batch={batch}, "
+                f"keys={joint_len}]."
+            )
+        if joint_len == 0:
+            # No joint keys: the image mask already covers every key.
+            assert img_mask is not None
+            attn_metadata.attn_mask = img_mask.bool().contiguous()
+            return attn_metadata
+        if joint_mask is None:
+            joint_mask = torch.ones([batch, joint_len], dtype=torch.bool, device=key.device)
+        elif img_mask is None:
+            img_mask = torch.ones([batch, img_len], dtype=torch.bool, device=key.device)
         joint_strategy = attn_metadata.joint_strategy or "front"
         merged = (
             torch.cat([joint_mask, img_mask], dim=1)
             if joint_strategy == "front"
             else torch.cat([img_mask, joint_mask], dim=1)
         )
-        if merged.shape[1] != key.shape[1]:
-            raise ValueError(
-                "Ulysses x AllGather-KV joint mask merge produced a key mask that does "
-                f"not match the gathered keys: mask_len={merged.shape[1]}, "
-                f"key_len={key.shape[1]} (joint_len={joint_mask.shape[1]})."
-            )
         attn_metadata.attn_mask = merged.bool().contiguous()
         return attn_metadata
 
@@ -171,16 +213,6 @@ class UlyssesAllGatherKVParallelAttention(AllGatherKVParallelAttention):
         value: torch.Tensor,
         attn_metadata: AttentionMetadata | None,
     ):
-        if attn_metadata is not None and attn_metadata.attn_mask is not None:
-            if attn_metadata.attn_mask.ndim == 2:
-                raise NotImplementedError(
-                    "Ulysses x AllGather-KV does not support a 2D image key mask: the mask "
-                    "semantics are defined against the full image key layout, which this "
-                    "strategy rebuilds only after the Ulysses all-to-all and the K/V gather. "
-                    "Use a 4D attention mask, or disable the composed topology by setting "
-                    "allgather_degree=1."
-                )
-
         # 1. Ulysses: reshard the image shard to [B, S/A, H/U, D] and record the
         #    head-sliced joint tensors for later, without concatenating them.
         query, key, value, attn_metadata, ctx = self._ulysses.pre_attention(
@@ -197,8 +229,9 @@ class UlyssesAllGatherKVParallelAttention(AllGatherKVParallelAttention):
         self._assert_equal_region_lengths(key.shape[1], key.device)
         query, key, value, attn_metadata, _ = super().pre_attention(query, key, value, attn_metadata)
 
-        # 3. Merge the deferred joint mask (text padding) against the gathered
-        #    keys, so padded joint K/V do not attend unmasked.
+        # 3. Own all 2D key-mask handling against the final key layout: merge
+        #    joint/image masks (filling missing sides), or leave 4D masks to
+        #    the inherited query-range slicing.
         attn_metadata = self._merge_joint_attn_mask(attn_metadata, key)
 
         # 4. The reverse transform is entirely Ulysses': it splits the joint

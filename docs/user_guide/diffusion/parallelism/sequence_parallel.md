@@ -124,9 +124,13 @@ Constraints:
 - Every rank's region must be equally long, so the shared sequence must be evenly
   shardable across the SP group (or the model's `_sp_plan` must use `auto_pad`).
   A mismatch fails fast instead of corrupting the collective.
-- A 2D key mask is rejected; use a 4D attention mask. Note that
-  `mask_sp_padding=True` generates a 2D padding mask, so auto-padding under this
-  topology requires the default `mask_sp_padding=False`.
+- 2D key masks are supported: an image mask must cover the gathered *global*
+  image keys replicated across SP ranks (the same contract as plain
+  AllGather-KV), and a joint text-padding mask (`joint_attn_mask`, e.g.
+  Qwen-Image with unequal prompt lengths) is merged automatically in
+  `joint_strategy` order. Masks covering only the local shard fail fast.
+  `mask_sp_padding=True` builds exactly such a global 2D mask, so strict
+  padding masking works under this topology; 4D masks keep query-range slicing.
 - Not supported with Scheduler-paged KV or with `diffusion_attention_backend="TRTLLM_ATTN"`.
 
 ---
