@@ -16,7 +16,11 @@ from vllm_omni.diffusion.attention.parallel.ulysses import UlyssesParallelAttent
 from vllm_omni.diffusion.distributed.group_coordinator import (
     SequenceParallelGroupCoordinator,
 )
-from vllm_omni.diffusion.forward_context import get_ulysses_mode
+from vllm_omni.diffusion.forward_context import (
+    get_forward_context,
+    get_ulysses_mode,
+    is_forward_context_available,
+)
 
 if TYPE_CHECKING:
     from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata
@@ -44,9 +48,11 @@ class UlyssesAllGatherKVParallelAttention(AllGatherKVParallelAttention):
     re-attaches the joint tensors -- attaching them before the gather would
     replicate them once per AllGather rank.
 
-    Fails closed on: ``ring_degree > 1``, causal attention, 2D key masks
-    (their joint merge is defined against the final key layout), and uneven
-    per-rank region lengths.
+    Fails closed on: ``ring_degree > 1``, causal attention, 2D image key
+    masks, a 2D ``joint_attn_mask`` combined with a non-2D ``attn_mask``, and
+    uneven per-rank region lengths. A 2D ``joint_attn_mask`` (text padding,
+    e.g. Qwen-Image with unequal prompt lengths) is merged into the key mask
+    after the gather, in ``_merge_joint_attn_mask``.
     """
 
     def __init__(
@@ -70,20 +76,33 @@ class UlyssesAllGatherKVParallelAttention(AllGatherKVParallelAttention):
     def name(self) -> str:
         return "ulysses_allgather_kv"
 
-    @torch.compiler.disable
     def _assert_equal_region_lengths(self, region_len: int, device: torch.device) -> None:
         """Fail fast when the ``A`` regions do not have equal length.
 
         ``all_gather_into_tensor`` derives its output shape from the *local*
         input, so uneven regions would hang or corrupt instead of raising. In
         strict mode the Ulysses all-to-all already guarantees equal region
-        lengths (seq must be evenly shardable), so this check is skipped and
-        costs no collective; under advanced_uaa rank-local lengths may
-        legitimately differ, so we validate on every forward there.
+        lengths (seq must be evenly shardable), so no collective is spent;
+        under advanced_uaa rank-local lengths may legitimately differ, so the
+        check runs on every forward there -- unless every active SP boundary
+        is framework-managed auto_pad, whose contract already guarantees equal
+        local lengths.
+
+        The cheap early returns live outside the ``torch.compiler.disable``d
+        checker so strict-mode compiled forwards do not unconditionally split
+        the graph to call a no-op.
         """
         if get_ulysses_mode(default="strict") == "strict" or self._sp_size <= 1:
             return
+        if is_forward_context_available() and get_forward_context().sp_rank_local_seq_lens_equal:
+            # auto_pad made every rank's shard equally long at each SP
+            # boundary, so equality is known without a per-forward collective
+            # or a host sync (mirrors the advanced_uaa fast path in Ulysses).
+            return
+        self._check_equal_region_lengths_collective(region_len, device)
 
+    @torch.compiler.disable
+    def _check_equal_region_lengths_collective(self, region_len: int, device: torch.device) -> None:
         local = torch.tensor([int(region_len)], dtype=torch.int64, device=device)
         gathered = [torch.empty_like(local) for _ in range(self._sp_size)]
         dist.all_gather(gathered, local, group=self._allgather_group)
@@ -97,6 +116,54 @@ class UlyssesAllGatherKVParallelAttention(AllGatherKVParallelAttention):
                 "ulysses_degree * allgather_degree, or enable auto_pad in the model's _sp_plan."
             )
 
+    @staticmethod
+    def _merge_joint_attn_mask(attn_metadata: AttentionMetadata | None, key: torch.Tensor):
+        """Merge a 2D ``joint_attn_mask`` into the post-gather key mask.
+
+        ``defer_joint=True`` skips the Ulysses mask merge, and the AllGather
+        path only consumes ``attn_mask``: without this merge, models that
+        carry text padding solely in ``joint_attn_mask`` (e.g. Qwen-Image with
+        unequal prompt lengths, where ``attn_mask`` can be ``None``) would
+        attend over unmasked padding K/V. The merge mirrors the non-deferred
+        Ulysses one, but is defined against the final (gathered) key layout,
+        so it must run after the AllGather concatenation.
+        """
+        if attn_metadata is None or attn_metadata.joint_attn_mask is None:
+            return attn_metadata
+        joint_mask = attn_metadata.joint_attn_mask
+        if joint_mask.ndim != 2:
+            raise NotImplementedError(
+                f"Ulysses x AllGather-KV only supports a 2D joint_attn_mask (got ndim={joint_mask.ndim})."
+            )
+        img_mask = attn_metadata.attn_mask
+        if img_mask is not None and img_mask.ndim != 2:
+            raise NotImplementedError(
+                "Ulysses x AllGather-KV cannot merge a 2D joint_attn_mask with a "
+                f"{img_mask.ndim}D attn_mask: the merged key mask is 2D. Move the padding "
+                "into a single mask, or disable the composed topology by setting "
+                "allgather_degree=1."
+            )
+        if img_mask is None:
+            img_mask = torch.ones(
+                [key.shape[0], key.shape[1] - joint_mask.shape[1]],
+                dtype=torch.bool,
+                device=key.device,
+            )
+        joint_strategy = attn_metadata.joint_strategy or "front"
+        merged = (
+            torch.cat([joint_mask, img_mask], dim=1)
+            if joint_strategy == "front"
+            else torch.cat([img_mask, joint_mask], dim=1)
+        )
+        if merged.shape[1] != key.shape[1]:
+            raise ValueError(
+                "Ulysses x AllGather-KV joint mask merge produced a key mask that does "
+                f"not match the gathered keys: mask_len={merged.shape[1]}, "
+                f"key_len={key.shape[1]} (joint_len={joint_mask.shape[1]})."
+            )
+        attn_metadata.attn_mask = merged.bool().contiguous()
+        return attn_metadata
+
     def pre_attention(
         self,
         query: torch.Tensor,
@@ -107,10 +174,11 @@ class UlyssesAllGatherKVParallelAttention(AllGatherKVParallelAttention):
         if attn_metadata is not None and attn_metadata.attn_mask is not None:
             if attn_metadata.attn_mask.ndim == 2:
                 raise NotImplementedError(
-                    "Ulysses x AllGather-KV does not support a 2D key mask: the joint mask merge "
-                    "is defined against the final key layout, which this strategy completes after "
-                    "the Ulysses all-to-all. Use a 4D attention mask, or disable the composed "
-                    "topology by setting allgather_degree=1."
+                    "Ulysses x AllGather-KV does not support a 2D image key mask: the mask "
+                    "semantics are defined against the full image key layout, which this "
+                    "strategy rebuilds only after the Ulysses all-to-all and the K/V gather. "
+                    "Use a 4D attention mask, or disable the composed topology by setting "
+                    "allgather_degree=1."
                 )
 
         # 1. Ulysses: reshard the image shard to [B, S/A, H/U, D] and record the
@@ -129,7 +197,11 @@ class UlyssesAllGatherKVParallelAttention(AllGatherKVParallelAttention):
         self._assert_equal_region_lengths(key.shape[1], key.device)
         query, key, value, attn_metadata, _ = super().pre_attention(query, key, value, attn_metadata)
 
-        # 3. The reverse transform is entirely Ulysses': it splits the joint
+        # 3. Merge the deferred joint mask (text padding) against the gathered
+        #    keys, so padded joint K/V do not attend unmasked.
+        attn_metadata = self._merge_joint_attn_mask(attn_metadata, key)
+
+        # 4. The reverse transform is entirely Ulysses': it splits the joint
         #    part back out, undoes the image all-to-all, and head-gathers the
         #    joint output over the Ulysses group.
         return query, key, value, attn_metadata, ctx

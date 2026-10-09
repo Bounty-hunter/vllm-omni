@@ -37,6 +37,7 @@ do not exercise the full model-registry pipeline.
 import os
 import pickle
 import tempfile
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -524,8 +525,133 @@ def test_composed_strategy_rejects_2d_key_mask():
     strategy = UlyssesAllGatherKVParallelAttention(sp_group, scatter_idx=2, gather_idx=1, use_sync=False)
     metadata = AttentionMetadata(attn_mask=torch.ones(1, 8, dtype=torch.bool))
 
-    with pytest.raises(NotImplementedError, match="2D key mask"):
+    with pytest.raises(NotImplementedError, match="2D image key mask"):
         strategy.pre_attention(torch.zeros(1, 2, 4, 1), torch.zeros(1, 2, 4, 1), torch.zeros(1, 2, 4, 1), metadata)
+
+
+def _composed_mask_mocks(monkeypatch, *, rank: int = 1, region: int = 4, heads_local: int = 2, joint_len: int = 1):
+    """Wire the composed strategy to a fake Ulysses half and mocked gathers.
+
+    Returns a factory building a fresh (sp_group, strategy) pair; each
+    ``pre_attention`` call consumes one key-chunks and one value-chunks list.
+    """
+    head_dim = 1
+
+    def make():
+        key_chunks = [torch.full((1, region, heads_local, head_dim), 10.0 + i) for i in range(2)]
+        value_chunks = [torch.full((1, region, heads_local, head_dim), 20.0 + i) for i in range(2)]
+        sp_group = _MockComposedSPGroup(rank=rank, allgather_world_size=2, gather_chunks=[key_chunks, value_chunks])
+        return sp_group, UlyssesAllGatherKVParallelAttention(sp_group, scatter_idx=2, gather_idx=1, use_sync=False)
+
+    def fake_pre_attention(self, query, key, value, attn_metadata, defer_joint=False):
+        joint = torch.ones(1, joint_len, heads_local, head_dim)
+        if attn_metadata is not None:
+            attn_metadata.joint_query = joint
+            attn_metadata.joint_key = joint
+            attn_metadata.joint_value = joint
+        return (
+            torch.zeros(1, region, heads_local, head_dim),
+            torch.full((1, region, heads_local, head_dim), 10.0 + rank),
+            torch.full((1, region, heads_local, head_dim), 20.0 + rank),
+            attn_metadata,
+            "ulysses-ctx",
+        )
+
+    monkeypatch.setattr(UlyssesParallelAttention, "pre_attention", fake_pre_attention)
+    monkeypatch.setattr(UlyssesParallelAttention, "post_attention", lambda self, attn_output, ctx: attn_output)
+    return make
+
+
+def test_composed_strategy_merges_joint_only_mask(monkeypatch):
+    """A joint-only 2D mask (text padding, ``attn_mask=None``) must not be dropped.
+
+    ``defer_joint=True`` skips the Ulysses mask merge and the AllGather path
+    only reads ``attn_mask``: without the post-gather merge, padded joint K/V
+    (e.g. Qwen-Image with unequal prompt lengths) would attend unmasked. The
+    padding column must survive at the joint key offset of the merged mask.
+    """
+    region, joint_len = 4, 1
+    make = _composed_mask_mocks(monkeypatch, region=region, joint_len=joint_len)
+    query = torch.zeros(1, 2, 4, 1)
+
+    # front: joint keys precede the gathered image keys.
+    joint_mask = torch.tensor([[False]], dtype=torch.bool)  # one padded text token
+    _, strategy = make()
+    _, k_out, _, merged, _ = strategy.pre_attention(
+        query, query, query, AttentionMetadata(attn_mask=None, joint_attn_mask=joint_mask, joint_strategy="front")
+    )
+
+    full_len = joint_len + 2 * region
+    assert merged.attn_mask is not None, "joint-only mask was silently dropped"
+    assert merged.attn_mask.shape == (1, full_len)
+    assert merged.attn_mask.dtype == torch.bool
+    assert not merged.attn_mask[0, 0], "padding column must stay masked at the front joint offset"
+    assert bool(merged.attn_mask[0, 1:].all()), "gathered image keys must stay attendable"
+    assert k_out.shape[1] == full_len
+
+    # rear: joint keys follow the gathered image keys.
+    _, strategy = make()
+    _, _, _, merged_rear, _ = strategy.pre_attention(
+        query, query, query, AttentionMetadata(attn_mask=None, joint_attn_mask=joint_mask, joint_strategy="rear")
+    )
+    assert not merged_rear.attn_mask[0, -1], "padding column must stay masked at the rear joint offset"
+    assert bool(merged_rear.attn_mask[0, :-1].all())
+
+
+def test_composed_strategy_rejects_4d_mask_with_joint_mask(monkeypatch):
+    """A 2D joint mask cannot be merged into a 4D image mask; fail closed."""
+    region, joint_len = 4, 1
+    make = _composed_mask_mocks(monkeypatch, region=region, joint_len=joint_len)
+    _, strategy = make()
+    query = torch.zeros(1, 2, 4, 1)
+    local_q, full_k = joint_len + region, joint_len + 2 * region
+    metadata = AttentionMetadata(
+        attn_mask=torch.ones(1, 1, local_q, full_k, dtype=torch.bool),
+        joint_attn_mask=torch.ones(1, joint_len, dtype=torch.bool),
+        joint_strategy="front",
+    )
+
+    with pytest.raises(NotImplementedError, match="cannot merge a 2D joint_attn_mask"):
+        strategy.pre_attention(query, query, query, metadata)
+
+
+def test_composed_strategy_skips_region_len_collective_with_auto_pad(monkeypatch):
+    """advanced_uaa + framework-managed auto_pad needs no length collective."""
+    make = _composed_mask_mocks(monkeypatch)
+    _, strategy = make()
+
+    collective_calls: list[int] = []
+
+    def fake_all_gather(gathered, local, group=None):
+        collective_calls.append(1)
+        for tensor in gathered:
+            tensor.fill_(4)
+
+    monkeypatch.setattr(torch.distributed, "all_gather", fake_all_gather)
+    monkeypatch.setattr(
+        "vllm_omni.diffusion.attention.parallel.ulysses_allgather.get_ulysses_mode",
+        lambda *, default="strict": "advanced_uaa",
+    )
+    monkeypatch.setattr(
+        "vllm_omni.diffusion.attention.parallel.ulysses_allgather.is_forward_context_available",
+        lambda: True,
+    )
+
+    ctx_equal = SimpleNamespace(sp_rank_local_seq_lens_equal=True)
+    monkeypatch.setattr(
+        "vllm_omni.diffusion.attention.parallel.ulysses_allgather.get_forward_context",
+        lambda: ctx_equal,
+    )
+    strategy._assert_equal_region_lengths(4, torch.device("cpu"))
+    assert collective_calls == [], "auto_pad contract makes the per-forward collective redundant"
+
+    ctx_unequal = SimpleNamespace(sp_rank_local_seq_lens_equal=False)
+    monkeypatch.setattr(
+        "vllm_omni.diffusion.attention.parallel.ulysses_allgather.get_forward_context",
+        lambda: ctx_unequal,
+    )
+    strategy._assert_equal_region_lengths(4, torch.device("cpu"))
+    assert collective_calls == [1], "manual sharding keeps the per-forward check"
 
 
 def test_composed_strategy_detects_uneven_allgather_regions(monkeypatch):
