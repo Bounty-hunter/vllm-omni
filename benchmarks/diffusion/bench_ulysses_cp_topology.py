@@ -38,8 +38,8 @@ Run on a box with >= 4 GPUs:
 from __future__ import annotations
 
 import argparse
+import json
 import os
-import pickle
 import tempfile
 import time
 
@@ -210,8 +210,16 @@ def _worker(
 
     destroy_distributed_env()
     if rank == 0:
-        with open(result_file, "wb") as f:
-            pickle.dump((label, medians, profiles), f)
+        with open(result_file, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "label": label,
+                    # JSON object keys are strings; restored to int on load.
+                    "medians": {str(seq): ms for seq, ms in medians.items()},
+                    "profiles": {str(seq): prof for seq, prof in profiles.items()},
+                },
+                f,
+            )
 
 
 def main() -> None:
@@ -262,9 +270,12 @@ def main() -> None:
                 nprocs=world_size,
                 join=True,
             )
-            with open(result_file, "rb") as f:
-                got_label, medians, profiles = pickle.load(f)
+            with open(result_file, encoding="utf-8") as f:
+                payload = json.load(f)
+            got_label = payload["label"]
             assert got_label == label, (got_label, label)
+            medians = {int(seq): ms for seq, ms in payload["medians"].items()}
+            profiles = {int(seq): prof for seq, prof in payload["profiles"].items()}
             results[label] = (medians, profiles)
         finally:
             if os.path.exists(result_file):
