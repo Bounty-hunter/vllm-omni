@@ -44,7 +44,7 @@ import torch
 import torch.distributed
 
 from tests.helpers.mark import hardware_test
-from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata, QueryRange
+from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata, PackedPaddingMetadata, QueryRange
 from vllm_omni.diffusion.attention.layer import Attention
 from vllm_omni.diffusion.attention.parallel.allgather_kv import (
     AllGatherKVParallelAttention,
@@ -253,6 +253,149 @@ def test_allgather_kv_slices_full_dense_mask_to_local_query_rows():
     torch.testing.assert_close(v_full[:, joint_len:], torch.cat(value_chunks, dim=1))
     assert metadata_local is not None
     assert torch.equal(metadata_local.attn_mask, expected_rows)
+
+
+def _packed_metadata(cu: list[int], max_len: int, valid_kv_length: int | None = None, **kwargs):
+    extra = {
+        "cu_seqlens_q": torch.tensor(cu, dtype=torch.int32),
+        "cu_seqlens_k": torch.tensor(cu, dtype=torch.int32),
+        "max_seqlen_q": max_len,
+        "max_seqlen_k": max_len,
+    }
+    if valid_kv_length is not None:
+        extra["valid_kv_length"] = valid_kv_length
+    return AttentionMetadata(extra=extra, **kwargs)
+
+
+def test_allgather_kv_remaps_packed_query_boundaries():
+    """Packed backends consume cu_seqlens_q, not query_ranges: remap per rank.
+
+    The review's example: two packed requests of 8 and 4 tokens, global
+    boundaries [0, 8, 12], allgather_degree=2. Rank 0 holds Q rows 0-5 of
+    request A; rank 1 holds A6 A7 | B0..B3. Each document keeps one local
+    entry (zero-length on rank 0 for B) so the one-to-one pairing with the
+    global cu_seqlens_k documents survives.
+    """
+    img_seq_local = 6
+    img_seq_full = 12
+    cu = [0, 8, 12]
+    expected = {0: [0, 6, 6], 1: [0, 2, 6]}
+    expected_max_q = {0: 6, 1: 4}  # exact per-rank maxima, for reference
+
+    for rank in (0, 1):
+        key_chunks = [torch.zeros((1, img_seq_local, 1, 1)) for _ in range(2)]
+        value_chunks = [torch.zeros_like(chunk) for chunk in key_chunks]
+        strategy = AllGatherKVParallelAttention(
+            _MockAllGatherSPGroup(rank=rank, gather_chunks=[key_chunks, value_chunks]),
+        )
+        metadata = _packed_metadata(cu, max_len=8)
+        query = torch.zeros((1, img_seq_local, 1, 1))
+
+        q_local, k_full, _, metadata_local, _ = strategy.pre_attention(
+            query, key_chunks[rank], value_chunks[rank], metadata
+        )
+
+        assert q_local.shape[1] == img_seq_local
+        assert k_full.shape[1] == img_seq_full
+        assert metadata_local is not None
+        assert metadata_local.query_ranges is not None
+        assert metadata_local.extra["cu_seqlens_q"].tolist() == expected[rank]
+        # Key side stays global: K/V were gathered.
+        assert metadata_local.extra["cu_seqlens_k"].tolist() == cu
+        # max_seqlen_q keeps the producer bound (a safe upper bound of every
+        # local segment, e.g. >= expected_max_q[rank], without a host sync).
+        assert metadata_local.extra["max_seqlen_q"] >= expected_max_q[rank]
+        assert metadata_local.extra["max_seqlen_q"] == 8
+
+
+def test_allgather_kv_packed_document_without_local_rows_keeps_entry():
+    """A document fully outside this rank's span keeps a zero-length entry.
+
+    Docs [0, 4, 12] with allgather_degree=2: rank 1's span [6, 12) holds no
+    row of document 0, which must still appear as a zero-length entry so the
+    Q/K document pairing stays one-to-one.
+    """
+    img_seq_local = 6
+    rank = 1
+    cu = [0, 4, 12]
+    key_chunks = [torch.zeros((1, img_seq_local, 1, 1)) for _ in range(2)]
+    value_chunks = [torch.zeros_like(chunk) for chunk in key_chunks]
+    strategy = AllGatherKVParallelAttention(
+        _MockAllGatherSPGroup(rank=rank, gather_chunks=[key_chunks, value_chunks]),
+    )
+    metadata = _packed_metadata(cu, max_len=8)
+
+    _, _, _, metadata_local, _ = strategy.pre_attention(
+        torch.zeros((1, img_seq_local, 1, 1)), key_chunks[rank], value_chunks[rank], metadata
+    )
+
+    assert metadata_local is not None
+    local_cu = metadata_local.extra["cu_seqlens_q"].tolist()
+    assert local_cu == [0, 0, 6], "document 0 must keep a zero-length local entry"
+    assert metadata_local.extra["cu_seqlens_k"].tolist() == cu
+
+
+def test_allgather_kv_packed_single_request_with_padding():
+    """The [real, pad] single-document packing narrows to the local valid prefix.
+
+    Global packing [0, 10] with 8 valid rows (valid_kv_length=8) and
+    allgather_degree=2: each rank owns 5 rows, of which rank 0 has 5 valid
+    and rank 1 has 3. packed_padding narrows q_length accordingly while the
+    key side keeps the global valid prefix.
+    """
+    img_seq_local = 5
+    cu = [0, 10]
+    for rank, local_valid in ((0, 5), (1, 3)):
+        key_chunks = [torch.zeros((1, img_seq_local, 1, 1)) for _ in range(2)]
+        value_chunks = [torch.zeros_like(chunk) for chunk in key_chunks]
+        strategy = AllGatherKVParallelAttention(
+            _MockAllGatherSPGroup(rank=rank, gather_chunks=[key_chunks, value_chunks]),
+        )
+        cu_q = torch.tensor(cu, dtype=torch.int32)
+        metadata = _packed_metadata(
+            cu,
+            max_len=8,
+            valid_kv_length=8,
+            packed_padding=PackedPaddingMetadata(
+                q_length=8,
+                kv_length=8,
+                cu_seqlens_q=cu_q[:2].clone(),
+                cu_seqlens_k=cu_q[:2].clone(),
+            ),
+        )
+
+        _, _, _, metadata_local, _ = strategy.pre_attention(
+            torch.zeros((1, img_seq_local, 1, 1)), key_chunks[rank], value_chunks[rank], metadata
+        )
+
+        assert metadata_local is not None
+        assert metadata_local.extra["cu_seqlens_q"].tolist() == [0, img_seq_local]
+        packed = metadata_local.packed_padding
+        assert packed is not None
+        assert packed.q_length == local_valid
+        assert packed.kv_length == 8, "key side keeps the global valid prefix"
+        assert packed.cu_seqlens_q.tolist() == [0, img_seq_local]
+        assert packed.cu_seqlens_k.tolist() == [0, 10]
+
+
+def test_allgather_kv_rejects_packed_metadata_with_joint():
+    """Packed cu_seqlens combined with joint attention is undefined; fail closed."""
+    rank = 1
+    joint_len = 1
+    img_seq_local = 2
+    key_chunks = [torch.zeros((1, img_seq_local, 1, 1)) for _ in range(2)]
+    value_chunks = [torch.zeros_like(chunk) for chunk in key_chunks]
+    strategy = AllGatherKVParallelAttention(
+        _MockAllGatherSPGroup(rank=rank, gather_chunks=[key_chunks, value_chunks]),
+    )
+    joint = torch.ones((1, joint_len, 1, 1))
+    metadata = _packed_metadata([0, 4], max_len=4)
+    metadata.joint_query = joint
+    metadata.joint_key = joint
+    metadata.joint_value = joint
+
+    with pytest.raises(NotImplementedError, match="packed cu_seqlens_q combined with joint"):
+        strategy.pre_attention(torch.zeros((1, img_seq_local, 1, 1)), key_chunks[rank], value_chunks[rank], metadata)
 
 
 def test_allgather_kv_slices_rear_joint_dense_mask():
@@ -1221,3 +1364,154 @@ def ulysses_attention_on_test_model(
             )
 
         destroy_distributed_env()
+
+
+def _packed_fa_worker(
+    local_rank: int,
+    world_size: int,
+    docs: list[int],
+    num_heads: int,
+    head_size: int,
+    dtype: torch.dtype,
+    output_file: str,
+):
+    """Run packed FlashAttention varlen with or without AllGather-KV SP.
+
+    Every rank generates the identical global packed input from the same
+    seed, then feeds only its contiguous query shard (with the *global*
+    packed metadata, as a producer would) to the production Attention layer.
+    Under SP the AllGather-KV strategy gathers global K/V and must remap the
+    packed query boundaries per rank before the real CUDA varlen kernel.
+    """
+    seed_everything(42)
+    device = torch.device(f"{current_omni_platform.device_type}:{local_rank}")
+    current_omni_platform.set_device(device)
+    torch.set_default_device(device)
+    torch.set_default_dtype(dtype)
+
+    update_environment_variables(
+        {
+            "RANK": str(local_rank),
+            "LOCAL_RANK": str(local_rank),
+            "WORLD_SIZE": str(world_size),
+            "MASTER_ADDR": "localhost",
+            "MASTER_PORT": "12347",
+        }
+    )
+    init_distributed_environment()
+
+    total = docs[-1]
+    local_len = total // world_size
+    parallel_config = DiffusionParallelConfig(
+        pipeline_parallel_size=1,
+        data_parallel_size=1,
+        tensor_parallel_size=1,
+        sequence_parallel_size=world_size,
+        ulysses_degree=1,
+        ring_degree=1,
+        allgather_degree=world_size,
+        cfg_parallel_size=1,
+    )
+    od_config = OmniDiffusionConfig.from_kwargs(
+        model="test_model",
+        dtype=dtype,
+        parallel_config=parallel_config,
+        diffusion_attention_backend="FLASH_ATTN",
+    )
+    initialize_model_parallel(
+        data_parallel_size=1,
+        cfg_parallel_size=1,
+        sequence_parallel_size=world_size,
+        ulysses_degree=1,
+        ring_degree=1,
+        allgather_degree=world_size,
+        tensor_parallel_size=1,
+        pipeline_parallel_size=1,
+    )
+
+    with set_forward_context(omni_diffusion_config=od_config), set_current_diffusion_config(od_config):
+        attn = Attention(
+            num_heads=num_heads,
+            head_size=head_size,
+            causal=False,
+            softmax_scale=1.0 / (head_size**0.5),
+            scatter_idx=2,
+            gather_idx=1,
+            use_sync=False,
+        )
+        q = torch.randn(1, total, num_heads, head_size)
+        k = torch.randn(1, total, num_heads, head_size)
+        v = torch.randn(1, total, num_heads, head_size)
+        max_len = max(b - a for a, b in zip(docs[:-1], docs[1:]))
+        cu = torch.tensor(docs, dtype=torch.int32, device=device)
+        metadata = AttentionMetadata(
+            extra={
+                "cu_seqlens_q": cu,
+                "cu_seqlens_k": cu,
+                "max_seqlen_q": max_len,
+                "max_seqlen_k": max_len,
+            }
+        )
+        start = local_rank * local_len
+        out = attn(
+            q[:, start : start + local_len],
+            k[:, start : start + local_len],
+            v[:, start : start + local_len],
+            metadata,
+        )
+        with open(f"{output_file}.{local_rank}", "wb") as f:
+            pickle.dump(out.detach().cpu().float().numpy(), f)
+
+    destroy_distributed_env()
+
+
+def test_packed_allgather_matches_unsplit_flash_varlen():
+    """Real CUDA varlen kernel: AllGather-KV SP output == unsplit packed attention.
+
+    Two packed requests (8 + 4 tokens, boundaries [0, 8, 12]) with
+    allgather_degree=2: document 0 spans the shard boundary, so rank 0 keeps
+    6 of its query rows and rank 1 keeps 2 plus all 4 rows of request 1
+    (local cu_seqlens_q [0, 6, 6] / [0, 2, 6]). The baseline is the same
+    FlashAttention varlen kernel on the unsplit sequence with the global
+    boundaries. This pins the review's reproduction end-to-end: request
+    isolation, boundary legality, and numerical agreement.
+    """
+    if current_omni_platform.get_device_count() < 2:
+        pytest.skip("Test requires 2 GPUs but only fewer are available")
+
+    from vllm_omni.diffusion.attention.backends.utils.fa import flash_attn_varlen_func
+
+    if flash_attn_varlen_func is None:
+        pytest.skip("flash_attn_varlen_func is unavailable")
+
+    docs = [0, 8, 12]
+    num_heads, head_size = 8, 64
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        base_file = os.path.join(tmpdir, "baseline.pkl")
+        sp_file = os.path.join(tmpdir, "sp.pkl")
+
+        # Baseline: single rank, no SP, global packed metadata as-is.
+        torch.multiprocessing.spawn(
+            _packed_fa_worker,
+            args=(1, docs, num_heads, head_size, torch.bfloat16, base_file),
+            nprocs=1,
+        )
+        # SP: two ranks with allgather_degree=2, each feeding its shard with
+        # the producer's *global* packed metadata.
+        torch.multiprocessing.spawn(
+            _packed_fa_worker,
+            args=(2, docs, num_heads, head_size, torch.bfloat16, sp_file),
+            nprocs=2,
+        )
+
+        with open(base_file + ".0", "rb") as fh:
+            baseline = torch.tensor(pickle.load(fh))
+        sp_rows = []
+        for rank in range(2):
+            with open(f"{sp_file}.{rank}", "rb") as fh:
+                sp_rows.append(torch.tensor(pickle.load(fh)))
+        sp_output = torch.cat(sp_rows, dim=1)
+
+        assert sp_output.shape == baseline.shape
+        torch.testing.assert_close(sp_output, baseline, atol=5e-2, rtol=5e-2)
