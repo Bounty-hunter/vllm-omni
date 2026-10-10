@@ -153,9 +153,7 @@ class AllGatherKVParallelAttention:
             )
         cu_q = extra["cu_seqlens_q"]
         span_lo, span_hi = img_start, img_start + img_seq_local
-        local_lens = torch.clamp(
-            torch.clamp(cu_q[1:], max=span_hi) - torch.clamp(cu_q[:-1], min=span_lo), min=0
-        )
+        local_lens = torch.clamp(torch.clamp(cu_q[1:], max=span_hi) - torch.clamp(cu_q[:-1], min=span_lo), min=0)
         local_cu = torch.zeros_like(cu_q)
         local_cu[1:] = torch.cumsum(local_lens, dim=0).to(cu_q.dtype)
 
