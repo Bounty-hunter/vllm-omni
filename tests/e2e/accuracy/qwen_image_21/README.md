@@ -87,6 +87,9 @@ package directory stays first so its pinned Diffusers takes precedence.
 Only Diffusers and the reference-only `torchao==0.16.0` are installed locally
 using `--no-deps`; the latter supplies `FqnToConfig`, required by this Diffusers
 revision even without quantization. Preflight verifies its pinned version.
+The reference environment defaults to `tests/e2e/accuracy/qwen_image_21/.venv`,
+covered by the repository's existing `.venv` ignore rule. Set
+`QWEN_IMAGE_21_REFERENCE_ENV` to use a different reference environment directory.
 The serving/shared environment is unchanged. Dependency versions and actual
 import paths are part of the calibration scope; a serving image upgrade
 requires revisiting the gate. No reference source is added to `PYTHONPATH`.

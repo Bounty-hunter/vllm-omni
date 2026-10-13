@@ -7,7 +7,7 @@
 # propagate failures: Bash ignores errexit inside a conditional subshell.
 if ! (
     set -euo pipefail
-    reference_env="${QWEN_IMAGE_21_REFERENCE_ENV:-$PWD/.venv-qwen-image-21-reference}"
+    reference_env="${QWEN_IMAGE_21_REFERENCE_ENV:-$PWD/tests/e2e/accuracy/qwen_image_21/.venv}"
     # Keep local reference packages first. Inherit only the serving interpreter's
     # enabled dependency roots below, rather than implicitly adding base packages.
     python -m venv "$reference_env" || exit 1
@@ -39,7 +39,7 @@ PY
 ); then
     return 1
 fi
-QWEN_IMAGE_21_REFERENCE_PYTHON=$(python - "${QWEN_IMAGE_21_REFERENCE_ENV:-$PWD/.venv-qwen-image-21-reference}" <<'PY'
+QWEN_IMAGE_21_REFERENCE_PYTHON=$(python - "${QWEN_IMAGE_21_REFERENCE_ENV:-$PWD/tests/e2e/accuracy/qwen_image_21/.venv}" <<'PY'
 import sys
 from pathlib import Path
 print(Path(sys.argv[1]).resolve() / "bin/python")

@@ -128,7 +128,6 @@ celerybeat.pid
 # Environments
 .env
 .venv
-.venv-qwen-image-21-reference/
 env/
 venv/
 ENV/
