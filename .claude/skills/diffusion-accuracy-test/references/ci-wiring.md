@@ -12,8 +12,9 @@ with the actual file, node, hardware, and artifact path before running them.
 | Location | Change when needed |
 | --- | --- |
 | [tests/e2e/accuracy](../../../../tests/e2e/accuracy/) | Add a model-specific test module or extend its existing suite. Keep model parameters and reference runners near that suite. |
-| [accuracy helpers](../../../../tests/e2e/accuracy/helpers.py) and [accuracy fixtures](../../../../tests/e2e/accuracy/conftest.py) | Reuse metrics, video probing, assets, and output directories. Extend these only for a shared capability or fixture. |
+| [accuracy helpers](../../../../tests/e2e/accuracy/helpers.py) and [accuracy fixtures](../../../../tests/e2e/accuracy/conftest.py) | Reuse metrics, device threshold resolution, assertions, JSON artifacts, video probing, assets, and output directories; see [image helper usage](image-accuracy.md#select-metrics-and-retain-evidence). Extend these only for a missing shared capability or fixture. |
 | [CUDA nightly](../../../../.buildkite/cuda/test-nightly.yml) or [CUDA weekly](../../../../.buildkite/cuda/test-weekly.yml) | Add the exact pytest files/nodes to an appropriate step, or add a scoped step with resources, timeout, prerequisites, and artifacts. |
+| [NPU nightly](../../../../.buildkite/npu/test-npu-nightly.yml) | Use an existing supported NPU accuracy lane with matching platform/SKU marks, resources, reference environment, and numerical evidence; see [NPU routing](#npu-accuracy-routing). |
 | [source dependency registry](../../../../.buildkite/common/ci_source_file_dependencies.yml) | Extend the job's alias to include the model code, tests, reference scripts, and relevant assets/configuration. |
 | [hardware presets](../../../../.buildkite/common/ci_mirror_hardwares.yml) | Reuse an existing preset; edit only if the required resource configuration is genuinely absent. |
 
@@ -31,6 +32,22 @@ README/contract, and dedicated helpers together there. Shared `helpers.py` and
 `conftest.py` stay in their public locations; model-only fixtures may live in a
 local `conftest.py`. This rule covers the accuracy suite, not the model's separate
 functional tests. Existing examples below retain their current repository paths.
+
+When reference provisioning is model-specific, keep its explicit setup script
+in this directory and reuse it from local instructions and CI. Keep revision,
+asset, and import checks in the test/reference preflight; package installation
+and reference checkout need not happen implicitly inside pytest. Source a Bash
+setup script when it must export paths to the subsequent pytest process.
+Resolve exported interpreter and asset paths to absolute paths when the test
+starts subprocesses from a different working directory, including user overrides.
+
+Check that every required new contract, policy, or input file is included in the
+deliverable. This repository broadly ignores `*.json`; a model-local JSON policy
+can exist and pass local checks while being absent from a clean checkout. Use
+`git check-ignore -v <file>` and the actual changed/untracked file list, adding a
+narrow allowlist rule for a required source asset when needed. Generated metrics
+and run artifacts should remain ignored. Validate against the files CI will
+receive, rather than assuming the working directory is the delivered file set.
 
 When moving an existing case into its model directory:
 
@@ -103,6 +120,41 @@ selection uses the corresponding CI labels and diff-aware upload. Check bootstra
 group, and step conditions separately for the intended build context; uploading
 a YAML file or retaining a rendered step does not prove its `if` is satisfied.
 
+If no defensible numerical gate exists yet, leave the proposed new CI step
+explicitly inactive with its calibration/selection reason until it is runnable.
+Do not activate a scheduled step whose checked-in default policy guarantees a
+failure before inference. Keep evidence collection available as an explicit
+command, and report its result separately from a numerical pass. Pending user
+selection must remain visible without breaking unrelated nightly coverage.
+
+## NPU accuracy routing
+
+Use the maintained NPU pipeline when the requested model and reference support
+that platform. The existing
+[HunyuanImage3 accuracy case](../../../../tests/e2e/accuracy/test_hunyuan_image3_pixel_accuracy.py)
+declares `@hardware_test(res={"cuda": ["H100", "B200"], "npu": "A3"}, num_cards=4)`
+for its online comparison. Its
+[nightly step](../../../../.buildkite/npu/test-npu-nightly.yml) selects the exact
+file with `-m "full_model and A3" --run-level full_model`, uses `a3_npu_4`, and
+sets `DIFFUSION_ATTENTION_BACKEND=TORCH_SDPA`. These are that case's resources and
+backend, not defaults for every NPU model.
+
+Align the NPU SKU/card marks, pytest selector, maintained resource preset, and
+native/reference launch environments. Verify the platform's device/generator
+handling, runtime dependencies and supported attention path; replacing a CUDA
+mark cannot make CUDA/cuDNN-specific reference code run on NPU. Use NPU-scoped
+comparison evidence and the shared
+[threshold resolution guidance](reference-contract.md#resolve-thresholds-by-device)
+rather than treating a GPU pass or a default threshold as NPU calibration.
+
+Inspect the [NPU bootstrap](../../../../.buildkite/npu/bootstrap-upload-steps.yml)
+upload condition and the nightly group/step activation, source dependency
+selection, and artifact retention separately. Scheduled main nightly uses
+`NIGHTLY=1`; PR nightly selection uses `nightly-test`. The current repository has
+no NPU weekly YAML; choose an existing maintained lane rather than constructing
+its path from the CUDA weekly example. Collect and render using the actual NPU
+file/preset, and report NPU execution unvalidated if it could not run.
+
 ## Wire the dependency alias and step together
 
 The [dependency registry](../../../../.buildkite/common/ci_source_file_dependencies.yml)
@@ -112,14 +164,35 @@ jobs. Extend the existing alias when extending that job. If adding a new job,
 create its corresponding alias and reference it with `source_file_dependencies`.
 Include every test/reference script the step runs and the inputs whose changes
 should retrigger it. The uploader does not inspect `commands` to infer these
-dependencies. Include relevant shared accuracy helpers/fixtures and used
-`tests/helpers/` paths in the job's alias, directly or through an anchor.
-`source_filter_fallback` only keeps all jobs when no job dependency matches the
-diff; it does not guarantee a particular job runs on a shared-helper change
-combined with another model's change. Do not attach that fallback as a job alias.
+dependencies. Standalone recipes/docs belong in an alias only when their changes
+affect the tested contract or they are actual runtime inputs; reading a recipe
+while designing a case does not make it a runtime dependency. A model-directory
+prefix can still include its README. Include relevant shared accuracy
+helpers/fixtures and used `tests/helpers/` paths in the job's alias, directly
+or through an anchor.
+Trace the exercised request path as well as the model: shared sampling/input
+contracts such as `vllm_omni/inputs/data.py`, request translation, and used
+execution helpers can change the comparison. Check those actual paths against
+the filter rather than assuming a model-directory dependency covers them.
+Preserve the broad coverage of `source_filter_fallback` for fallback-only diffs,
+even when a job lists a shared path. Inspect the actual renderer: some revisions
+bypass filtering only when no job dependency matches. Adding an explicit helper
+dependency there can shrink a formerly broad helper-only run to just the new
+job. If this occurs, fix the fallback-only handling and add a routing regression
+check before accepting the alias change. Compare the existing selected jobs
+before and after; checking only that the new job appears misses lost coverage.
+For mixed diffs, a shared-helper change combined with another model's change
+needs explicit helper dependencies in the consuming job. Keep mixed-diff
+selection scoped to those dependencies when a job matches. Do not attach the
+global fallback as a job alias.
 For a model directory, use `tests/e2e/accuracy/<slug>/` as the prefix
 covering its tests, runners, and dedicated support files. Keep the other source
 and shared dependencies alongside it; that directory is not the entire alias.
+
+Buildkite retains the step's console output. Save JUnit, media, metrics,
+provenance, and subprocess logs that are redirected away from that output as
+artifacts. Add a separate copy of the pytest console log only for a concrete
+archiving need; if piping through `tee`, preserve pytest's exit status.
 
 This is an adaptable fragment for a new **one-card nightly image** step inside
 the existing X2I group. Replace the label, alias, file, artifact subdirectory,
@@ -139,6 +212,13 @@ or a prerequisite chain, use the appropriate file list and card selector.
       --run-level full_model
       --junitxml=tests/e2e/accuracy/artifacts/<artifact-subdirectory>/pytest.xml
 ```
+
+Buildkite interpolates environment variables when uploading the pipeline, before
+the GPU worker runs its commands. Escape worker-time variables in YAML commands
+as `$$PWD` or `$${VARIABLE}`, for example
+`export REFERENCE_ROOT="$$PWD/.ci-references/<slug>"`. Shell quoting does not
+prevent upload-time interpolation. Local shell examples use ordinary `$PWD`.
+Inspect the rendered commands to ensure worker variables remain escaped.
 
 Keep the containing group's activation and `depends_on` contract. For a new
 top-level arrangement, follow the existing lane and
@@ -216,7 +296,9 @@ Git/CI context's diff filter. Inspect the retained step, resource preset, file
 list, and artifacts; the renderer preserves `if` expressions without evaluating
 them, so check activation separately. Also resolve the step's dependency alias
 and check that
-the changed model/test/helper/input paths match its prefixes. An `--all` render
+the changed model/test/helper/input paths match its prefixes. Exercise shared
+helpers alone and together with an unrelated model change, checking both the
+intended job and preservation of existing helper-only coverage. An `--all` render
 does not exercise that filter; when diff context is unavailable, record a static
 alias/path check and mark filter execution unvalidated. For weekly work, replace
 the YAML path with `.buildkite/cuda/test-weekly.yml`. These commands omit `--upload`; rendering is

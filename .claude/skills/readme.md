@@ -34,7 +34,7 @@ self-check.
 - [`diffusion-perf-opt`](diffusion-perf-opt/SKILL.md): guides diffusion model
   performance optimization, including profiling traces, parallel strategies,
   stage timing analysis, and benchmark-driven tuning
-- [`diffusion-accuracy-ci`](diffusion-accuracy-ci/SKILL.md): adds or extends
+- [`diffusion-accuracy-test`](diffusion-accuracy-test/SKILL.md): adds or extends
   image/video numerical accuracy tests with aligned references, scoped
   tolerances, and explicit Buildkite Accuracy coverage
 - [`find-simplifications`](find-simplifications/SKILL.md): finds evidence-backed

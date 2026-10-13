@@ -1,213 +1,273 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 
-"""Real-weight native/upstream T2I parity; see README.md."""
-
 from __future__ import annotations
 
 import base64
-import hashlib
 import json
+import math
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 from importlib.metadata import version
+from io import BytesIO
 from pathlib import Path
 
-import diffusers
+import huggingface_hub
 import numpy as np
 import pytest
 import requests
 import torch
-from huggingface_hub import snapshot_download
 from PIL import Image
 
-from tests.e2e.accuracy.helpers import compute_image_ssim_psnr, model_output_dir
+from tests.e2e.accuracy.helpers import (
+    SimilarityThresholds,
+    assert_similarity_metrics,
+    compute_image_ssim_psnr,
+    model_output_dir,
+    resolve_device_profile,
+    resolve_similarity_thresholds,
+    write_json_artifact,
+)
+from tests.e2e.accuracy.qwen_image_21.contract import (
+    CASES,
+    INPUTS,
+    MODEL_ID,
+    MODEL_REVISION,
+    ROOT,
+    sha256,
+    validate_model,
+)
 from tests.helpers.mark import hardware_test
 from tests.helpers.runtime import OmniServer
 
 pytestmark = [pytest.mark.full_model, pytest.mark.diffusion]
-
-MODEL_ID = "Qwen/Qwen-Image-2.1"
-MODEL_REVISION = "790c92633540aa0cb11d9abf19eb46d861714758"
-REFERENCE_REVISION = "8d3c30bfda9b511c00992f40cff4170a5502814d"
-GENERATION = {
-    "prompt": "A ceramic teapot on a wooden table",
-    "width": 1024,
-    "height": 1024,
-    "num_inference_steps": 50,
-    "true_cfg_scale": 1.0,
-    "seed": 42,
-    "generator_device": "cuda",
-}
-# Fixed fidelity target: PSNR 40 dB corresponds to normalized pixel RMSE 0.01.
-# Provisional proposal, awaiting user selection; evidence and scope are in README.md.
-SSIM_MIN = 0.99
-PSNR_MIN = 40.0
-ALPHA_MAE_MAX = 1 / 255
+HERE = Path(__file__).resolve().parent
+SERVER_ARGS = [
+    "--num-gpus",
+    "1",
+    "--dtype",
+    "bfloat16",
+    "--enforce-eager",
+    "--diffusion-attention-backend",
+    "CUDNN_ATTN",
+    "--max-num-seqs",
+    "1",
+    "--stage-init-timeout",
+    "600",
+    "--init-timeout",
+    "1200",
+]
 
 
-def _git(root: Path, *args: str) -> str:
-    return subprocess.check_output(["git", "-C", str(root), *args], text=True).strip()
-
-
-def _write_json(path: Path, value: dict) -> None:
-    path.write_text(json.dumps(value, indent=2, allow_nan=False) + "\n", encoding="utf-8")
-
-
-def _load_rgba(path: Path) -> Image.Image:
-    with Image.open(path) as image:
-        assert image.format == "PNG", (path, image.format)
-        assert image.size == (GENERATION["width"], GENERATION["height"]), (path, image.size)
-        assert image.mode == "RGBA", (path, image.mode)
-        image.load()
-        return image.copy()
-
-
-def _reference(output_dir: Path, *, preflight: bool) -> None:
-    root_value = os.environ.get("QWEN_IMAGE_21_REFERENCE_ROOT")
-    assert root_value, "Prepare QWEN_IMAGE_21_REFERENCE_ROOT as described in README.md"
-    root = Path(root_value).resolve()
-    assert _git(root, "rev-parse", "HEAD") == REFERENCE_REVISION, "Unexpected reference revision"
-    assert not _git(root, "status", "--porcelain", "--", "src/diffusers"), "Reference source must be clean"
-    env = os.environ.copy()
-    # Keep reference-only dependencies/source out of the native server's imports.
-    env["PYTHONPATH"] = str(root / "src")
-    command = [
-        os.environ.get("QWEN_IMAGE_21_REFERENCE_PYTHON", sys.executable),
-        str(Path(__file__).with_name("run_reference.py")),
-        "--request",
-        str(output_dir / "request.json"),
-        "--output-dir",
-        str(output_dir),
-        "--reference-root",
-        str(root),
-    ]
+def _reference(request_path: Path, output: Path, *, preflight: bool) -> dict:
+    python = os.environ.get("QWEN_IMAGE_21_REFERENCE_PYTHON")
+    assert python and Path(python).is_file(), "Source setup_reference.sh before running accuracy"
+    command = [python, str(HERE / "run_reference.py"), "--request", str(request_path), "--output-dir", str(output)]
     if preflight:
-        command.append("--preflight")
-    print(f"Reference command: {command}", flush=True)
-    with (output_dir / ("preflight.log" if preflight else "reference.log")).open("w") as log:
-        subprocess.run(command, env=env, cwd=output_dir, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=1800)
+        command.append("--preflight-only")
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    env["PYTHONNOUSERSITE"] = "1"
+    name = "preflight" if preflight else "reference"
+    with (output / f"{name}.log").open("w", encoding="utf-8") as log:
+        try:
+            result = subprocess.run(command, cwd=HERE, env=env, stdout=log, stderr=subprocess.STDOUT, timeout=3600)
+        except subprocess.TimeoutExpired:
+            write_json_artifact(
+                output / f"{name}_exit.json", {"command": command, "exit_status": "timeout", "timeout_s": 3600}
+            )
+            raise
+    write_json_artifact(output / f"{name}_exit.json", {"command": command, "exit_status": result.returncode})
+    assert result.returncode == 0, f"Reference {name} failed: {output / (name + '.log')}"
+    return json.loads((output / "reference_preflight.json").read_text(encoding="utf-8"))
 
 
-def _native(model: Path, output_dir: Path) -> Image.Image:
-    server_args = [
-        "--num-gpus",
-        "1",
-        "--dtype",
-        "bfloat16",
-        "--enforce-eager",
-        "--no-enable-cuda-graph-decode",
-        "--diffusion-attention-backend",
-        "CUDNN_ATTN",
-        "--stage-init-timeout",
-        "600",
-        "--init-timeout",
-        "900",
-    ]
-    request = {key: value for key, value in GENERATION.items() if key not in ("width", "height")} | {
-        "model": str(model),
-        "size": f"{GENERATION['width']}x{GENERATION['height']}",
+def _native(request: dict, output: Path) -> None:
+    payload = {
+        "prompt": request["prompt"],
+        "negative_prompt": request["negative_prompt"],
+        "size": f"{request['width']}x{request['height']}",
         "n": 1,
         "response_format": "b64_json",
         "output_format": "png",
+        "num_inference_steps": request["num_inference_steps"],
+        "true_cfg_scale": request["true_cfg_scale"],
+        "seed": request["seed"],
+        "generator_device": "cuda",
     }
-    _write_json(output_dir / "native_request.json", {"server_args": server_args, "request": request})
-    with OmniServer(
-        str(model),
-        server_args,
-        use_omni=True,
-        env_dict={"DIFFUSION_ATTENTION_BACKEND": "CUDNN_ATTN"},
-        startup_timeout=1000,
-    ) as server:
-        requests.get(f"http://{server.host}:{server.port}/health", timeout=30).raise_for_status()
-        response = requests.post(
-            f"http://{server.host}:{server.port}/v1/images/generations", json=request, timeout=1200
-        )
-        response.raise_for_status()
-        payload = response.json()
-        assert isinstance(payload.get("data"), list) and len(payload["data"]) == 1, payload.keys()
-        (output_dir / "native.png").write_bytes(base64.b64decode(payload["data"][0]["b64_json"], validate=True))
-        return _load_rgba(output_dir / "native.png")
-
-
-@hardware_test(res={"cuda": ["H100", "H200"]}, num_cards=1)
-def test_qwen_image_21_matches_diffusers(accuracy_artifact_root: Path) -> None:
-    assert torch.cuda.is_available(), "This real-weight accuracy gate requires CUDA"
-    override = os.environ.get("QWEN_IMAGE_21_MODEL")
-    if override:
-        model = Path(override).resolve()
-        revision = os.environ.get("QWEN_IMAGE_21_MODEL_REVISION", model.name)
-        assert revision == MODEL_REVISION, "Local model override must identify the pinned checkpoint revision"
-    else:
-        model = Path(snapshot_download(MODEL_ID, revision=MODEL_REVISION)).resolve()
-    output_dir = Path(tempfile.mkdtemp(prefix="t2i-", dir=model_output_dir(accuracy_artifact_root, MODEL_ID)))
-    repo = Path(__file__).resolve().parents[4]
-    _write_json(
-        output_dir / "request.json",
+    payload = {key: value for key, value in payload.items() if value is not None}
+    write_json_artifact(
+        output / "native_launch.json",
         {
-            "model": str(model),
-            "model_id": MODEL_ID,
-            "model_revision": MODEL_REVISION,
-            "reference_revision": REFERENCE_REVISION,
-            "generation": GENERATION,
-            "dtype": "bfloat16",
-            "attention": "transformer-only cuDNN SDPA",
-            "use_kv_cache": True,
-            "native_enforce_eager": True,
-            "device": torch.cuda.get_device_name(),
-            "cuda": torch.version.cuda,
-            "cudnn": torch.backends.cudnn.version(),
-            "native_diffusers_source": diffusers.__file__,
-            "native_diffusers_version": diffusers.__version__,
-            "native_revision": _git(repo, "rev-parse", "HEAD"),
-            "native_worktree": _git(repo, "status", "--short"),
-            "test_source_sha256": {
-                path.name: hashlib.sha256(path.read_bytes()).hexdigest()
-                for path in (Path(__file__), Path(__file__).with_name("run_reference.py"))
-            },
-            "packages": {
-                name: version(name) for name in ("torch", "vllm", "diffusers", "transformers", "torchmetrics")
-            },
+            "model": request["model"],
+            "serve_args": SERVER_ARGS,
+            "request": payload,
+            "python": sys.executable,
+            "git_head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+            "git_status": subprocess.check_output(["git", "status", "--short"], cwd=ROOT, text=True),
+            "versions": {name: version(name) for name in ("vllm", "diffusers", "torch", "transformers", "Pillow")},
         },
     )
-    print(f"Qwen-Image 2.1 artifacts: {output_dir}", flush=True)
-    # Import/asset checks finish in the actual reference environment before either model loads.
-    _reference(output_dir, preflight=True)
-    _reference(output_dir, preflight=False)
-    reference = _load_rgba(output_dir / "reference.png")
-    repeat = _load_rgba(output_dir / "reference_repeat.png")
-    repeat_equal = np.array_equal(np.asarray(reference), np.asarray(repeat))
-    _write_json(output_dir / "repeatability.json", {"identical_rgba_pixels": repeat_equal})
-    assert repeat_equal, f"Reference is not repeatable; inspect {output_dir}"
-    native = _native(model, output_dir)
-    metrics = {}
-    for mode in ("RGB", "RGBA"):
-        ssim, psnr = compute_image_ssim_psnr(prediction=native, reference=reference, compare_mode=mode)
-        metrics[mode] = {"ssim": ssim, "psnr_db": psnr if np.isfinite(psnr) else "inf"}
-    alpha_error = float(
-        np.abs(
-            np.asarray(native.getchannel("A"), dtype=np.float32)
-            - np.asarray(reference.getchannel("A"), dtype=np.float32)
-        ).mean()
-        / 255
+    with OmniServer(model=request["model"], serve_args=SERVER_ARGS, startup_timeout=1200) as server:
+        payload["model"] = server.model
+        if request["inputs"]:
+            response = requests.post(
+                f"http://{server.host}:{server.port}/v1/images/edits",
+                data=payload,
+                files=[
+                    ("image", (Path(entry["path"]).name, Path(entry["path"]).read_bytes(), "image/png"))
+                    for entry in request["inputs"]
+                ],
+                timeout=1200,
+            )
+        else:
+            response = requests.post(
+                f"http://{server.host}:{server.port}/v1/images/generations",
+                json=payload,
+                timeout=1200,
+            )
+        (output / "http_response.json").write_text(response.text, encoding="utf-8")
+        response.raise_for_status()
+        body = response.json()
+        assert isinstance(body, dict) and isinstance(body.get("data"), list), body
+        assert len(body["data"]) == 1, "Exactly one RGBA output is required"
+        raw = base64.b64decode(body["data"][0]["b64_json"], validate=True)
+        (output / "native.png").write_bytes(raw)
+        with Image.open(BytesIO(raw)) as image:
+            image.load()
+            assert image.format == "PNG" and image.mode == "RGBA", (image.format, image.mode)
+            assert image.size == (request["width"], request["height"]), image.size
+
+
+def _scores(prediction: Image.Image, reference: Image.Image) -> dict[str, float]:
+    ssim, psnr = compute_image_ssim_psnr(prediction=prediction, reference=reference, compare_mode="RGBA")
+    alpha = (
+        np.abs(np.asarray(prediction, dtype=np.float32)[..., 3] - np.asarray(reference, dtype=np.float32)[..., 3]) / 255
     )
-    metrics.update(
+    assert math.isfinite(ssim) and not math.isnan(psnr)
+    return {"ssim": ssim, "psnr": psnr, "alpha_mae": float(alpha.mean())}
+
+
+@pytest.mark.parametrize("case_name", ["it2i", "t2i"])
+@hardware_test(res={"cuda": "H100"}, num_cards=1)
+def test_qwen_image_21_matches_reference(accuracy_artifact_root: Path, run_level: str, case_name: str) -> None:
+    """Own both generations and fresh artifacts; no prerequisite test or old output reuse."""
+    assert run_level == "full_model", "Accuracy requires --run-level full_model"
+    parent = model_output_dir(accuracy_artifact_root, "qwen_image_21")
+    output = Path(tempfile.mkdtemp(prefix=f"{case_name}-", dir=parent))
+    print(f"Qwen-Image 2.1 artifacts: {output}", flush=True)
+    calibration = os.environ.get("QWEN_IMAGE_21_CALIBRATE") == "1"
+    policy = json.loads((HERE / "thresholds.json").read_text(encoding="utf-8"))
+    bounds = policy[case_name]
+    write_json_artifact(output / "threshold_policy.json", policy)
+    if not calibration:
+        assert policy["status"] == "selected", (
+            "No calibrated, user-selected Qwen-Image 2.1 gate. See README.md; "
+            "QWEN_IMAGE_21_CALIBRATE=1 collects evidence and reports XFAIL, never an accuracy pass."
+        )
+        assert all(isinstance(v, (float, int)) and math.isfinite(v) for row in bounds.values() for v in row.values())
+    model_value = os.environ.get("QWEN_IMAGE_21_MODEL")
+    assert model_value, "Source setup_reference.sh, or set QWEN_IMAGE_21_MODEL to a frozen complete snapshot"
+    model = Path(model_value).resolve()
+    assert model.is_dir(), model
+    request = dict(CASES[case_name], model=str(model), seed=42, num_inference_steps=40, inputs=[])
+    for name, expected_hash in INPUTS if case_name == "it2i" else ():
+        source = ROOT / "tests/assets/qwen_image_edit" / name
+        assert sha256(source) == expected_hash, f"Input changed: {source}"
+        target = output / name
+        shutil.copyfile(source, target)
+        with Image.open(target) as image:
+            image.load()
+            w, h = image.size
+            processed_w = round(math.sqrt(1024**2 * w / h) / 32) * 32
+            processed_h = round(math.sqrt(1024**2 * h / w) / 32) * 32
+            request["inputs"].append(
+                {
+                    "path": str(target),
+                    "sha256": expected_hash,
+                    "size": [w, h],
+                    "mode": image.mode,
+                    "processed_size": [processed_w, processed_h],
+                }
+            )
+    request_path = output / "request.json"
+    write_json_artifact(request_path, request)
+    native_assets = validate_model(model)
+    write_json_artifact(
+        output / "model_assets.json",
         {
-            "alpha_mean_abs_error": alpha_error,
-            "reference_repeat_identical": repeat_equal,
-            "threshold_status": "proposal_awaiting_selection",
-            "thresholds": {"ssim_min": SSIM_MIN, "psnr_db_min": PSNR_MIN, "alpha_mae_max": ALPHA_MAE_MAX},
-            "output_sha256": {
-                name: hashlib.sha256((output_dir / name).read_bytes()).hexdigest()
-                for name in ("native.png", "reference.png", "reference_repeat.png")
-            },
-        }
+            "expected_public_model": MODEL_ID,
+            "expected_public_revision": MODEL_REVISION,
+            "local_override": model.name != MODEL_REVISION,
+            **native_assets,
+        },
     )
-    _write_json(output_dir / "metrics.json", metrics)
-    print(json.dumps(metrics, indent=2), flush=True)
-    for mode in ("RGB", "RGBA"):
-        assert metrics[mode]["ssim"] >= SSIM_MIN, f"{mode} SSIM below gate; artifacts: {output_dir}"
-        assert float(metrics[mode]["psnr_db"]) >= PSNR_MIN, f"{mode} PSNR below gate; artifacts: {output_dir}"
-    assert alpha_error <= ALPHA_MAE_MAX, f"Alpha mismatch; artifacts: {output_dir}"
+    # Run the actual reference interpreter's import and asset checks before either model loads.
+    preflight = _reference(request_path, output, preflight=True)
+    assert preflight["assets"] == native_assets
+    for package in ("torch", "transformers", "accelerate", "Pillow", "huggingface-hub"):
+        assert preflight["versions"][package] == version(package), f"Mismatched shared dependency: {package}"
+    assert torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+    device_name = torch.cuda.get_device_name(0)
+    assert preflight["device"] == device_name
+    write_json_artifact(
+        output / "comparison_preflight.json",
+        {
+            "device": device_name,
+            "cuda": torch.version.cuda,
+            "torchmetrics": version("torchmetrics"),
+            "numpy": version("numpy"),
+            "huggingface_hub_path": str(Path(huggingface_hub.__file__).resolve()),
+            "python": sys.executable,
+        },
+    )
+    _native(request, output)
+    _reference(request_path, output, preflight=False)
+    with (
+        Image.open(output / "native.png") as candidate,
+        Image.open(output / "reference_0.png") as reference,
+        Image.open(output / "reference_1.png") as repeated,
+    ):
+        for image in (candidate, reference, repeated):
+            image.load()
+            assert image.mode == "RGBA" and image.size == (request["width"], request["height"])
+        candidate_scores = _scores(candidate, reference)
+        repeat_scores = _scores(repeated, reference)
+    profile = resolve_device_profile(device_name, profiles=bounds)
+    selected = None
+    if not calibration:
+        table = {key: SimilarityThresholds(**row) for key, row in bounds.items()}
+        selected = resolve_similarity_thresholds(table, device_name=device_name)
+    write_json_artifact(
+        output / "metrics.json",
+        {
+            "case": case_name,
+            "device": device_name,
+            "profile": profile,
+            "threshold_status": policy["status"],
+            "resolved_bounds": bounds.get(profile, bounds["default"]),
+            "calibration_only": calibration,
+            "representation": "RGBA uint8 / 255, no compositing or resizing",
+            **{
+                comparison: {metric: str(value) if math.isinf(value) else value for metric, value in scores.items()}
+                for comparison, scores in (
+                    ("candidate_vs_reference", candidate_scores),
+                    ("reference_repeatability", repeat_scores),
+                )
+            },
+            "artifacts": {name: sha256(output / name) for name in ("native.png", "reference_0.png", "reference_1.png")},
+        },
+    )
+    if calibration:
+        pytest.xfail(f"Calibration collected; numerical gate awaiting selection. Metrics: {output / 'metrics.json'}")
+    assert selected is not None
+    assert_similarity_metrics(
+        model_name=f"Qwen-Image 2.1 {case_name}; artifacts: {output}",
+        ssim_score=candidate_scores["ssim"],
+        psnr_score=candidate_scores["psnr"],
+        ssim_threshold=selected.ssim,
+        psnr_threshold=selected.psnr,
+    )

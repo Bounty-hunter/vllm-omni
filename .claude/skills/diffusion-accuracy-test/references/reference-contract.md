@@ -38,6 +38,32 @@ Choose a reference strategy based on dependencies, runtime cost, and control:
   authorization to publish assets or replace a canonical reference. See the
   [SANA golden contract](../../../../tests/e2e/accuracy/sana_video/README.md).
 
+## Choose a workload for path coverage
+
+For a first case or a requested coverage extension, inspect the actual native
+and trusted reference task support, input processing, and pipeline branches.
+Within the requested scope and CI resource budget, prefer a representative
+workload that exercises more meaningful paths in one comparison. For a model
+supporting image-and-text-to-image (IT2I), prefer IT2I over text-only T2I so the
+case also exercises image decoding/preprocessing and image conditioning.
+Apply the same reasoning to I2V versus T2V when both tasks are supported.
+
+Pass fixed, meaningful media through each runtime's normal input interface and
+align its effective processing; shared precomputed conditioning must not bypass
+the input path the case is intended to guard. Follow the
+[image input guidance](image-accuracy.md#editing-inputs-and-dimensions) for IT2I.
+If matching reference support, assets, hardware, or scope prevents the richer
+task, explain the simpler selection and report those input paths as unvalidated.
+
+Record the chosen task, exercised paths, and remaining coverage gaps beside the
+case. IT2I does not automatically cover a separate no-image T2I branch; likewise,
+one image does not cover multi-image ordering. Add another small case when a
+distinct branch needed by the requested coverage cannot be exercised by the
+chosen workload. More prompts or seeds alone do not establish broader path
+coverage. Reuse an existing case within its scope without replacing it solely
+to apply this preference; a task change requires reference alignment and scoped
+threshold evidence.
+
 ## Preflight before model loading
 
 Use the reference worker's exact interpreter/launcher, working directory,
@@ -67,6 +93,12 @@ verify its actual commit and imported paths against the pinned reference;
 a package version alone cannot detect a different editable checkout.
 For unpackaged official source, replace the distribution-version assertion
 with that commit check.
+When an isolated reference reuses serving dependencies, preserve the active
+interpreter's dependency roots and their order, including enabled user-site or
+parent-venv packages. `--system-site-packages` alone does not establish that
+contract; clearing `PYTHONPATH` or disabling user-site can silently select a
+different installed version. Keep the pinned reference package ahead of shared
+roots and verify the actual imported paths/versions under the final launcher.
 For frozen-golden comparison, validate provenance/assets without importing
 the unused generating pipeline. Finish preflight with these case-specific checks:
 
@@ -95,11 +127,37 @@ runtime settings or saved metadata, not just similarly named arguments.
 | Source and inputs | Implementation/checkpoint revisions, prompt/media hash and order, preprocessing, shape/count/FPS |
 | Randomness and sampling | Seed, generator device/noise dtype and draw order, scheduler/timesteps, steps and guidance |
 | Numerical path | Component dtypes, actual attention backend/processors, determinism, relevant cache/quantization/parallel/offload/compile settings |
+| Constructed state | Initialization device/dtype of numerically relevant buffers absent from the checkpoint, such as RoPE frequencies |
 | Output and comparison | Decode settings, raw vs encoded output, range/layout/RGB(A), codec, metric implementation and aggregation |
 
 Equal seeds need not produce equal initial noise. Share latents when supported,
 or establish the actual RNG behavior and reference repeatability. Do not hide
 request/output mismatches by resizing, dropping frames/layers, or truncating audio.
+
+An attention API such as PyTorch SDPA is a dispatcher, not a fixed numerical
+backend. Different masks, shapes, or prefill/decode paths may select different
+kernels even when both implementations name SDPA. Check each participating
+component, including text/vision encoders, the denoiser, and VAE attention where
+present; a denoiser backend flag need not configure the encoders. Library imports
+and runtime initialization can change process-wide backend flags. Record the
+effective settings in the actual worker after initialization, and use a targeted
+dispatch trace when the selected kernel is uncertain or drift remains unexplained.
+An enable flag permits a kernel; it does not prove that the dispatcher selected it.
+
+When kernel variation is outside the comparison's intended scope, use a supported
+kernel consistently on both sides and check the relevant phases. Select it from
+the model/reference contract and hardware support; cuDNN or FlashAttention is not
+a universal accuracy requirement. If matching kernels changes the intended
+deployment configuration, label that comparison's narrower scope explicitly.
+
+Equal weights and parameter dtypes do not establish equal constructed state.
+CPU/GPU initialization can produce different RoPE frequency buffers even when
+both are FP32; small differences can grow through BF16 computation. On unexplained
+drift, compare relevant buffer values and construction paths as well as parameters.
+Keep the reference independent: copying its embeddings or internal buffers into
+the candidate may isolate a cause, but cannot be the accuracy test's passing path.
+Treat unexplained drift as a diagnosis blocker before calibration; a high aggregate
+SSIM alone does not establish that the execution conditions are aligned.
 
 For an optimization comparison, change the feature under test and keep other
 settings fixed. For native/upstream parity, align behavior-affecting settings
@@ -119,6 +177,10 @@ and explain unavoidable differences, including memory-management choices.
    variation and the intended fidelity requirement. Record the calibration
    source and justification beside the threshold. Device-specific thresholds
    need device-specific evidence, not merely a failing candidate run.
+   Distinguish same-environment repeatability from variation across the intended
+   CI machines, GPU SKUs, drivers, and dependency versions. A pass on another
+   environment does not calibrate the target CI environment; identify unmeasured
+   configurations when recommending headroom and keep their bounds provisional.
 4. **Judge the candidate against the fixed accepted or proposed policy.** Label
    results under a proposal as provisional. On failure, use the diagnostic
    order below. An intentionally approximate feature needs an
@@ -135,6 +197,30 @@ error, or tensor error. Image SSIM/PSNR describe matched images, not prompt
 understanding. CLIP, FID, or VBench may support a separately requested semantic
 or distributional quality evaluation with a defined workload; they do not
 replace native/reference parity for a single seeded case.
+
+## Resolve thresholds by device
+
+Reuse `SimilarityThresholds`, `resolve_device_profile`, and
+`resolve_similarity_thresholds` from the shared
+[accuracy helpers](../../../../tests/e2e/accuracy/helpers.py) for SSIM/PSNR
+threshold tables. Include the required `default` entry. Match the actual device
+name to a profile, resolve its bounds, and save the device name, selected profile,
+resolved values, and accepted/proposed status with the metrics. Pass the captured
+device name to the profile resolver when the test already records it; otherwise
+the helper can query the current Omni platform. Keep model-specific metrics such
+as alpha error separate, using `resolve_device_threshold` if they need a scalar
+per-device policy.
+
+Start with an existing in-scope gate or evidenced provisional recommendation as
+`default`. Add differing SKU entries only with corresponding calibration evidence
+and user selection; a failing run alone does not justify a looser entry. An
+unmatched device uses `default`, which is a lookup fallback, not proof that the
+gate is calibrated for that device. Do not copy another model's device values.
+
+This resolver matches device-name substrings; it does not account for drivers,
+library versions, attention backends, or workload changes. Record those conditions
+and use the calibration and headroom guidance above when their scope differs.
+The user still chooses final new or adjusted bounds as described below.
 
 ## Threshold recommendation and user selection
 
@@ -176,8 +262,16 @@ changing anything. Check in this order, using saved evidence before new runs:
 | 1. Environment and assets | Preflight results, imports/revisions, missing/corrupt weights or inputs, device/tool availability |
 | 2. Request and output structure | Effective input/preprocessing, task, shape/count/channels, frame order/FPS, audio shape |
 | 3. Reference repeatability | Existing repeatability evidence; repeat the trusted reference only when this remains unresolved |
-| 4. Numerical path | Actual RNG, schedule/guidance, component dtypes, attention, cache and relevant execution settings |
-| 5. Implementation differences | Compare the earliest relevant intermediate, such as conditioning, initial noise, denoising or VAE output |
+| 4. Numerical path | Actual RNG, schedule/guidance, per-component attention dispatch, dtypes, constructed buffers, cache and execution settings |
+| 5. First divergence | Trace the affected path: processed pixels/tokens, encoder conditioning, VAE condition latents, initial noise, first denoising prediction, final latents and decoded output |
+
+Use targeted captures to find the first divergence instead of inferring its cause
+from the visible output defect. For example, an alpha/background difference can
+originate in image conditioning before denoising. Once a component is implicated,
+compare its inputs, relevant buffers and earliest differing operation before
+repeating the whole generation. If several settings may interact, isolate their
+effects and verify the combined alignment when needed. Tensor capture should not
+change the computation; verify this against saved outputs when practical.
 
 Before each rerun record `hypothesis -> change (or controlled repeat) -> smallest
 check -> expected evidence`; afterwards record the outcome. Use a fresh output
@@ -185,3 +279,20 @@ directory or archive fixed paths. Do not blindly rerun unchanged failures,
 loosen thresholds, or regenerate goldens from the candidate to obtain a pass.
 If no new evidence supports another check, stop retries and report the unresolved
 cause and missing evidence. Keep successful results for unaffected checks.
+
+## Report comparable runs
+
+Associate each metric with its saved effective configuration and artifact path.
+When settings change, report the old/new values alongside that change and enough
+numeric precision to explain the difference. Different backends or initialization
+paths are different configurations, not repeated-run fluctuation; do not pool
+their scores into an unexplained calibration margin.
+
+Separate diagnostic results from validation of the delivered implementation.
+Agreement obtained with temporary hooks or patches establishes evidence about the
+cause. Before claiming the CI case passes, land the intended fix within the
+authorized scope and rerun the affected case through its delivered launcher,
+without unshipped diagnostic changes. Otherwise report the verified diagnosis and
+outstanding implementation/validation. Even pixel-identical output on one device
+and workload does not establish cross-environment headroom or the final threshold;
+retain the user's threshold selection described above.

@@ -1,0 +1,5 @@
+{
+  "status": "awaiting_calibration_and_user_selection",
+  "it2i": {"default": {"ssim": null, "psnr": null}},
+  "t2i": {"default": {"ssim": null, "psnr": null}}
+}

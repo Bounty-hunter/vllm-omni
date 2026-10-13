@@ -84,7 +84,7 @@ Verify the actual source revision and use the shared request JSON for both runne
 The runner saves `video.npy`, `audio.npy`, and metadata. Canonical video is
 frame-major RGB float data in `[0, 1]`; assert identical shapes and compare every
 frame. `_video_metrics` records mean/min SSIM, mean PSNR, and absolute error.
-First/middle/last PNGs are previews only. This gate measures pre-output-encoding
+First/middle/last PNG images are previews only. This gate measures pre-output-encoding
 arrays. LTX's I2V reference also controls conditioning-image encoding with `crf=0`.
 
 When audio is part of the model contract, assert sample-rate and canonical

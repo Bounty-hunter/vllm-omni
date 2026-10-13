@@ -589,7 +589,7 @@ Implementation strategy:
 | **Doc** (optional) | `· Doc Test` | Runnable doc examples | `tests/examples/*/test_text_to_image.py`, … |
 
 For diffusion image/video **Accuracy** cases, use
-[diffusion-accuracy-ci](../diffusion-accuracy-ci/SKILL.md) for reference
+[diffusion-accuracy-test](../diffusion-accuracy-test/SKILL.md) for reference
 alignment, modality-specific comparisons, threshold calibration, and
 nightly/weekly Accuracy wiring. Retain this skill's test mechanics where needed.
 

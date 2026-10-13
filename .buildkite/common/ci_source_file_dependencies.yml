@@ -5,8 +5,8 @@
 # YAML anchors above the registry hold model business-code paths. Job keys
 # ({model}_function / _perf / _accuracy / _reliability / _doc / _cov) alias
 # those anchors and add the scripts the job actually runs. Feature keys below
-# are unchanged. ``source_filter_fallback`` is not a job key: when no job-key
-# prefix matches, a matching diff keeps every job for that upload.
+# are unchanged. ``source_filter_fallback`` is not a job key: a fallback-only
+# diff, or a fallback hit with no job-key match, keeps every job for that upload.
 #
 # YAML anchors are nested lists; the loader flattens them.
 
@@ -160,7 +160,8 @@ x-kandinsky6: &kandinsky6
 
 source_file_dependencies:
   # Hardware presets and shared test helpers. Not a job key — do not attach this
-  # to a step. Used only when no job-key prefix matches: then a hit keeps every job.
+  # to a step. Fallback-only diffs keep every job, even when a job lists a shared
+  # path. Mixed diffs use normal job dependencies when any job-key prefix matches.
   source_filter_fallback:
     - .buildkite/common/ci_mirror_hardwares.yml
     - tests/helpers/
@@ -395,14 +396,37 @@ source_file_dependencies:
     - vllm_omni/diffusion/models/qwen_image_21/
     - vllm_omni/diffusion/models/qwen_image/
     - vllm_omni/diffusion/distributed/autoencoders/autoencoder_kl_qwenimage21.py
+    - vllm_omni/diffusion/distributed/autoencoders/distributed_vae_executor.py
+    - vllm_omni/diffusion/forward_context.py
     - vllm_omni/diffusion/attention/
+    - vllm_omni/diffusion/worker/
+    - vllm_omni/diffusion/executor/
+    - vllm_omni/diffusion/sched/
+    - vllm_omni/diffusion/request.py
+    - vllm_omni/diffusion/diffusion_engine.py
+    - vllm_omni/diffusion/output_formatter.py
+    - vllm_omni/diffusion/io_support.py
+    - vllm_omni/diffusion/postprocess/
+    - vllm_omni/diffusion/layers/
+    - vllm_omni/diffusion/model_loader/
+    - vllm_omni/diffusion/models/utils.py
     - vllm_omni/diffusion/registry.py
+    - vllm_omni/diffusion/data.py
     - vllm_omni/diffusion/model_metadata.py
+    - vllm_omni/diffusion/utils/
+    - vllm_omni/model_extras/qwen_image_21.py
+    - vllm_omni/entrypoints/
+    - vllm_omni/engine/
+    - vllm_omni/inputs/
+    - vllm_omni/config/
     - tests/e2e/accuracy/qwen_image_21/
     - tests/e2e/accuracy/helpers.py
     - tests/e2e/accuracy/conftest.py
-    # tests/helpers/ is covered by source_filter_fallback; keep its broad routing.
-    - recipes/Qwen/Qwen-Image-2.1.md
+    - tests/assets/qwen_image_edit/
+    - tests/helpers/
+    - tests/conftest.py
+    - requirements/
+    - pyproject.toml
 
   diffusion_joy_image_accuracy:
     - *joy_image

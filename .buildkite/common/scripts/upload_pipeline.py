@@ -16,11 +16,11 @@ Test pipeline mode (e.g. test-merge.yml, test-nightly.yml, test-weekly.yml):
     prefixes). Filtering applies on **PR label** uploads and on post-merge
     ``main`` L3 uploads. Scheduled ``main`` uploads that pass ``--all``
     (NIGHTLY/WEEKLY) or ``--e2e`` keep every selected job and still strip
-    the field. If no job-key prefix matches, a change to the pipeline YAML
-    being uploaded or to a path under the ``source_filter_fallback`` registry
-    key keeps every job so command, env, and hardware edits can be validated
-    before merge. When any job-key prefix already matches, normal filtering
-    wins.
+    the field. A diff limited to the pipeline YAML being uploaded or to paths
+    under ``source_filter_fallback`` keeps every job, even if a job lists a
+    shared path. For mixed diffs, those paths keep every job only when no job-key
+    prefix matches; otherwise normal filtering wins. List used shared helpers
+    in job dependencies so mixed diffs retain their consumers.
   - Expand uploader-only ``mirror_hardwares`` into ``agents`` (+ optional ``image``
     for NPU) + ``plugins`` (see ci_mirror_hardwares.yml).
   - Omit ``mirror_hardwares`` to compose ``{chip}_{n}`` from pytest ``-m`` SKU
@@ -726,12 +726,19 @@ def _render_test_pipeline(
         return doc
     if e2e_only:
         steps = _select_e2e_group_steps(steps)
-    # Bypass is a fallback: only when no job-key prefix matched.
+    # Preserve broad routing for fallback-only diffs even when a job declares
+    # shared helpers. Mixed diffs still select jobs by their explicit dependencies.
     if changed_files is not None and pipeline_path is not None:
-        if not _any_source_dependency_match(steps, changed_files):
-            bypass = _source_filter_fallback_reason(changed_files, pipeline_path)
-            if bypass is not None:
-                _log(f"keep all jobs (no source_file_dependencies match; bypassed by {bypass})")
+        bypass = _source_filter_fallback_reason(changed_files, pipeline_path)
+        if bypass is not None:
+            pipeline_rel = _repo_relative_posix(pipeline_path)
+            fallback_prefixes = _source_filter_fallback_prefixes()
+            fallback_only = all(
+                path == pipeline_rel or _match_source_file([path], fallback_prefixes) for path in changed_files
+            )
+            if fallback_only or not _any_source_dependency_match(steps, changed_files):
+                reason = "fallback-only diff" if fallback_only else "no source_file_dependencies match"
+                _log(f"keep all jobs ({reason}; bypassed by {bypass})")
                 changed_files = None
     steps = _process_test_steps(steps, changed_files)
     return {**doc, "steps": steps}
@@ -787,7 +794,8 @@ def _changed_files_for_source_filter(
     uploads and weekly E2E sweeps). Post-merge ``main`` L3 and PR-label
     uploads filter against the commit/PR diff. Pipeline YAML /
     ``source_filter_fallback`` matches are applied later in
-    ``_render_test_pipeline`` only when no job-key prefix already matched.
+    ``_render_test_pipeline`` for fallback-only diffs or when no job-key prefix
+    already matched. Mixed diffs with a job-key match use normal filtering.
     """
     if force_all or e2e_only:
         return None
