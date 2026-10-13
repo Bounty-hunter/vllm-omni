@@ -820,7 +820,12 @@ def test_source_filter_fallback_is_fallback_when_no_job_key_matches(
     ("changed_files", "expected_keys"),
     [
         (["tests/helpers/runtime.py"], {"ungated", "helper_user", "model_b", "unrelated"}),
+        (["tests/helpers/runtime.py", "README.md"], {"ungated", "helper_user", "model_b", "unrelated"}),
         (["tests/helpers/runtime.py", "pkg/model_b/pipeline.py"], {"ungated", "helper_user", "model_b"}),
+        (
+            ["tests/helpers/runtime.py", "README.md", "pkg/model_b/pipeline.py"],
+            {"ungated", "helper_user", "model_b"},
+        ),
         (["pkg/model_b/pipeline.py"], {"ungated", "model_b"}),
     ],
 )
@@ -858,11 +863,13 @@ def test_qwen_image_21_accuracy_shared_helper_routing(monkeypatch: pytest.Monkey
     helper = "tests/helpers/runtime.py"
     wan = "vllm_omni/diffusion/models/wan2_2/pipeline_wan2_2.py"
     assert selected_labels([helper]) == selected_labels(None)
+    assert selected_labels([helper, "README.md"]) == selected_labels(None)
     wan_labels = selected_labels([wan])
     assert qwen_label not in wan_labels
     mixed_labels = selected_labels([helper, wan])
     assert qwen_label in mixed_labels
     assert wan_labels <= mixed_labels
+    assert selected_labels([helper, "README.md", wan]) == mixed_labels
 
 
 @pytest.mark.parametrize(

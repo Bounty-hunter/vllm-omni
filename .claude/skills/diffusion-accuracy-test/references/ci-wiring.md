@@ -28,10 +28,14 @@ not automatically schedule it.
 For new accuracy suites, use `tests/e2e/accuracy/<slug>/test_<slug>.py` by default;
 task/variant suffixes are allowed when multiple test modules are useful. Once a
 model directory exists, keep that model's accuracy tests, reference runners,
-README/contract, and dedicated helpers together there. Shared `helpers.py` and
+contract/configuration, and dedicated helpers together there. Shared `helpers.py` and
 `conftest.py` stay in their public locations; model-only fixtures may live in a
 local `conftest.py`. This rule covers the accuracy suite, not the model's separate
 functional tests. Existing examples below retain their current repository paths.
+
+A model-local README is optional. Prefer concise usage instructions in the test
+or setup script and record run results in PR descriptions or retained artifacts.
+Add separate documentation only when a durable contract needs more explanation.
 
 When reference provisioning is model-specific, keep its explicit setup script
 in this directory and reuse it from local instructions and CI. Keep revision,
@@ -174,17 +178,15 @@ Trace the exercised request path as well as the model: shared sampling/input
 contracts such as `vllm_omni/inputs/data.py`, request translation, and used
 execution helpers can change the comparison. Check those actual paths against
 the filter rather than assuming a model-directory dependency covers them.
-Preserve the broad coverage of `source_filter_fallback` for fallback-only diffs,
-even when a job lists a shared path. Inspect the actual renderer: some revisions
-bypass filtering only when no job dependency matches. Adding an explicit helper
-dependency there can shrink a formerly broad helper-only run to just the new
-job. If this occurs, fix the fallback-only handling and add a routing regression
-check before accepting the alias change. Compare the existing selected jobs
-before and after; checking only that the new job appears misses lost coverage.
-For mixed diffs, a shared-helper change combined with another model's change
-needs explicit helper dependencies in the consuming job. Keep mixed-diff
-selection scoped to those dependencies when a job matches. Do not attach the
-global fallback as a job alias.
+Preserve the broad coverage of `source_filter_fallback` when no non-fallback
+file matches a job dependency, even when a job explicitly lists a shared path.
+Adding an unrelated file such as the root README to a helper change must not
+shrink coverage. When a non-fallback model file does match, filter using the
+complete diff so explicit helper dependencies retain their consumers too.
+Inspect the actual renderer and add regression coverage for helper-only,
+helper plus unrelated files, and helper plus model changes. Compare the full
+selected job sets before and after; merely checking that the new job appears
+misses lost coverage. Do not attach the global fallback as a job alias.
 For a model directory, use `tests/e2e/accuracy/<slug>/` as the prefix
 covering its tests, runners, and dedicated support files. Keep the other source
 and shared dependencies alongside it; that directory is not the entire alias.
@@ -297,8 +299,9 @@ list, and artifacts; the renderer preserves `if` expressions without evaluating
 them, so check activation separately. Also resolve the step's dependency alias
 and check that
 the changed model/test/helper/input paths match its prefixes. Exercise shared
-helpers alone and together with an unrelated model change, checking both the
-intended job and preservation of existing helper-only coverage. An `--all` render
+helpers alone, with an unrelated file such as README, and with another model's
+change, checking both the intended job and preservation of broad fallback
+coverage when no non-fallback dependency matches. An `--all` render
 does not exercise that filter; when diff context is unavailable, record a static
 alias/path check and mark filter execution unvalidated. For weekly work, replace
 the YAML path with `.buildkite/cuda/test-weekly.yml`. These commands omit `--upload`; rendering is
@@ -326,6 +329,11 @@ selection, hand off the completed implementation/evidence and mark that decision
 outstanding. If hardware, calibration or CI context is unavailable, deliver
 feasible changes and commands, explicitly list unvalidated conditions, and do
 not claim complete validation.
+
+When handing off a PR description, reconcile its workload, revisions, execution
+mode, results and CI activation state with the current deliverable. Identify
+reused evidence and subsequent changes; an old PASS must not describe a current
+calibration-only or inactive CI case.
 
 For a later change, rerun only the affected checks:
 

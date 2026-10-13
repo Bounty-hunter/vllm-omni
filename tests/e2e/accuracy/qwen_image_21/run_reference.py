@@ -147,7 +147,7 @@ def main() -> None:
     parser.add_argument("--request", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--preflight-only", action="store_true")
-    parser.add_argument("--repeats", type=int, default=2)
+    parser.add_argument("--repeats", type=int, default=1)
     args = parser.parse_args()
     assert args.repeats >= 1
     args.output_dir.mkdir(parents=True, exist_ok=True)

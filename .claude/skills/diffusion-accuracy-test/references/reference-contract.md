@@ -150,6 +150,13 @@ the model/reference contract and hardware support; cuDNN or FlashAttention is no
 a universal accuracy requirement. If matching kernels changes the intended
 deployment configuration, label that comparison's narrower scope explicitly.
 
+Changing a production backend default, global flag, or buffer initialization
+for alignment is a runtime behavior change. Explain the previous policy and
+affected configurations, and validate the real dispatch and outputs within
+the claimed scope. Cleanup mocks do not establish backend compatibility, and
+restoring a process-wide flag does not provide thread-local isolation. Report
+unvalidated production paths separately from the tested accuracy configuration.
+
 Equal weights and parameter dtypes do not establish equal constructed state.
 CPU/GPU initialization can produce different RoPE frequency buffers even when
 both are FP32; small differences can grow through BF16 computation. On unexplained
@@ -167,7 +174,10 @@ and explain unavoidable differences, including memory-management choices.
 
 1. **Measure reference repeatability.** Repeat the trusted reference with the
    fixed workload on the target environment. Inspect unexpected variation
-   before attributing any difference to vLLM-Omni.
+   before attributing any difference to vLLM-Omni. Keep diagnostic repeats in
+   calibration mode; recurring CI should repeat the reference only when that
+   extra output has an explicit, calibrated acceptance condition. Record which
+   comparisons actually ran and omit artifacts/metrics for unexecuted repeats.
 2. **Collect a known-good comparison.** Measure a trusted baseline against
    that reference. Save per-case/per-frame results and the environment. A
    known-good result can come from existing CI evidence when its contract

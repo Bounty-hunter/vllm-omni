@@ -666,9 +666,10 @@ class QwenImage21Pipeline(
 
         text_model = getattr(self.text_encoder.model, "language_model", self.text_encoder.model)
         handle = text_model.norm.register_forward_hook(lambda module, args, output: args[0])
-        # vLLM disables cuDNN SDPA globally. Restore the HF encoder's normal
-        # CUDA dispatch choices for this forward, independently of DiT backend
-        # selection, then restore the caller's setting even on failure.
+        # Production encoder policy: allow cuDNN SDPA independently of the DiT
+        # backend, matching HF dispatch eligibility. This process-wide flag does
+        # not force a kernel or provide thread-local isolation. Restore the
+        # caller's setting even on failure.
         use_cuda = self.device.type == "cuda"
         cudnn_sdp_enabled = torch.backends.cuda.cudnn_sdp_enabled() if use_cuda else None
         try:

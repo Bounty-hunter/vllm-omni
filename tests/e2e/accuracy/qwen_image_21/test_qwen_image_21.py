@@ -1,6 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 
+"""Real-checkpoint IT2I/T2I comparison against the pinned Diffusers reference.
+
+Run from the repository root in the installed serving environment::
+
+    source tests/e2e/accuracy/qwen_image_21/setup_reference.sh
+    QWEN_IMAGE_21_CALIBRATE=1 pytest -sv \
+        tests/e2e/accuracy/qwen_image_21/test_qwen_image_21.py \
+        -m 'full_model and diffusion and H100 and cards_1' --run-level full_model
+
+Calibration generates two references, saves evidence and reports XFAIL. After
+target-device calibration and user selection of thresholds.json, unset
+QWEN_IMAGE_21_CALIBRATE to run the gate with one reference generation.
+"""
+
 from __future__ import annotations
 
 import base64
@@ -62,12 +76,14 @@ SERVER_ARGS = [
 ]
 
 
-def _reference(request_path: Path, output: Path, *, preflight: bool) -> dict:
+def _reference(request_path: Path, output: Path, *, preflight: bool, repeats: int = 1) -> dict:
     python = os.environ.get("QWEN_IMAGE_21_REFERENCE_PYTHON")
     assert python and Path(python).is_file(), "Source setup_reference.sh before running accuracy"
     command = [python, str(HERE / "run_reference.py"), "--request", str(request_path), "--output-dir", str(output)]
     if preflight:
         command.append("--preflight-only")
+    else:
+        command.extend(["--repeats", str(repeats)])
     env = os.environ.copy()
     env.pop("PYTHONPATH", None)
     env["PYTHONNOUSERSITE"] = "1"
@@ -165,7 +181,7 @@ def test_qwen_image_21_matches_reference(accuracy_artifact_root: Path, run_level
     write_json_artifact(output / "threshold_policy.json", policy)
     if not calibration:
         assert policy["status"] == "selected", (
-            "No calibrated, user-selected Qwen-Image 2.1 gate. See README.md; "
+            "No calibrated, user-selected Qwen-Image 2.1 gate. Select bounds in thresholds.json after calibration; "
             "QWEN_IMAGE_21_CALIBRATE=1 collects evidence and reports XFAIL, never an accuracy pass."
         )
         assert all(isinstance(v, (float, int)) and math.isfinite(v) for row in bounds.values() for v in row.values())
@@ -225,17 +241,24 @@ def test_qwen_image_21_matches_reference(accuracy_artifact_root: Path, run_level
         },
     )
     _native(request, output)
-    _reference(request_path, output, preflight=False)
+    reference_repeats = 2 if calibration else 1
+    _reference(request_path, output, preflight=False, repeats=reference_repeats)
+    artifact_names = ["native.png", "reference_0.png"]
     with (
         Image.open(output / "native.png") as candidate,
         Image.open(output / "reference_0.png") as reference,
-        Image.open(output / "reference_1.png") as repeated,
     ):
-        for image in (candidate, reference, repeated):
+        for image in (candidate, reference):
             image.load()
             assert image.mode == "RGBA" and image.size == (request["width"], request["height"])
         candidate_scores = _scores(candidate, reference)
-        repeat_scores = _scores(repeated, reference)
+        comparisons = {"candidate_vs_reference": candidate_scores}
+        if calibration:
+            with Image.open(output / "reference_1.png") as repeated:
+                repeated.load()
+                assert repeated.mode == "RGBA" and repeated.size == reference.size
+                comparisons["reference_repeatability"] = _scores(repeated, reference)
+            artifact_names.append("reference_1.png")
     profile = resolve_device_profile(device_name, profiles=bounds)
     selected = None
     if not calibration:
@@ -250,15 +273,13 @@ def test_qwen_image_21_matches_reference(accuracy_artifact_root: Path, run_level
             "threshold_status": policy["status"],
             "resolved_bounds": bounds.get(profile, bounds["default"]),
             "calibration_only": calibration,
+            "reference_generations": reference_repeats,
             "representation": "RGBA uint8 / 255, no compositing or resizing",
             **{
                 comparison: {metric: str(value) if math.isinf(value) else value for metric, value in scores.items()}
-                for comparison, scores in (
-                    ("candidate_vs_reference", candidate_scores),
-                    ("reference_repeatability", repeat_scores),
-                )
+                for comparison, scores in comparisons.items()
             },
-            "artifacts": {name: sha256(output / name) for name in ("native.png", "reference_0.png", "reference_1.png")},
+            "artifacts": {name: sha256(output / name) for name in artifact_names},
         },
     )
     if calibration:
