@@ -121,25 +121,6 @@ def _resolve_text_encoder_quant_config(
 _TEXT_ENCODER_QUANT_EXCLUDED_PREFIXES = ("model.visual", "lm_head")
 
 
-def _initialize_qwen3_vl_rope(text_encoder: nn.Module) -> None:
-    """Match HF's CPU initialization of non-checkpoint rotary buffers.
-
-    The pipeline loader constructs modules under the target device context.
-    Computing these FP32 constants on CUDA instead of CPU changes their low
-    bits, which can amplify through the BF16 vision-language encoder.
-    Rebuild only the small rotary modules, preserving checkpoint parameters.
-    """
-    vision = text_encoder.model.visual.rotary_pos_emb
-    text = text_encoder.model.language_model.rotary_emb
-    with torch.device("cpu"):
-        fresh_vision = type(vision)(vision.dim, vision.theta)
-        fresh_text = type(text)(text.config, device=torch.device("cpu"))
-    for target, source in ((vision, fresh_vision), (text, fresh_text)):
-        for name, value in source.named_buffers():
-            buffer = target.get_buffer(name)
-            buffer.copy_(value.to(buffer.device))
-
-
 def _exclude_text_encoder_subtrees_from_quant(
     quant_config: "QuantizationConfig | None",
 ) -> "QuantizationConfig | None":
@@ -398,7 +379,6 @@ class QwenImage21Pipeline(
                     prefix="text_encoder.",
                 )
             )
-        _initialize_qwen3_vl_rope(self.text_encoder)
         self.vae = from_pretrained_with_prefetch(
             DistributedAutoencoderKLQwenImage21.from_pretrained,
             model,
@@ -666,19 +646,9 @@ class QwenImage21Pipeline(
 
         text_model = getattr(self.text_encoder.model, "language_model", self.text_encoder.model)
         handle = text_model.norm.register_forward_hook(lambda module, args, output: args[0])
-        # Production encoder policy: allow cuDNN SDPA independently of the DiT
-        # backend, matching HF dispatch eligibility. This process-wide flag does
-        # not force a kernel or provide thread-local isolation. Restore the
-        # caller's setting even on failure.
-        use_cuda = self.device.type == "cuda"
-        cudnn_sdp_enabled = torch.backends.cuda.cudnn_sdp_enabled() if use_cuda else None
         try:
-            if use_cuda:
-                torch.backends.cuda.enable_cudnn_sdp(True)
             outputs = self.text_encoder(**forward_kwargs)
         finally:
-            if use_cuda:
-                torch.backends.cuda.enable_cudnn_sdp(cudnn_sdp_enabled)
             handle.remove()
         hidden_states = outputs.hidden_states[-1]
 

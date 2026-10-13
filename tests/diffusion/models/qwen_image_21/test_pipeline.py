@@ -13,7 +13,6 @@ from torch import nn
 
 from vllm_omni.diffusion.models.qwen_image_21.pipeline_qwen_image_21 import (
     QwenImage21Pipeline,
-    _initialize_qwen3_vl_rope,
     get_qwen_image_21_post_process_func,
 )
 
@@ -27,92 +26,6 @@ def _toy_pipeline() -> QwenImage21Pipeline:
     pipeline.vae_scale_factor = 16
     pipeline.latent_channels = 4
     return pipeline
-
-
-def test_encoder_rotary_buffers_match_cpu_initialization_under_device_context():
-    from transformers.models.qwen3_vl.configuration_qwen3_vl import Qwen3VLTextConfig
-    from transformers.models.qwen3_vl.modeling_qwen3_vl import (
-        Qwen3VLTextRotaryEmbedding,
-        Qwen3VLVisionRotaryEmbedding,
-    )
-
-    vision = Qwen3VLVisionRotaryEmbedding(64)
-    text = Qwen3VLTextRotaryEmbedding(Qwen3VLTextConfig())
-    expected = [[buffer.clone() for buffer in module.buffers()] for module in (vision, text)]
-    for module in (vision, text):
-        for buffer in module.buffers():
-            buffer.zero_()
-    encoder = SimpleNamespace(
-        model=SimpleNamespace(
-            visual=SimpleNamespace(rotary_pos_emb=vision), language_model=SimpleNamespace(rotary_emb=text)
-        )
-    )
-    # The ambient loader device must not determine how rotary constants are
-    # computed. Meta makes an accidental device-dependent initialization fail
-    # without requiring CUDA in this regression test.
-    with torch.device("meta"):
-        _initialize_qwen3_vl_rope(encoder)
-    for module, buffers in zip((vision, text), expected):
-        for actual, reference in zip(module.buffers(), buffers):
-            assert actual.dtype == torch.float32
-            torch.testing.assert_close(actual, reference, rtol=0, atol=0)
-
-
-@pytest.mark.parametrize("initially_enabled", [False, True])
-@pytest.mark.parametrize("fail_forward", [False, True])
-@pytest.mark.parametrize("device_type", ["cuda", "cpu"])
-def test_prompt_encoder_restores_backend_and_norm_hook(monkeypatch, initially_enabled, fail_forward, device_type):
-    state = {"enabled": initially_enabled}
-    changes = []
-
-    def enable(value):
-        changes.append(value)
-        state["enabled"] = value
-
-    monkeypatch.setattr(torch.backends.cuda, "cudnn_sdp_enabled", lambda: state["enabled"])
-    monkeypatch.setattr(torch.backends.cuda, "enable_cudnn_sdp", enable)
-    norm = nn.Identity()
-
-    class Encoder(nn.Module):
-        dtype = torch.float32
-
-        def __init__(self):
-            super().__init__()
-            self.model = SimpleNamespace(language_model=SimpleNamespace(norm=norm))
-
-        def forward(self, **kwargs):
-            assert state["enabled"] == (True if device_type == "cuda" else initially_enabled)
-            if fail_forward:
-                raise RuntimeError("encoder failed")
-            return SimpleNamespace(hidden_states=[norm(torch.ones(1, 4, 2))])
-
-    inputs = SimpleNamespace(input_ids=torch.zeros(1, 4, dtype=torch.long), attention_mask=torch.ones(1, 4))
-    inputs.to = lambda device: inputs
-
-    class Processor:
-        def __call__(self, **kwargs):
-            return inputs
-
-        def tokenizer(self, *args, **kwargs):
-            return inputs
-
-    pipeline = _toy_pipeline()
-    pipeline.text_encoder = Encoder()
-    pipeline.processor = Processor()
-    pipeline.device = torch.device(device_type)
-    pipeline.prompt_template_t2i = "{}"
-    pipeline._max_length = 8192
-    pipeline._drop_idx = 0
-    pipeline._img_token_id = 42
-    if fail_forward:
-        with pytest.raises(RuntimeError, match="encoder failed"):
-            pipeline._get_qwen_prompt_embeds("test")
-    else:
-        embeds, _, _ = pipeline._get_qwen_prompt_embeds("test")
-        assert embeds.shape == (1, 4, 2)
-    assert not norm._forward_hooks
-    assert state["enabled"] == initially_enabled
-    assert changes == ([True, initially_enabled] if device_type == "cuda" else [])
 
 
 # ---------------------------------------------------------------------------

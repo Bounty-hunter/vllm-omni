@@ -75,7 +75,11 @@ def generate(request: dict, output: Path, repeats: int) -> None:
 
     images = []
     pipe = None
+    cudnn_sdp_enabled = torch.backends.cuda.cudnn_sdp_enabled()
     try:
+        # vLLM's CUDA platform disables cuDNN SDPA globally. Match that policy
+        # in this isolated reference worker; the DiT override below is separate.
+        torch.backends.cuda.enable_cudnn_sdp(False)
         for entry in request["inputs"]:
             with Image.open(entry["path"]) as image:
                 image.load()
@@ -85,13 +89,27 @@ def generate(request: dict, output: Path, repeats: int) -> None:
             torch_dtype=torch.bfloat16,
             local_files_only=True,
         ).to("cuda")
+        # Native constructs the encoder under the loader's CUDA device context.
+        # Recreate only non-checkpoint RoPE buffers using the reference's own
+        # constructors on that device, without copying any native tensors.
+        vision = pipe.text_encoder.model.visual.rotary_pos_emb
+        text = pipe.text_encoder.model.language_model.rotary_emb
+        device = pipe.text_encoder.device
+        with torch.device(device):
+            fresh_vision = type(vision)(vision.dim, vision.theta)
+            fresh_text = type(text)(text.config, device=device)
+        for target, source in ((vision, fresh_vision), (text, fresh_text)):
+            for name, value in source.named_buffers():
+                buffer = target.get_buffer(name)
+                assert buffer.dtype == value.dtype == torch.float32
+                buffer.copy_(value)
         pipe.transformer.set_attn_processor(QwenImage21AttnProcessor())
         pipe.transformer.set_attention_backend("native")
         original_forward = pipe.transformer.forward
 
         def cudnn_forward(*args, **kwargs):
             # Prefill uses backend=None; constrain both phases at the SDPA dispatcher.
-            # Leave text encoder and VAE attention unchanged.
+            # Encoder and VAE retain the cuDNN-disabled policy outside this scope.
             with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
                 return original_forward(*args, **kwargs)
 
@@ -101,6 +119,13 @@ def generate(request: dict, output: Path, repeats: int) -> None:
                 name: str(getattr(pipe, name).dtype) for name in ("transformer", "text_encoder", "vae")
             },
             "text_attention": pipe.text_encoder.config._attn_implementation,
+            "encoder_rope_initialization": str(device),
+            "sdpa_enabled_outside_transformer": {
+                "cudnn": torch.backends.cuda.cudnn_sdp_enabled(),
+                "flash": torch.backends.cuda.flash_sdp_enabled(),
+                "mem_efficient": torch.backends.cuda.mem_efficient_sdp_enabled(),
+                "math": torch.backends.cuda.math_sdp_enabled(),
+            },
             "transformer_attention": type(pipe.transformer.transformer_blocks[0].attn.processor).__name__,
             "transformer_sdpa": "CUDNN_ATTENTION (prefill and decode)",
             "cudnn": torch.backends.cudnn.version(),
@@ -133,6 +158,7 @@ def generate(request: dict, output: Path, repeats: int) -> None:
             assert image.size == (request["width"], request["height"]), image.size
             write_json(output / f"schedule_{repeat}.json", {"timesteps": pipe.scheduler.timesteps.tolist()})
     finally:
+        torch.backends.cuda.enable_cudnn_sdp(cudnn_sdp_enabled)
         if pipe is not None:
             pipe.maybe_free_model_hooks()
         del pipe

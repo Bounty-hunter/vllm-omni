@@ -150,6 +150,15 @@ the model/reference contract and hardware support; cuDNN or FlashAttention is no
 a universal accuracy requirement. If matching kernels changes the intended
 deployment configuration, label that comparison's narrower scope explicitly.
 
+For accuracy-test work, first align the independent reference to the existing
+native execution conditions using supported settings or a narrow reference
+adapter. Reconstruct non-checkpoint state with the reference's own constructors;
+do not copy candidate tensors or replace reference computation with native code.
+Record these adaptations and the scope of the comparison. A parity gap alone
+does not establish a production defect or justify changing production policy
+to improve the score. Propose a runtime fix only with evidence of a defect and
+within the user's authorized scope.
+
 Changing a production backend default, global flag, or buffer initialization
 for alignment is a runtime behavior change. Explain the previous policy and
 affected configurations, and validate the real dispatch and outputs within
