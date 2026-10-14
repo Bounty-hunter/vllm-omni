@@ -415,6 +415,7 @@ source_file_dependencies:
     - vllm_omni/diffusion/model_metadata.py
     - vllm_omni/diffusion/utils/
     - vllm_omni/model_extras/qwen_image_21.py
+    - vllm_omni/platforms/
     - vllm_omni/entrypoints/
     - vllm_omni/engine/
     - vllm_omni/inputs/

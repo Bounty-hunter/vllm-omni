@@ -154,8 +154,11 @@ For accuracy-test work, first align the independent reference to the existing
 native execution conditions using supported settings or a narrow reference
 adapter. Reconstruct non-checkpoint state with the reference's own constructors;
 do not copy candidate tensors or replace reference computation with native code.
-Record these adaptations and the scope of the comparison. A parity gap alone
-does not establish a production defect or justify changing production policy
+When adapting the reference, label the comparison as aligned-reference parity
+in its existing metadata and record each controlled adaptation and its purpose,
+along with remaining numerical differences. This does not establish parity
+with unmodified upstream defaults. A parity gap alone does not establish a
+production defect or justify changing production policy
 to improve the score. Propose a runtime fix only with evidence of a defect and
 within the user's authorized scope.
 

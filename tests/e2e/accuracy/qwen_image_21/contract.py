@@ -15,6 +15,12 @@ MODEL_REVISION = "d26bb61231c349cf6b7896fa83353113880e1ba3"
 REFERENCE_REVISION = "6256aa7666cedd47443adc8f82da9a10e110b09c"
 REFERENCE_TORCHAO_VERSION = "0.16.0"
 ROOT = Path(__file__).resolve().parents[4]
+EXECUTION_SETTINGS = {
+    "cuda": {"generator_device": "cuda", "attention_backend": "CUDNN_ATTN"},
+    # Match CPU RNG on NPU; preserve native dense and reference segmented prefill.
+    # See thresholds.json for the resulting IT2I calibration scope.
+    "npu": {"generator_device": "cpu", "attention_backend": "TORCH_SDPA"},
+}
 INPUTS = (
     ("qwen_image_edit_2511_test1.png", "ae23dbfe1723f0cae27a4152fa21feea83180437c079dd32d142112c18095b1d"),
     ("qwen_image_edit_2511_test2.png", "b13355115f5e5da9e3d146c4ad942eeba4e1c35005f786f44c0ea07f0298d024"),
@@ -48,6 +54,23 @@ def write_json(path: Path, value: object) -> None:
 
 def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def device_preflight(device_type: str) -> dict:
+    """Check the requested accelerator in either worker without importing vLLM."""
+    import torch
+
+    assert device_type in EXECUTION_SETTINGS, f"Unsupported accuracy device: {device_type}"
+    if device_type == "npu":
+        import torch_npu  # noqa: F401 -- register the NPU device in the independent reference
+
+    accelerator = getattr(torch, device_type)
+    assert accelerator.is_available(), f"{device_type} is required; accuracy preflight must not skip"
+    assert accelerator.is_bf16_supported(), f"BF16 {device_type} hardware is required"
+    memory = accelerator.get_device_properties(0).total_memory
+    if device_type == "cuda":
+        assert memory >= 70 * 1024**3, "Use one >=80 GB CUDA GPU"
+    return {"device_type": device_type, "device": accelerator.get_device_name(0), "memory_bytes": memory}
 
 
 def validate_model(model: Path) -> dict:

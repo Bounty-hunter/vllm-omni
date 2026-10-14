@@ -847,9 +847,10 @@ def test_shared_helper_dependencies_preserve_broad_and_mixed_routing(
     assert {step["key"] for step in _iter_steps(rendered)} == expected_keys
 
 
-def test_qwen_image_21_accuracy_shared_helper_routing(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("pipeline_path", [NIGHTLY_YAML, Path(".buildkite/npu/test-npu-nightly.yml")])
+def test_qwen_image_21_accuracy_shared_helper_routing(monkeypatch: pytest.MonkeyPatch, pipeline_path: Path) -> None:
     monkeypatch.setattr("upload_pipeline._get_mirror_hw_selector", lambda: "")
-    doc = yaml.safe_load(NIGHTLY_YAML.read_text(encoding="utf-8"))
+    doc = yaml.safe_load(pipeline_path.read_text(encoding="utf-8"))
     qwen_label = next(
         step["label"]
         for step in _iter_steps(doc)
@@ -857,7 +858,7 @@ def test_qwen_image_21_accuracy_shared_helper_routing(monkeypatch: pytest.Monkey
     )
 
     def selected_labels(changed_files: list[str] | None) -> set[str]:
-        rendered = _render_test_pipeline(copy.deepcopy(doc), changed_files, pipeline_path=NIGHTLY_YAML)
+        rendered = _render_test_pipeline(copy.deepcopy(doc), changed_files, pipeline_path=pipeline_path)
         return {step["label"] for step in _iter_steps(rendered) if "label" in step}
 
     helper = "tests/helpers/runtime.py"
@@ -883,16 +884,33 @@ def test_qwen_image_21_accuracy_shared_helper_routing(monkeypatch: pytest.Monkey
         "vllm_omni/diffusion/forward_context.py",
         "vllm_omni/diffusion/distributed/autoencoders/distributed_vae_executor.py",
         "vllm_omni/diffusion/sched/request_scheduler.py",
+        "vllm_omni/platforms/npu/platform.py",
         "tests/e2e/accuracy/qwen_image_21/thresholds.json",
     ],
 )
-def test_qwen_image_21_accuracy_shared_request_dependencies(monkeypatch: pytest.MonkeyPatch, changed_path: str) -> None:
+@pytest.mark.parametrize(
+    "pipeline_path,queue,selector",
+    [
+        (NIGHTLY_YAML, "mithril-h100-pool", "full_model and diffusion and H100 and cards_1"),
+        (
+            Path(".buildkite/npu/test-npu-nightly.yml"),
+            "ascend-a3",
+            "full_model and diffusion and npu and A3 and cards_1",
+        ),
+    ],
+)
+def test_qwen_image_21_accuracy_shared_request_dependencies(
+    monkeypatch: pytest.MonkeyPatch, changed_path: str, pipeline_path: Path, queue: str, selector: str
+) -> None:
     monkeypatch.setattr("upload_pipeline._get_mirror_hw_selector", lambda: "")
-    doc = yaml.safe_load(NIGHTLY_YAML.read_text(encoding="utf-8"))
-    rendered = _render_test_pipeline(doc, [changed_path], pipeline_path=NIGHTLY_YAML)
+    doc = yaml.safe_load(pipeline_path.read_text(encoding="utf-8"))
+    rendered = _render_test_pipeline(doc, [changed_path], pipeline_path=pipeline_path)
     steps = [step for step in _iter_steps(rendered) if "Qwen-Image 2.1 Accuracy Test" in step.get("label", "")]
     assert len(steps) == 1
     step = steps[0]
-    assert step["agents"]["queue"] == "mithril-h100-pool"
+    assert step["agents"]["queue"] == queue
+    assert not step.get("skip")
+    assert step["env"]["QWEN_IMAGE_21_CALIBRATE"] == "0"
     assert any("test_qwen_image_21.py" in command for command in step["commands"])
+    assert any(selector in command for command in step["commands"])
     assert "tests/e2e/accuracy/artifacts/qwen_image_21/**/*" in step["artifact_paths"]

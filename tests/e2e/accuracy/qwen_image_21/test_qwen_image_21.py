@@ -6,13 +6,20 @@
 Run from the repository root in the installed serving environment::
 
     source tests/e2e/accuracy/qwen_image_21/setup_reference.sh
-    QWEN_IMAGE_21_CALIBRATE=1 pytest -sv \
+    pytest -sv \
         tests/e2e/accuracy/qwen_image_21/test_qwen_image_21.py \
         -m 'full_model and diffusion and H100 and cards_1' --run-level full_model
 
-Calibration generates two references, saves evidence and reports XFAIL. After
-target-device calibration and user selection of thresholds.json, unset
-QWEN_IMAGE_21_CALIBRATE to run the gate with one reference generation.
+For NPU A3 nightly, use '-m "full_model and diffusion and npu and A3 and cards_1"'.
+The NPU native uses TORCH_SDPA with dense-mask prefill; the upstream reference
+retains segmented PyTorch NPU SDPA prefill. Both use CPU RNG. This known numerical
+difference requires separate NPU IT2I calibration; see thresholds.json for the
+observed baseline and selection limits. CUDA retains cuDNN and CUDA RNG.
+NPU calibration does not establish CUDA thresholds.
+
+Normal execution enforces the user-selected bounds in thresholds.json with one
+reference generation. Set QWEN_IMAGE_21_CALIBRATE=1 to generate two references
+and collect calibration evidence without enforcing bounds; this reports XFAIL.
 """
 
 from __future__ import annotations
@@ -47,15 +54,18 @@ from tests.e2e.accuracy.helpers import (
 )
 from tests.e2e.accuracy.qwen_image_21.contract import (
     CASES,
+    EXECUTION_SETTINGS,
     INPUTS,
     MODEL_ID,
     MODEL_REVISION,
     ROOT,
+    device_preflight,
     sha256,
     validate_model,
 )
 from tests.helpers.mark import hardware_test
 from tests.helpers.runtime import OmniServer
+from vllm_omni.platforms import current_omni_platform
 
 pytestmark = [pytest.mark.full_model, pytest.mark.diffusion]
 HERE = Path(__file__).resolve().parent
@@ -65,8 +75,6 @@ SERVER_ARGS = [
     "--dtype",
     "bfloat16",
     "--enforce-eager",
-    "--diffusion-attention-backend",
-    "CUDNN_ATTN",
     "--max-num-seqs",
     "1",
     "--stage-init-timeout",
@@ -112,14 +120,15 @@ def _native(request: dict, output: Path) -> None:
         "num_inference_steps": request["num_inference_steps"],
         "true_cfg_scale": request["true_cfg_scale"],
         "seed": request["seed"],
-        "generator_device": "cuda",
+        "generator_device": request["generator_device"],
     }
     payload = {key: value for key, value in payload.items() if value is not None}
+    serve_args = SERVER_ARGS + ["--diffusion-attention-backend", request["attention_backend"]]
     write_json_artifact(
         output / "native_launch.json",
         {
             "model": request["model"],
-            "serve_args": SERVER_ARGS,
+            "serve_args": serve_args,
             "request": payload,
             "python": sys.executable,
             "git_head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
@@ -127,7 +136,7 @@ def _native(request: dict, output: Path) -> None:
             "versions": {name: version(name) for name in ("vllm", "diffusers", "torch", "transformers", "Pillow")},
         },
     )
-    with OmniServer(model=request["model"], serve_args=SERVER_ARGS, startup_timeout=1200) as server:
+    with OmniServer(model=request["model"], serve_args=serve_args, startup_timeout=1200) as server:
         payload["model"] = server.model
         if request["inputs"]:
             response = requests.post(
@@ -168,7 +177,7 @@ def _scores(prediction: Image.Image, reference: Image.Image) -> dict[str, float]
 
 
 @pytest.mark.parametrize("case_name", ["it2i", "t2i"])
-@hardware_test(res={"cuda": "H100"}, num_cards=1)
+@hardware_test(res={"cuda": "H100", "npu": "A3"}, num_cards=1)
 def test_qwen_image_21_matches_reference(accuracy_artifact_root: Path, run_level: str, case_name: str) -> None:
     """Own both generations and fresh artifacts; no prerequisite test or old output reuse."""
     assert run_level == "full_model", "Accuracy requires --run-level full_model"
@@ -179,17 +188,32 @@ def test_qwen_image_21_matches_reference(accuracy_artifact_root: Path, run_level
     policy = json.loads((HERE / "thresholds.json").read_text(encoding="utf-8"))
     bounds = policy[case_name]
     write_json_artifact(output / "threshold_policy.json", policy)
+    device_type = current_omni_platform.device_type
+    device = device_preflight(device_type)
+    device_name = device["device"]
+    profile = resolve_device_profile(device_name, profiles=bounds)
     if not calibration:
         assert policy["status"] == "selected", (
-            "No calibrated, user-selected Qwen-Image 2.1 gate. Select bounds in thresholds.json after calibration; "
+            "No user-selected Qwen-Image 2.1 gate. Select bounds in thresholds.json after calibration; "
             "QWEN_IMAGE_21_CALIBRATE=1 collects evidence and reports XFAIL, never an accuracy pass."
         )
-        assert all(isinstance(v, (float, int)) and math.isfinite(v) for row in bounds.values() for v in row.values())
+        assert device_type != "npu" or profile != "default", "NPU requires an explicit device threshold profile"
+        assert all(isinstance(v, (float, int)) and math.isfinite(v) for v in bounds[profile].values()), (
+            f"No finite, user-selected thresholds for {device_name} ({profile})"
+        )
     model_value = os.environ.get("QWEN_IMAGE_21_MODEL")
     assert model_value, "Source setup_reference.sh, or set QWEN_IMAGE_21_MODEL to a frozen complete snapshot"
     model = Path(model_value).resolve()
     assert model.is_dir(), model
-    request = dict(CASES[case_name], model=str(model), seed=42, num_inference_steps=40, inputs=[])
+    request = dict(
+        CASES[case_name],
+        model=str(model),
+        seed=42,
+        num_inference_steps=40,
+        inputs=[],
+        device_type=device_type,
+        **EXECUTION_SETTINGS[device_type],
+    )
     for name, expected_hash in INPUTS if case_name == "it2i" else ():
         source = ROOT / "tests/assets/qwen_image_edit" / name
         assert sha256(source) == expected_hash, f"Input changed: {source}"
@@ -224,15 +248,16 @@ def test_qwen_image_21_matches_reference(accuracy_artifact_root: Path, run_level
     # Run the actual reference interpreter's import and asset checks before either model loads.
     preflight = _reference(request_path, output, preflight=True)
     assert preflight["assets"] == native_assets
-    for package in ("torch", "transformers", "accelerate", "Pillow", "huggingface-hub"):
+    shared_packages = ["torch", "transformers", "accelerate", "Pillow", "huggingface-hub"]
+    if device_type == "npu":
+        shared_packages.append("torch-npu")
+    for package in shared_packages:
         assert preflight["versions"][package] == version(package), f"Mismatched shared dependency: {package}"
-    assert torch.cuda.is_available() and torch.cuda.is_bf16_supported()
-    device_name = torch.cuda.get_device_name(0)
-    assert preflight["device"] == device_name
+    assert all(preflight[key] == value for key, value in device.items())
     write_json_artifact(
         output / "comparison_preflight.json",
         {
-            "device": device_name,
+            **device,
             "cuda": torch.version.cuda,
             "torchmetrics": version("torchmetrics"),
             "numpy": version("numpy"),
@@ -259,9 +284,9 @@ def test_qwen_image_21_matches_reference(accuracy_artifact_root: Path, run_level
                 assert repeated.mode == "RGBA" and repeated.size == reference.size
                 comparisons["reference_repeatability"] = _scores(repeated, reference)
             artifact_names.append("reference_1.png")
-    profile = resolve_device_profile(device_name, profiles=bounds)
     selected = None
     if not calibration:
+        # Uncalibrated profiles may remain null while a different device is gated.
         table = {key: SimilarityThresholds(**row) for key, row in bounds.items()}
         selected = resolve_similarity_thresholds(table, device_name=device_name)
     write_json_artifact(
@@ -269,6 +294,7 @@ def test_qwen_image_21_matches_reference(accuracy_artifact_root: Path, run_level
         {
             "case": case_name,
             "device": device_name,
+            "device_type": device_type,
             "profile": profile,
             "threshold_status": policy["status"],
             "resolved_bounds": bounds.get(profile, bounds["default"]),
@@ -283,7 +309,7 @@ def test_qwen_image_21_matches_reference(accuracy_artifact_root: Path, run_level
         },
     )
     if calibration:
-        pytest.xfail(f"Calibration collected; numerical gate awaiting selection. Metrics: {output / 'metrics.json'}")
+        pytest.xfail(f"Calibration collected; thresholds were not enforced. Metrics: {output / 'metrics.json'}")
     assert selected is not None
     assert_similarity_metrics(
         model_name=f"Qwen-Image 2.1 {case_name}; artifacts: {output}",

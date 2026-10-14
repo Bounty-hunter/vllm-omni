@@ -10,13 +10,25 @@ import gc
 import inspect
 import json
 import sys
+from contextlib import ExitStack
 from importlib.metadata import distribution, version
 from pathlib import Path
 
-from contract import REFERENCE_REVISION, REFERENCE_TORCHAO_VERSION, sha256, validate_model, write_json
+from contract import (
+    EXECUTION_SETTINGS,
+    REFERENCE_REVISION,
+    REFERENCE_TORCHAO_VERSION,
+    device_preflight,
+    sha256,
+    validate_model,
+    write_json,
+)
 
 
 def preflight(request: dict) -> dict:
+    device = device_preflight(request["device_type"])
+    for key, value in EXECUTION_SETTINGS[request["device_type"]].items():
+        assert request[key] == value, f"Mismatched {key}: {request[key]} != {value}"
     import diffusers
     import huggingface_hub
     import torch
@@ -37,9 +49,6 @@ def preflight(request: dict) -> dict:
         assert Path(inspect.getfile(cls)).resolve().is_relative_to(package), inspect.getfile(cls)
     assert "use_kv_cache" in inspect.signature(QwenImage21Pipeline.__call__).parameters
     assert "dummy_" not in Qwen3VLForConditionalGeneration.__module__
-    assert torch.cuda.is_available(), "CUDA is required; accuracy preflight must not skip"
-    assert torch.cuda.is_bf16_supported(), "BF16 CUDA hardware is required"
-    assert torch.cuda.get_device_properties(0).total_memory >= 70 * 1024**3, "Use one >=80 GB CUDA GPU"
     model = Path(request["model"])
     assets = validate_model(model)
     processor = Qwen3VLProcessor.from_pretrained(str(model), subfolder="processor", local_files_only=True)
@@ -51,17 +60,17 @@ def preflight(request: dict) -> dict:
         with Image.open(path) as image:
             image.load()
             assert list(image.size) == entry["size"] and image.mode == entry["mode"]
+    packages = ["diffusers", "torchao", "torch", "transformers", "accelerate", "Pillow", "huggingface-hub"]
+    if request["device_type"] == "npu":
+        packages.append("torch-npu")
     return {
         "python": sys.executable,
         "reference_revision": REFERENCE_REVISION,
         "pipeline_path": inspect.getfile(QwenImage21Pipeline),
-        "versions": {
-            name: version(name)
-            for name in ("diffusers", "torchao", "torch", "transformers", "accelerate", "Pillow", "huggingface-hub")
-        },
+        "versions": {name: version(name) for name in packages},
         "huggingface_hub_path": str(Path(huggingface_hub.__file__).resolve()),
         "cuda": torch.version.cuda,
-        "device": torch.cuda.get_device_name(0),
+        **device,
         "assets": assets,
     }
 
@@ -75,11 +84,19 @@ def generate(request: dict, output: Path, repeats: int) -> None:
 
     images = []
     pipe = None
-    cudnn_sdp_enabled = torch.backends.cuda.cudnn_sdp_enabled()
+    adapters = ExitStack()
+    is_cuda = request["device_type"] == "cuda"
+    cudnn_sdp_enabled = torch.backends.cuda.cudnn_sdp_enabled() if is_cuda else None
     try:
-        # vLLM's CUDA platform disables cuDNN SDPA globally. Match that policy
-        # in this isolated reference worker; the DiT override below is separate.
-        torch.backends.cuda.enable_cudnn_sdp(False)
+        if is_cuda:
+            # vLLM's CUDA platform disables cuDNN SDPA globally. Match that policy
+            # in this isolated reference worker; the DiT override below is separate.
+            torch.backends.cuda.enable_cudnn_sdp(False)
+        else:
+            # NPUOmniPlatform.set_device enables internal formats.
+            # torch_npu exposes a write-only setter. This worker exits after
+            # generation, so the setting cannot leak into another comparison.
+            torch.npu.config.allow_internal_format = True
         for entry in request["inputs"]:
             with Image.open(entry["path"]) as image:
                 image.load()
@@ -88,8 +105,8 @@ def generate(request: dict, output: Path, repeats: int) -> None:
             request["model"],
             torch_dtype=torch.bfloat16,
             local_files_only=True,
-        ).to("cuda")
-        # Native constructs the encoder under the loader's CUDA device context.
+        ).to(request["device_type"])
+        # Native constructs the encoder under the loader's accelerator context.
         # Recreate only non-checkpoint RoPE buffers using the reference's own
         # constructors on that device, without copying any native tensors.
         vision = pipe.text_encoder.model.visual.rotary_pos_emb
@@ -105,6 +122,10 @@ def generate(request: dict, output: Path, repeats: int) -> None:
                 buffer.copy_(value)
         pipe.transformer.set_attn_processor(QwenImage21AttnProcessor())
         pipe.transformer.set_attention_backend("native")
+        if not is_cuda:
+            from npu_reference import real_rope_on_npu
+
+            adapters.enter_context(real_rope_on_npu(pipe.transformer))
         original_forward = pipe.transformer.forward
 
         def cudnn_forward(*args, **kwargs):
@@ -113,26 +134,70 @@ def generate(request: dict, output: Path, repeats: int) -> None:
             with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
                 return original_forward(*args, **kwargs)
 
-        pipe.transformer.forward = cudnn_forward
+        if is_cuda:
+            pipe.transformer.forward = cudnn_forward
         metadata = {
+            "comparison_kind": "aligned_reference_parity",
+            "controlled_adaptations": {
+                "encoder_rope": (
+                    f"Rebuild non-checkpoint FP32 RoPE buffers on {device} with upstream constructors "
+                    "to match native default-loader initialization, without copying native tensors."
+                ),
+                "transformer_attention": (
+                    "Use upstream QwenImage21AttnProcessor with the native SDPA backend "
+                    "to compare against the native SDPA execution path."
+                ),
+                "rng": (
+                    f"Use a seeded {request['generator_device']} generator to match the native request's RNG device."
+                ),
+            },
             "component_dtypes": {
                 name: str(getattr(pipe, name).dtype) for name in ("transformer", "text_encoder", "vae")
             },
             "text_attention": pipe.text_encoder.config._attn_implementation,
             "encoder_rope_initialization": str(device),
-            "sdpa_enabled_outside_transformer": {
-                "cudnn": torch.backends.cuda.cudnn_sdp_enabled(),
-                "flash": torch.backends.cuda.flash_sdp_enabled(),
-                "mem_efficient": torch.backends.cuda.mem_efficient_sdp_enabled(),
-                "math": torch.backends.cuda.math_sdp_enabled(),
-            },
             "transformer_attention": type(pipe.transformer.transformer_blocks[0].attn.processor).__name__,
-            "transformer_sdpa": "CUDNN_ATTENTION (prefill and decode)",
-            "cudnn": torch.backends.cudnn.version(),
+            "transformer_sdpa": "CUDNN_ATTENTION (prefill and decode)" if is_cuda else "PyTorch NPU SDPA dispatcher",
             "scheduler": dict(pipe.scheduler.config),
             "use_kv_cache": True,
             "request": request,
         }
+        if is_cuda:
+            metadata["controlled_adaptations"].update(
+                {
+                    "sdpa_outside_transformer": (
+                        "Disable cuDNN SDPA eligibility to match vLLM's CUDA platform policy for the encoder and VAE."
+                    ),
+                    "transformer_sdpa": (
+                        "Constrain prefill and decode to CUDNN_ATTENTION to match the requested native CUDNN_ATTN backend."
+                    ),
+                }
+            )
+            metadata["sdpa_enabled_outside_transformer"] = {
+                "cudnn": torch.backends.cuda.cudnn_sdp_enabled(),
+                "flash": torch.backends.cuda.flash_sdp_enabled(),
+                "mem_efficient": torch.backends.cuda.mem_efficient_sdp_enabled(),
+                "math": torch.backends.cuda.math_sdp_enabled(),
+            }
+            metadata["cudnn"] = torch.backends.cudnn.version()
+        else:
+            metadata["controlled_adaptations"].update(
+                {
+                    "internal_formats": "Enable NPU internal formats to match NPUOmniPlatform.set_device.",
+                    "transformer_rope": (
+                        "Keep upstream position/frequency lookup on CPU and use upstream real-valued rotation on NPU "
+                        "to avoid unsupported complex operations; preserve upstream attention segmentation."
+                    ),
+                }
+            )
+            metadata["known_differences"] = {
+                "transformer_prefill": (
+                    "Reference retains segmented NPU SDPA; native TORCH_SDPA uses dense block-causal prefill. "
+                    "See thresholds.json for IT2I observations and calibration limits."
+                ),
+            }
+            metadata["npu_allow_internal_format"] = True
+            metadata["transformer_rope"] = "upstream CPU position lookup + upstream real-valued rotation on NPU"
         write_json(output / "effective_reference.json", metadata)
         assert all(dtype == "torch.bfloat16" for dtype in metadata["component_dtypes"].values()), metadata
         for repeat in range(repeats):
@@ -145,7 +210,7 @@ def generate(request: dict, output: Path, repeats: int) -> None:
                 width=request["width"],
                 num_inference_steps=request["num_inference_steps"],
                 num_images_per_prompt=1,
-                generator=torch.Generator(device="cuda").manual_seed(request["seed"]),
+                generator=torch.Generator(device=request["generator_device"]).manual_seed(request["seed"]),
                 output_type="pil",
                 output_resolution=1024,
                 use_kv_cache=True,
@@ -158,14 +223,16 @@ def generate(request: dict, output: Path, repeats: int) -> None:
             assert image.size == (request["width"], request["height"]), image.size
             write_json(output / f"schedule_{repeat}.json", {"timesteps": pipe.scheduler.timesteps.tolist()})
     finally:
-        torch.backends.cuda.enable_cudnn_sdp(cudnn_sdp_enabled)
+        adapters.close()
+        if is_cuda:
+            torch.backends.cuda.enable_cudnn_sdp(cudnn_sdp_enabled)
         if pipe is not None:
             pipe.maybe_free_model_hooks()
         del pipe
         for image in images:
             image.close()
         gc.collect()
-        torch.accelerator.empty_cache()
+        getattr(torch, request["device_type"]).empty_cache()
 
 
 def main() -> None:
