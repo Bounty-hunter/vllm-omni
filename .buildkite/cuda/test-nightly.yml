@@ -287,12 +287,12 @@ steps:
         artifact_paths:
           - tests/e2e/accuracy/artifacts/qwen_image_21/**/*
         commands:
-          - source tests/e2e/accuracy/qwen_image_21/setup_reference.sh
           - >-
-            pytest -sv tests/e2e/accuracy/qwen_image_21/test_qwen_image_21.py
+            bash -c 'source tests/e2e/accuracy/qwen_image_21/setup_reference.sh &&
+            exec pytest -sv tests/e2e/accuracy/qwen_image_21/test_qwen_image_21.py
             -m "full_model and diffusion and H100 and cards_1"
             --run-level full_model
-            --junitxml=tests/e2e/accuracy/artifacts/qwen_image_21/pytest.xml
+            --junitxml=tests/e2e/accuracy/artifacts/qwen_image_21/pytest.xml'
 
       - label: ":full_moon: JoyAI-Image-Edit · Accuracy Test"
         source_file_dependencies: diffusion_joy_image_accuracy

@@ -215,6 +215,14 @@ or a prerequisite chain, use the appropriate file list and card selector.
       --junitxml=tests/e2e/accuracy/artifacts/<artifact-subdirectory>/pytest.xml
 ```
 
+Check the worker/container's actual command shell; it may be `/bin/sh` even
+when local validation uses Bash. For Bash-only setup, run setup and pytest in
+one explicit Bash command, e.g. `bash -c 'source <setup.sh> && exec pytest ...'`,
+so exported reference settings reach pytest and setup failures stop execution.
+A sourced script's shebang does not select its interpreter. Smoke-test the
+rendered command's environment propagation and failure exit status with stubs
+under the worker's shell before spending accelerator time.
+
 Buildkite interpolates environment variables when uploading the pipeline, before
 the GPU worker runs its commands. Escape worker-time variables in YAML commands
 as `$$PWD` or `$${VARIABLE}`, for example
