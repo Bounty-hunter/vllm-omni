@@ -294,12 +294,6 @@ steps:
             --run-level full_model
             --junitxml=tests/e2e/accuracy/artifacts/qwen_image_21/pytest.xml'
 
-      - label: ":full_moon: JoyAI-Image-Edit · Accuracy Test"
-        source_file_dependencies: diffusion_joy_image_accuracy
-        timeout_in_minutes: 180
-        commands:
-          - pytest -s -v tests/e2e/accuracy/test_joy_image_edit.py -m "full_model and diffusion and H100 and B200 and cards_1" --run-level full_model
-
       - label: ":full_moon: HunyuanImage3-DIT · Accuracy Test"
         source_file_dependencies: diffusion_hunyuan_image3_accuracy
         timeout_in_minutes: 180

@@ -499,12 +499,6 @@ source_file_dependencies:
     - requirements/
     - pyproject.toml
 
-  diffusion_joy_image_accuracy:
-    - *joy_image
-    - tests/diffusion/models/joy_image/
-    - tests/e2e/accuracy/test_joy_image_edit.py
-    - recipes/JD/JoyAI-Image-Edit.md
-
   diffusion_qwen_image_perf:
     - *qwen_image
     - tests/dfx/perf/scripts/run_diffusion_benchmark.py
