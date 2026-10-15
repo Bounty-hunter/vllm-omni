@@ -1195,10 +1195,6 @@ class OmniGen2Pipeline(CFGParallelMixin, nn.Module, SupportsComponentDiscovery):
             num_tokens=latents.shape[-2] * latents.shape[-1],
         )
         self._num_timesteps = len(timesteps)
-        # Each CFG branch keeps its own immutable layout/rotary metadata for this request.
-        positive_rotary_cache = {}
-        negative_rotary_cache = {}
-        ref_negative_rotary_cache = {}
 
         for i, t in enumerate(timesteps):
             text_guidance_scale = (
@@ -1214,7 +1210,6 @@ class OmniGen2Pipeline(CFGParallelMixin, nn.Module, SupportsComponentDiscovery):
                 prompt_embeds=prompt_embeds,
                 freqs_cis=freqs_cis,
                 prompt_attention_mask=prompt_attention_mask,
-                rotary_cache=positive_rotary_cache,
                 ref_image_hidden_states=ref_latents,
             )
             uncond_kwargs = dict(
@@ -1223,7 +1218,6 @@ class OmniGen2Pipeline(CFGParallelMixin, nn.Module, SupportsComponentDiscovery):
                 prompt_embeds=negative_prompt_embeds,
                 freqs_cis=freqs_cis,
                 prompt_attention_mask=negative_prompt_attention_mask,
-                rotary_cache=negative_rotary_cache,
                 ref_image_hidden_states=None,
             )
 
@@ -1235,7 +1229,6 @@ class OmniGen2Pipeline(CFGParallelMixin, nn.Module, SupportsComponentDiscovery):
                     prompt_embeds=negative_prompt_embeds,
                     freqs_cis=freqs_cis,
                     prompt_attention_mask=negative_prompt_attention_mask,
-                    rotary_cache=ref_negative_rotary_cache,
                     ref_image_hidden_states=ref_latents,
                 )
                 model_pred = self.predict_noise_with_multi_branch_cfg(
@@ -1281,18 +1274,13 @@ class OmniGen2Pipeline(CFGParallelMixin, nn.Module, SupportsComponentDiscovery):
         freqs_cis,
         prompt_attention_mask,
         ref_image_hidden_states,
-        rotary_cache=None,
     ):
         # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
         timestep = t.expand(latents.shape[0]).to(latents.dtype)
 
         optional_kwargs = {}
-        forward_params = inspect.signature(self.transformer.forward).parameters
-        accepts_kwargs = any(param.kind == inspect.Parameter.VAR_KEYWORD for param in forward_params.values())
-        if "ref_image_hidden_states" in forward_params or accepts_kwargs:
+        if "ref_image_hidden_states" in set(inspect.signature(self.transformer.forward).parameters.keys()):
             optional_kwargs["ref_image_hidden_states"] = ref_image_hidden_states
-        if "rotary_cache" in forward_params or accepts_kwargs:
-            optional_kwargs["rotary_cache"] = rotary_cache
 
         with torch.autocast(
             device_type=self.device.type,

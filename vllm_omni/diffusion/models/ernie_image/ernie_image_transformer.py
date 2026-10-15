@@ -184,7 +184,6 @@ class UnifiedPrepare(nn.Module):
         hidden_states: torch.Tensor,
         text_bth: torch.Tensor,
         text_lens: torch.Tensor,
-        static_cache: dict | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Prepare hidden_states, RoPE embeddings, and attention mask.
 
@@ -205,29 +204,6 @@ class UnifiedPrepare(nn.Module):
         N_img = Hp * Wp
 
         img_sbh = self.x_embedder(hidden_states).transpose(0, 1).contiguous()
-        sp_size = _get_sequence_parallel_world_size_or_one()
-        cache_key = None
-        if static_cache is not None and sp_size == 1 and not self.training and not torch.is_grad_enabled():
-            cache_key = (
-                tuple(hidden_states.shape),
-                hidden_states.dtype,
-                tuple(text_bth.shape),
-                text_bth.dtype,
-                text_bth.data_ptr(),
-                text_lens.data_ptr(),
-                device,
-                sp_size,
-            )
-        if cache_key is not None and static_cache.get("key") == cache_key:
-            hidden_states = torch.cat([img_sbh, static_cache["text_sbh"]], dim=0)
-            pad_size = static_cache["pad_size"]
-            if pad_size:
-                pad_hidden = torch.zeros(
-                    (pad_size, B, hidden_states.shape[-1]), device=device, dtype=hidden_states.dtype
-                )
-                hidden_states = torch.cat([hidden_states, pad_hidden], dim=0)
-            return hidden_states, static_cache["freqs_cos"], static_cache["freqs_sin"], static_cache["attention_mask"]
-
         if self.text_proj is not None and text_bth.numel() > 0:
             text_bth = self.text_proj(text_bth)
         Tmax = text_bth.shape[1]
@@ -266,6 +242,7 @@ class UnifiedPrepare(nn.Module):
             else torch.zeros((B, 0), device=device, dtype=torch.bool)
         )
         attention_mask = torch.cat([torch.ones((B, N_img), device=device, dtype=torch.bool), valid_text], dim=1)
+        sp_size = _get_sequence_parallel_world_size_or_one()
         pad_size = (-hidden_states.shape[0]) % sp_size
         if pad_size:
             pad_hidden = torch.zeros((pad_size, B, hidden_states.shape[-1]), device=device, dtype=hidden_states.dtype)
@@ -276,15 +253,6 @@ class UnifiedPrepare(nn.Module):
             freqs_sin = torch.cat([freqs_sin, pad_freq], dim=1)
             attention_mask = torch.cat([attention_mask, pad_mask], dim=1)
 
-        if cache_key is not None:
-            static_cache.update(
-                key=cache_key,
-                text_sbh=text_sbh,
-                pad_size=pad_size,
-                freqs_cos=freqs_cos,
-                freqs_sin=freqs_sin,
-                attention_mask=attention_mask,
-            )
         return hidden_states, freqs_cos, freqs_sin, attention_mask
 
 
@@ -650,7 +618,6 @@ class ErnieImageTransformer2DModel(nn.Module):
         text_lens: torch.Tensor,
         return_dict: bool = True,
         host_text_lens: list[int] | None = None,
-        static_prepare_cache: dict | None = None,
     ) -> torch.Tensor | Transformer2DModelOutput:
         dtype = hidden_states.dtype
         B, C, H, W = hidden_states.shape
@@ -658,9 +625,7 @@ class ErnieImageTransformer2DModel(nn.Module):
         Hp, Wp = H // p, W // p
 
         N_img = Hp * Wp
-        hidden_states, freqs_cos, freqs_sin, attention_mask = self.unified_prepare(
-            hidden_states, text_bth, text_lens, static_prepare_cache
-        )
+        hidden_states, freqs_cos, freqs_sin, attention_mask = self.unified_prepare(hidden_states, text_bth, text_lens)
         attention_mask = self._slice_attention_mask_for_ring(attention_mask)
         attention_mask_mode = None
         if (

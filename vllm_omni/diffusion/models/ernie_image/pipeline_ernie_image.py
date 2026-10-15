@@ -499,7 +499,6 @@ class ErnieImagePipeline(
         text_bth, text_lens, host_text_lens = self._pad_text(
             text_hiddens=cfg_text_hiddens, device=device, dtype=dtype, text_in_dim=self.transformer.config.text_in_dim
         )
-        static_prepare_cache = {}
 
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(self.scheduler.timesteps):
@@ -521,7 +520,6 @@ class ErnieImagePipeline(
                     text_bth=text_bth,
                     text_lens=text_lens,
                     host_text_lens=host_text_lens,
-                    static_prepare_cache=static_prepare_cache,
                     return_dict=False,
                 )[0]
 
