@@ -106,6 +106,11 @@ the unused generating pipeline. Finish preflight with these case-specific checks
   indexes; verify every referenced shard and required auxiliary file exists and
   is nonempty. Validate input decoding/hash and golden manifest size/hash where
   applicable. A model directory or `model_index.json` alone is insufficient.
+  Respect CI's offline/cache settings. For `snapshot_download`, pass
+  `local_files_only=constants.HF_HUB_OFFLINE` explicitly: a pinned commit can
+  otherwise still trigger a remote tree lookup. Require that exact revision in
+  the cache or an explicit frozen local snapshot; do not silently select another
+  revision or disable offline mode. Check cached and missing-snapshot behavior.
 - **Comparison environment:** import the metric dependencies and check required
   tools in the process that uses them (`ffmpeg -version` / `ffprobe -version`
   for encoded video); confirm target devices/backends are available.

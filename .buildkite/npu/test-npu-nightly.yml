@@ -198,6 +198,7 @@ steps:
           VLLM_WORKER_MULTIPROC_METHOD: spawn
           HF_TOKEN: "${HF_TOKEN}"
           QWEN_IMAGE_21_CALIBRATE: "0"
+          HF_HUB_OFFLINE: "1"
         artifact_paths:
           - tests/e2e/accuracy/artifacts/qwen_image_21/**/*
         commands:
