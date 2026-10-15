@@ -214,9 +214,7 @@ class UnifiedPrepare(nn.Module):
                 tuple(text_bth.shape),
                 text_bth.dtype,
                 text_bth.data_ptr(),
-                text_bth._version,
                 text_lens.data_ptr(),
-                text_lens._version,
                 device,
                 sp_size,
             )

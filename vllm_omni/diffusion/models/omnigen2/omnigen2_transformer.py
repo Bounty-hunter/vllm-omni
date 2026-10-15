@@ -1259,9 +1259,8 @@ class OmniGen2Transformer2DModel(nn.Module):
         if rotary_cache is not None and not self.training and not torch.is_grad_enabled():
             cache_key = (
                 text_attention_mask.data_ptr(),
-                text_attention_mask._version,
                 tuple(text_attention_mask.shape),
-                tuple((freq.data_ptr(), freq._version, tuple(freq.shape)) for freq in freqs_cis),
+                tuple((freq.data_ptr(), tuple(freq.shape)) for freq in freqs_cis),
                 tuple(l_effective_img_len),
                 tuple(tuple(lengths) for lengths in l_effective_ref_img_len),
                 tuple(img_sizes),
