@@ -50,16 +50,16 @@ if [[ -z "${QWEN_IMAGE_21_MODEL:-}" ]]; then
     QWEN_IMAGE_21_MODEL=$(python - <<'PY'
 from huggingface_hub import constants, snapshot_download
 from huggingface_hub.errors import LocalEntryNotFoundError
-from tests.e2e.accuracy.qwen_image_21.contract import MODEL_ID, MODEL_REVISION
+from tests.e2e.accuracy.qwen_image_21.contract import MODEL_ID
 try:
-    # A pinned commit can still trigger a tree lookup unless local-only is explicit.
+    # Resolve main once (cached refs/main when offline) for both runtimes.
     model = snapshot_download(
-        MODEL_ID, revision=MODEL_REVISION, ignore_patterns=["assets/*"],
+        MODEL_ID, ignore_patterns=["assets/*"],
         local_files_only=constants.HF_HUB_OFFLINE,
     )
 except LocalEntryNotFoundError as exc:
     raise RuntimeError(
-        f"Checkpoint {MODEL_ID}@{MODEL_REVISION} is not cached. Pre-cache this revision "
+        f"No cached main snapshot for {MODEL_ID}. Pre-cache main "
         "or set QWEN_IMAGE_21_MODEL to a frozen complete local snapshot."
     ) from exc
 print(model)

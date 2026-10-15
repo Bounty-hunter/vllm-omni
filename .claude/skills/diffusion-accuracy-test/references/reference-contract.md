@@ -108,9 +108,13 @@ the unused generating pipeline. Finish preflight with these case-specific checks
   applicable. A model directory or `model_index.json` alone is insufficient.
   Respect CI's offline/cache settings. For `snapshot_download`, pass
   `local_files_only=constants.HF_HUB_OFFLINE` explicitly: a pinned commit can
-  otherwise still trigger a remote tree lookup. Require that exact revision in
-  the cache or an explicit frozen local snapshot; do not silently select another
-  revision or disable offline mode. Check cached and missing-snapshot behavior.
+  otherwise still trigger a remote tree lookup. Follow the user's model selection
+  policy: a pinned revision, main (cached refs/main offline), or an explicit local
+  snapshot. Resolve it once and pass that same complete directory to both runtimes.
+  Record the resolved path and revision when available; do not report a configured
+  revision as the actual one. Fail clearly if the requested cache entry is missing,
+  without selecting an arbitrary snapshot or disabling offline mode. Check cached
+  and missing-snapshot behavior. Model selection is separate from reference-code pinning.
 - **Comparison environment:** import the metric dependencies and check required
   tools in the process that uses them (`ffmpeg -version` / `ffprobe -version`
   for encoded video); confirm target devices/backends are available.

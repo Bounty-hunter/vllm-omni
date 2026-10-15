@@ -10,6 +10,10 @@ Run from the repository root in the installed serving environment::
         tests/e2e/accuracy/qwen_image_21/test_qwen_image_21.py \
         -m 'full_model and diffusion and H100 and cards_1' --run-level full_model
 
+Model setup follows main (cached main in offline mode), unless QWEN_IMAGE_21_MODEL
+names a complete local snapshot. Both runtimes use the same resolved directory;
+model_assets.json records its path and snapshot revision when available.
+
 For NPU A3 nightly, use '-m "full_model and diffusion and npu and A3 and cards_1"'.
 The NPU native uses TORCH_SDPA with dense-mask prefill; the upstream reference
 retains segmented PyTorch NPU SDPA prefill. Both use CPU RNG. This known numerical
@@ -57,7 +61,6 @@ from tests.e2e.accuracy.qwen_image_21.contract import (
     EXECUTION_SETTINGS,
     INPUTS,
     MODEL_ID,
-    MODEL_REVISION,
     ROOT,
     device_preflight,
     sha256,
@@ -240,8 +243,7 @@ def test_qwen_image_21_matches_reference(accuracy_artifact_root: Path, run_level
         output / "model_assets.json",
         {
             "expected_public_model": MODEL_ID,
-            "expected_public_revision": MODEL_REVISION,
-            "local_override": model.name != MODEL_REVISION,
+            "resolved_revision": model.name if model.parent.name == "snapshots" else None,
             **native_assets,
         },
     )
