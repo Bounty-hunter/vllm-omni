@@ -571,15 +571,12 @@ class OmniGen2RotaryPosEmbed(nn.Module):
         ref_img_sizes,
         img_sizes,
         device,
-        text_seq_lengths: list[int] | None = None,
     ):
         batch_size = len(attention_mask)
         p = self.patch_size
 
         encoder_seq_len = attention_mask.shape[1]
-        l_effective_cap_len = (
-            text_seq_lengths if text_seq_lengths is not None else attention_mask.sum(dim=1).tolist()
-        )
+        l_effective_cap_len = attention_mask.sum(dim=1).tolist()
 
         seq_lengths = [
             cap_len + sum(ref_img_len) + img_len
@@ -1233,7 +1230,7 @@ class OmniGen2Transformer2DModel(nn.Module):
         text_attention_mask: torch.Tensor,
         ref_image_hidden_states: list[list[torch.Tensor]] | None = None,
         return_dict: bool = False,
-        text_seq_lengths: list[int] | None = None,
+        rotary_cache: dict | None = None,
     ) -> torch.Tensor | Transformer2DModelOutput:
         # 1. Condition, positional & patch embedding
         batch_size = len(hidden_states)
@@ -1258,6 +1255,34 @@ class OmniGen2Transformer2DModel(nn.Module):
             img_sizes,
         ) = self.flat_and_pad_to_seq(hidden_states, ref_image_hidden_states)
 
+        cache_key = None
+        if rotary_cache is not None and not self.training and not torch.is_grad_enabled():
+            cache_key = (
+                text_attention_mask.data_ptr(),
+                text_attention_mask._version,
+                tuple(text_attention_mask.shape),
+                tuple((freq.data_ptr(), freq._version, tuple(freq.shape)) for freq in freqs_cis),
+                tuple(l_effective_img_len),
+                tuple(tuple(lengths) for lengths in l_effective_ref_img_len),
+                tuple(img_sizes),
+                tuple(None if sizes is None else tuple(tuple(size) for size in sizes) for sizes in ref_img_sizes),
+                device,
+            )
+        if cache_key is not None and rotary_cache.get("key") == cache_key:
+            rotary_output = rotary_cache["value"]
+        else:
+            rotary_output = self.rope_embedder(
+                freqs_cis,
+                text_attention_mask,
+                l_effective_ref_img_len,
+                l_effective_img_len,
+                ref_img_sizes,
+                img_sizes,
+                device,
+            )
+            if cache_key is not None:
+                rotary_cache["key"] = cache_key
+                rotary_cache["value"] = rotary_output
         (
             context_rotary_emb,
             ref_img_rotary_emb,
@@ -1265,16 +1290,7 @@ class OmniGen2Transformer2DModel(nn.Module):
             rotary_emb,
             encoder_seq_lengths,
             seq_lengths,
-        ) = self.rope_embedder(
-            freqs_cis,
-            text_attention_mask,
-            l_effective_ref_img_len,
-            l_effective_img_len,
-            ref_img_sizes,
-            img_sizes,
-            device,
-            text_seq_lengths,
-        )
+        ) = rotary_output
 
         # 2. Context refinement
         for layer in self.context_refiner:
