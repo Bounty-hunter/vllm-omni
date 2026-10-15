@@ -960,18 +960,15 @@ def test_qwen_image_21_accuracy_shared_helper_routing(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.parametrize(
-    "changed_path",
+    "changed_path,selected",
     [
-        "vllm_omni/inputs/data.py",
-        "vllm_omni/entrypoints/async_omni.py",
-        "vllm_omni/engine/async_omni_engine.py",
-        "vllm_omni/diffusion/request.py",
-        "vllm_omni/diffusion/diffusion_engine.py",
-        "vllm_omni/diffusion/forward_context.py",
-        "vllm_omni/diffusion/distributed/autoencoders/distributed_vae_executor.py",
-        "vllm_omni/diffusion/sched/request_scheduler.py",
-        "vllm_omni/platforms/npu/platform.py",
-        "tests/e2e/accuracy/qwen_image_21/thresholds.json",
+        ("vllm_omni/diffusion/models/qwen_image_21/pipeline_qwen_image_21.py", True),
+        ("vllm_omni/diffusion/models/qwen_image/pipeline_qwen_image.py", True),
+        ("vllm_omni/diffusion/distributed/autoencoders/autoencoder_kl_qwenimage21.py", True),
+        ("vllm_omni/model_extras/qwen_image_21.py", True),
+        ("tests/e2e/accuracy/qwen_image_21/thresholds.json", True),
+        ("vllm_omni/diffusion/attention/backends/sdpa.py", False),
+        ("vllm_omni/diffusion/worker/diffusion_worker.py", False),
     ],
 )
 @pytest.mark.parametrize(
@@ -985,14 +982,18 @@ def test_qwen_image_21_accuracy_shared_helper_routing(monkeypatch: pytest.Monkey
         ),
     ],
 )
-def test_qwen_image_21_accuracy_shared_request_dependencies(
-    monkeypatch: pytest.MonkeyPatch, changed_path: str, pipeline_path: Path, queue: str, selector: str
+def test_qwen_image_21_accuracy_model_dependencies(
+    monkeypatch: pytest.MonkeyPatch, changed_path: str, selected: bool, pipeline_path: Path, queue: str, selector: str
 ) -> None:
     monkeypatch.setattr("upload_pipeline._get_mirror_hw_selector", lambda: "")
     doc = yaml.safe_load(pipeline_path.read_text(encoding="utf-8"))
-    rendered = _render_test_pipeline(doc, [changed_path], pipeline_path=pipeline_path)
+    # Include a known model match so the no-match fallback cannot mask routing.
+    changed_files = [changed_path, "vllm_omni/diffusion/models/wan2_2/pipeline_wan2_2.py"]
+    rendered = _render_test_pipeline(doc, changed_files, pipeline_path=pipeline_path)
     steps = [step for step in _iter_steps(rendered) if "Qwen-Image 2.1 Accuracy Test" in step.get("label", "")]
-    assert len(steps) == 1
+    assert len(steps) == int(selected)
+    if not selected:
+        return
     step = steps[0]
     assert step["agents"]["queue"] == queue
     assert not step.get("skip")

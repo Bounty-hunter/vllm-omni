@@ -166,6 +166,9 @@ uses YAML anchors for model business-code paths and aliases such as
 `diffusion_qwen_image_accuracy` or `diffusion_wan22_accuracy` for individual
 jobs. Extend the existing alias when extending that job. If adding a new job,
 create its corresponding alias and reference it with `source_file_dependencies`.
+Reuse the model's top-level YAML anchor for business-code dependencies, or create
+one for a new model. Keep job-specific test/reference/asset paths in the job alias.
+When only extracting an anchor, preserve the expanded dependency set.
 Include every test/reference script the step runs and the inputs whose changes
 should retrigger it. The uploader does not inspect `commands` to infer these
 dependencies. Standalone recipes/docs belong in an alias only when their changes
@@ -174,10 +177,11 @@ while designing a case does not make it a runtime dependency. A model-directory
 prefix can still include its README. Include relevant shared accuracy
 helpers/fixtures and used `tests/helpers/` paths in the job's alias, directly
 or through an anchor.
-Trace the exercised request path as well as the model: shared sampling/input
-contracts such as `vllm_omni/inputs/data.py`, request translation, and used
-execution helpers can change the comparison. Check those actual paths against
-the filter rather than assuming a model-directory dependency covers them.
+Match neighboring model jobs: start with model-owned code, model-specific files
+outside its directory, and the test's direct helpers/inputs. Do not expand the
+alias to every transitive framework dependency (attention, workers, engines,
+platforms, or global package configuration). Add a shared runtime path only when
+the requested CI scope or a concrete regression requires this model to cover it.
 Preserve the broad coverage of `source_filter_fallback` when no non-fallback
 file matches a job dependency, even when a job explicitly lists a shared path.
 Adding an unrelated file such as the root README to a helper change must not
