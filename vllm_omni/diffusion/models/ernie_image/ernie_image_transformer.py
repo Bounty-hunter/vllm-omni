@@ -347,6 +347,7 @@ class ErnieImageAttention(nn.Module):
         encoder_hidden_states: torch.Tensor | None = None,
         attention_mask: torch.Tensor | None = None,
         image_rotary_emb: torch.Tensor | None = None,
+        attention_mask_mode: str | None = None,
         **kwargs,
     ) -> torch.Tensor:
         query, _ = self.to_q(hidden_states)
@@ -369,7 +370,8 @@ class ErnieImageAttention(nn.Module):
         if attention_mask is not None:
             if attention_mask.dim() == 3:
                 attention_mask = attention_mask.unsqueeze(1)
-            attn_metadata = AttentionMetadata(attn_mask=attention_mask)
+            extra = {"attention_mask_mode": attention_mask_mode} if attention_mask_mode is not None else {}
+            attn_metadata = AttentionMetadata(attn_mask=attention_mask, extra=extra)
 
         hidden_states = self.attn(query, key, value, attn_metadata)
         hidden_states = hidden_states.flatten(2, 3).to(query.dtype)
@@ -451,6 +453,7 @@ class ErnieImageSharedAdaLNBlock(nn.Module):
         rotary_pos_emb: torch.Tensor,
         temb: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
         attention_mask: torch.Tensor | None = None,
+        attention_mask_mode: str | None = None,
     ) -> torch.Tensor:
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = temb
         residual = hidden_states
@@ -459,7 +462,10 @@ class ErnieImageSharedAdaLNBlock(nn.Module):
         hidden_states_bsh = hidden_states.permute(1, 0, 2)
 
         attn_out = self.self_attention(
-            hidden_states_bsh, attention_mask=attention_mask, image_rotary_emb=rotary_pos_emb
+            hidden_states_bsh,
+            attention_mask=attention_mask,
+            image_rotary_emb=rotary_pos_emb,
+            attention_mask_mode=attention_mask_mode,
         )
         attn_out = attn_out.permute(1, 0, 2)
         hidden_states = residual + (gate_msa.float() * attn_out.float()).to(hidden_states.dtype)
@@ -611,6 +617,7 @@ class ErnieImageTransformer2DModel(nn.Module):
         text_bth: torch.Tensor,
         text_lens: torch.Tensor,
         return_dict: bool = True,
+        host_text_lens: list[int] | None = None,
     ) -> torch.Tensor | Transformer2DModelOutput:
         dtype = hidden_states.dtype
         B, C, H, W = hidden_states.shape
@@ -620,6 +627,15 @@ class ErnieImageTransformer2DModel(nn.Module):
         N_img = Hp * Wp
         hidden_states, freqs_cos, freqs_sin, attention_mask = self.unified_prepare(hidden_states, text_bth, text_lens)
         attention_mask = self._slice_attention_mask_for_ring(attention_mask)
+        attention_mask_mode = None
+        if (
+            host_text_lens is not None
+            and _get_sequence_parallel_world_size_or_one() == 1
+            and _get_ring_parallel_info()[0] == 1
+        ):
+            attention_mask_mode = (
+                "padding" if any(length < text_bth.shape[1] for length in host_text_lens) else "none"
+            )
         rotary_pos_emb = (freqs_cos, freqs_sin)
         sample = self.time_proj(timestep)
         sample = sample.to(dtype=dtype)
@@ -636,7 +652,7 @@ class ErnieImageTransformer2DModel(nn.Module):
                     attention_mask,
                 )
             else:
-                hidden_states = layer(hidden_states, rotary_pos_emb, temb, attention_mask)
+                hidden_states = layer(hidden_states, rotary_pos_emb, temb, attention_mask, attention_mask_mode)
         hidden_states = self.final_norm(hidden_states, c).type_as(hidden_states)
         patches = self.final_linear(hidden_states)[:N_img].transpose(0, 1).contiguous()
         output = (

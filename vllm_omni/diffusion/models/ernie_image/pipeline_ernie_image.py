@@ -320,18 +320,21 @@ class ErnieImagePipeline(
     def _pad_text(text_hiddens: list[torch.Tensor], device: torch.device, dtype: torch.dtype, text_in_dim: int):
         B = len(text_hiddens)
         if B == 0:
-            return torch.zeros((0, 0, text_in_dim), device=device, dtype=dtype), torch.zeros(
-                (0,), device=device, dtype=torch.long
+            return (
+                torch.zeros((0, 0, text_in_dim), device=device, dtype=dtype),
+                torch.zeros((0,), device=device, dtype=torch.long),
+                [],
             )
         normalized = [
             th.squeeze(1).to(device).to(dtype) if th.dim() == 3 else th.to(device).to(dtype) for th in text_hiddens
         ]
-        lens = torch.tensor([t.shape[0] for t in normalized], device=device, dtype=torch.long)
-        Tmax = int(lens.max().item())
+        host_lens = [t.shape[0] for t in normalized]
+        lens = torch.tensor(host_lens, device=device, dtype=torch.long)
+        Tmax = max(host_lens)
         text_bth = torch.zeros((B, Tmax, text_in_dim), device=device, dtype=dtype)
         for i, t in enumerate(normalized):
             text_bth[i, : t.shape[0], :] = t
-        return text_bth, lens
+        return text_bth, lens, host_lens
 
     @property
     def guidance_scale(self):
@@ -493,7 +496,7 @@ class ErnieImagePipeline(
         else:
             cfg_text_hiddens = text_hiddens
 
-        text_bth, text_lens = self._pad_text(
+        text_bth, text_lens, host_text_lens = self._pad_text(
             text_hiddens=cfg_text_hiddens, device=device, dtype=dtype, text_in_dim=self.transformer.config.text_in_dim
         )
 
@@ -506,18 +509,17 @@ class ErnieImagePipeline(
 
                 if self.do_classifier_free_guidance:
                     latent_model_input = torch.cat([latents, latents], dim=0)
-                    t_batch = torch.full(
-                        (batch_size * num_images_per_prompt * 2,), t.item(), device=device, dtype=dtype
-                    )
                 else:
                     latent_model_input = latents
-                    t_batch = torch.full((batch_size * num_images_per_prompt,), t.item(), device=device, dtype=dtype)
+                # Keep the timestep on device instead of synchronizing once per denoising step.
+                t_batch = t.expand(latent_model_input.shape[0]).to(device=device, dtype=dtype)
 
                 pred = self.transformer(
                     hidden_states=latent_model_input,
                     timestep=t_batch,
                     text_bth=text_bth,
                     text_lens=text_lens,
+                    host_text_lens=host_text_lens,
                     return_dict=False,
                 )[0]
 

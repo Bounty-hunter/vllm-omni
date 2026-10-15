@@ -571,12 +571,15 @@ class OmniGen2RotaryPosEmbed(nn.Module):
         ref_img_sizes,
         img_sizes,
         device,
+        text_seq_lengths: list[int] | None = None,
     ):
         batch_size = len(attention_mask)
         p = self.patch_size
 
         encoder_seq_len = attention_mask.shape[1]
-        l_effective_cap_len = attention_mask.sum(dim=1).tolist()
+        l_effective_cap_len = (
+            text_seq_lengths if text_seq_lengths is not None else attention_mask.sum(dim=1).tolist()
+        )
 
         seq_lengths = [
             cap_len + sum(ref_img_len) + img_len
@@ -1230,6 +1233,7 @@ class OmniGen2Transformer2DModel(nn.Module):
         text_attention_mask: torch.Tensor,
         ref_image_hidden_states: list[list[torch.Tensor]] | None = None,
         return_dict: bool = False,
+        text_seq_lengths: list[int] | None = None,
     ) -> torch.Tensor | Transformer2DModelOutput:
         # 1. Condition, positional & patch embedding
         batch_size = len(hidden_states)
@@ -1269,6 +1273,7 @@ class OmniGen2Transformer2DModel(nn.Module):
             ref_img_sizes,
             img_sizes,
             device,
+            text_seq_lengths,
         )
 
         # 2. Context refinement

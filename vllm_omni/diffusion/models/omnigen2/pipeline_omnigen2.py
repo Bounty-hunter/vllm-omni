@@ -1195,6 +1195,14 @@ class OmniGen2Pipeline(CFGParallelMixin, nn.Module, SupportsComponentDiscovery):
             num_tokens=latents.shape[-2] * latents.shape[-1],
         )
         self._num_timesteps = len(timesteps)
+        # Text masks are request-invariant. Read their lengths once rather than
+        # synchronizing the device in every transformer forward and CFG branch.
+        prompt_text_lengths = prompt_attention_mask.sum(dim=1).tolist()
+        negative_text_lengths = (
+            negative_prompt_attention_mask.sum(dim=1).tolist()
+            if negative_prompt_attention_mask is not None
+            else None
+        )
 
         for i, t in enumerate(timesteps):
             text_guidance_scale = (
@@ -1210,6 +1218,7 @@ class OmniGen2Pipeline(CFGParallelMixin, nn.Module, SupportsComponentDiscovery):
                 prompt_embeds=prompt_embeds,
                 freqs_cis=freqs_cis,
                 prompt_attention_mask=prompt_attention_mask,
+                text_seq_lengths=prompt_text_lengths,
                 ref_image_hidden_states=ref_latents,
             )
             uncond_kwargs = dict(
@@ -1218,6 +1227,7 @@ class OmniGen2Pipeline(CFGParallelMixin, nn.Module, SupportsComponentDiscovery):
                 prompt_embeds=negative_prompt_embeds,
                 freqs_cis=freqs_cis,
                 prompt_attention_mask=negative_prompt_attention_mask,
+                text_seq_lengths=negative_text_lengths,
                 ref_image_hidden_states=None,
             )
 
@@ -1229,6 +1239,7 @@ class OmniGen2Pipeline(CFGParallelMixin, nn.Module, SupportsComponentDiscovery):
                     prompt_embeds=negative_prompt_embeds,
                     freqs_cis=freqs_cis,
                     prompt_attention_mask=negative_prompt_attention_mask,
+                    text_seq_lengths=negative_text_lengths,
                     ref_image_hidden_states=ref_latents,
                 )
                 model_pred = self.predict_noise_with_multi_branch_cfg(
@@ -1274,13 +1285,18 @@ class OmniGen2Pipeline(CFGParallelMixin, nn.Module, SupportsComponentDiscovery):
         freqs_cis,
         prompt_attention_mask,
         ref_image_hidden_states,
+        text_seq_lengths=None,
     ):
         # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
         timestep = t.expand(latents.shape[0]).to(latents.dtype)
 
         optional_kwargs = {}
-        if "ref_image_hidden_states" in set(inspect.signature(self.transformer.forward).parameters.keys()):
+        forward_params = inspect.signature(self.transformer.forward).parameters
+        accepts_kwargs = any(param.kind == inspect.Parameter.VAR_KEYWORD for param in forward_params.values())
+        if "ref_image_hidden_states" in forward_params or accepts_kwargs:
             optional_kwargs["ref_image_hidden_states"] = ref_image_hidden_states
+        if "text_seq_lengths" in forward_params or accepts_kwargs:
+            optional_kwargs["text_seq_lengths"] = text_seq_lengths
 
         with torch.autocast(
             device_type=self.device.type,
