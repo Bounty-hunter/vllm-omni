@@ -1,0 +1,4 @@
+interface:
+  display_name: "Diffusion Pipeline Bubbles"
+  short_description: "Reduce diffusion bubbles and measure before/after gains"
+  default_prompt: "Use $diffusion-pipeline-bubbles to reduce request-internal device idle time below 1%. Make one experience-led and at most one profiling-led optimization round, checking exact correctness, matched device activity and end-to-end latency after each. Then report the residual bubble and let me decide whether to continue."
