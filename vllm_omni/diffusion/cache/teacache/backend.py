@@ -161,10 +161,36 @@ def enable_kandinsky6_teacache(pipeline: Any, config: DiffusionCacheConfig) -> N
     )
 
 
+def enable_hunyuan_video_15_teacache(pipeline: Any, config: DiffusionCacheConfig) -> None:
+    """Enable TeaCache for HunyuanVideo-1.5 (t2v and i2v share the transformer).
+
+    The pipelines drive true CFG through separate positive/negative forwards;
+    marking ``do_true_cfg`` on the transformer lets the hook keep one cache
+    state per branch (sequential CFG alternates states by forward parity,
+    CFG-parallel splits them by rank). Coefficients are an uncalibrated
+    HunyuanImage3 stand-in until refit with TeaCacheCoefficientEstimator.
+    """
+    teacache_config = TeaCacheConfig(
+        transformer_type="HunyuanVideo15Transformer3DModel",
+        rel_l1_thresh=config.rel_l1_thresh,
+        coefficients=config.coefficients,
+    )
+    transformer = pipeline.transformer
+    transformer.do_true_cfg = True
+    apply_teacache_hook(transformer, teacache_config)
+
+    logger.info(
+        f"TeaCache applied with rel_l1_thresh={teacache_config.rel_l1_thresh}, "
+        f"transformer_class={teacache_config.transformer_type} (uncalibrated coefficients)"
+    )
+
+
 CUSTOM_TEACACHE_ENABLERS = {
     "BagelPipeline": enable_bagel_teacache,
     "Flux2KleinPipeline": enable_flux2_klein_teacache,
     "HunyuanImage3Pipeline": enable_hunyuan_image3_teacache,
+    "HunyuanVideo15Pipeline": enable_hunyuan_video_15_teacache,
+    "HunyuanVideo15ImageToVideoPipeline": enable_hunyuan_video_15_teacache,
     "MammothModa2DiTPipeline": enable_mammoth_moda2_teacache,
     "Kandinsky6TI2VAPipeline": enable_kandinsky6_teacache,
     "MiniMaxH3Pipeline": enable_minimax_h3_teacache,

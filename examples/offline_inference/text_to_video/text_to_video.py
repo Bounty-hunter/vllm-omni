@@ -302,8 +302,14 @@ def parse_args() -> argparse.Namespace:
         "--cache-backend",
         type=str,
         default=None,
-        choices=["cache_dit"],
+        choices=["cache_dit", "tea_cache"],
         help="Cache backend for supported diffusion pipelines. Default: None.",
+    )
+    parser.add_argument(
+        "--tea-cache-rel-l1-thresh",
+        type=float,
+        default=0.2,
+        help="[tea_cache] Threshold for accumulated relative L1 distance.",
     )
     parser.add_argument(
         "--enable-cache-dit-summary",
@@ -541,6 +547,8 @@ def main():
             "scm_steps_mask_policy": None,
             "scm_steps_policy": "dynamic",
         }
+    elif args.cache_backend == "tea_cache":
+        cache_config = {"rel_l1_thresh": args.tea_cache_rel_l1_thresh}
 
     profiler_enabled = args.profiler_config is not None
 

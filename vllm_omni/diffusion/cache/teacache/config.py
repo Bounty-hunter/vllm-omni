@@ -95,6 +95,19 @@ _MODEL_COEFFICIENTS = {
         -1.04182570e01,
         6.78098549e-01,
     ],
+    # HunyuanVideo-1.5 DiT coefficients.
+    # Uncalibrated stand-in copied from HunyuanImage3Pipeline (same vendor
+    # family, calibrated in-repo): the video DiT's time-embedding rel-L1
+    # distribution differs, so refit with TeaCacheCoefficientEstimator before
+    # treating skips as quality-neutral (same caveat as the Kandinsky6 borrow
+    # above).
+    "HunyuanVideo15Transformer3DModel": [
+        1.04117826e02,
+        -1.26848482e02,
+        5.68168652e01,
+        -1.04182570e01,
+        6.78098549e-01,
+    ],
     # Flux2 transformer coefficients
     # Copied from Qwen-Image, still uncalibrated; tracked in #8411 together with
     # the Flux2Klein borrow and the Ming subclasses of ZImageTransformer2DModel.

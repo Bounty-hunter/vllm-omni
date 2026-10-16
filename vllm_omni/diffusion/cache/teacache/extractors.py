@@ -1659,6 +1659,211 @@ def extract_cosmos3_context(
     )
 
 
+def extract_hunyuan_video_15_context(
+    module: nn.Module,
+    hidden_states: torch.Tensor,
+    timestep: torch.LongTensor,
+    encoder_hidden_states: torch.Tensor,
+    encoder_attention_mask: torch.Tensor,
+    timestep_r: torch.LongTensor | None = None,
+    encoder_hidden_states_2: torch.Tensor | None = None,
+    encoder_attention_mask_2: torch.Tensor | None = None,
+    image_embeds: torch.Tensor | None = None,
+    image_embeds_mask: torch.Tensor | None = None,
+    attention_kwargs: dict[str, Any] | None = None,
+    return_dict: bool = True,
+    **kwargs: Any,
+) -> CacheContext:
+    """Extract cache context for the HunyuanVideo-1.5 MM-DiT.
+
+    Replicates the transformer forward's preprocessing verbatim (rope, time
+    embedding, x/context embedders, cond-type embeds, token reordering, SP
+    scatter) so the hook's cached residuals are computed against exactly the
+    tensors the unhooked forward would produce. The transformer block loop and
+    the norm_out/proj_out head become ``run_transformer_blocks`` /
+    ``postprocess``. The timestep embedding (``temb``) is the TeaCache decision
+    signal, matching the HunyuanImage3 integration.
+    """
+    from diffusers.models.modeling_outputs import Transformer2DModelOutput
+
+    from vllm_omni.diffusion.distributed.parallel_state import get_sequence_parallel_world_size
+    from vllm_omni.diffusion.distributed.sp_sharding import sp_shard_with_padding
+
+    batch_size, num_channels, num_frames, height, width = hidden_states.shape
+    p_t, p_h, p_w = module.patch_size_t, module.patch_size, module.patch_size
+    post_patch_num_frames = num_frames // p_t
+    post_patch_height = height // p_h
+    post_patch_width = width // p_w
+
+    image_rotary_emb = module.rope(hidden_states)
+
+    temb = module.time_embed(timestep, timestep_r=timestep_r)
+
+    hidden_states = module.x_embedder(hidden_states)
+
+    # Scatter hidden_states along seq dim for sequence parallelism, identical
+    # to the unhooked forward so residuals see the same sharded layout.
+    if get_sequence_parallel_world_size() > 1:
+        hidden_states, _pad_size = sp_shard_with_padding(hidden_states, dim=1)
+        if _pad_size > 0:
+            sp_ctx = get_forward_context()
+            if sp_ctx.sp_original_seq_len is None:
+                sp_ctx.sp_padding_size = _pad_size
+                sp_ctx.sp_original_seq_len = hidden_states.shape[1] * get_sequence_parallel_world_size() - _pad_size
+
+    encoder_hidden_states = module.context_embedder(encoder_hidden_states, timestep, encoder_attention_mask)
+
+    encoder_hidden_states_cond_emb = module.cond_type_embed(
+        torch.zeros_like(encoder_hidden_states[:, :, 0], dtype=torch.long)
+    )
+    encoder_hidden_states = encoder_hidden_states + encoder_hidden_states_cond_emb
+
+    encoder_hidden_states_2 = module.context_embedder_2(encoder_hidden_states_2)
+
+    encoder_hidden_states_2_cond_emb = module.cond_type_embed(
+        torch.ones_like(encoder_hidden_states_2[:, :, 0], dtype=torch.long)
+    )
+    encoder_hidden_states_2 = encoder_hidden_states_2 + encoder_hidden_states_2_cond_emb
+
+    encoder_hidden_states_3 = module.image_embedder(image_embeds)
+    if image_embeds_mask is not None:
+        encoder_attention_mask_3 = image_embeds_mask
+    else:
+        # Fallback: detect T2V by checking if image_embeds are all zeros
+        is_t2v = torch.all(image_embeds == 0)
+        if is_t2v:
+            encoder_hidden_states_3 = encoder_hidden_states_3 * 0.0
+            encoder_attention_mask_3 = torch.zeros(
+                (batch_size, encoder_hidden_states_3.shape[1]),
+                dtype=encoder_attention_mask.dtype,
+                device=encoder_attention_mask.device,
+            )
+        else:
+            encoder_attention_mask_3 = torch.ones(
+                (batch_size, encoder_hidden_states_3.shape[1]),
+                dtype=encoder_attention_mask.dtype,
+                device=encoder_attention_mask.device,
+            )
+    encoder_hidden_states_3_cond_emb = module.cond_type_embed(
+        2 * torch.ones_like(encoder_hidden_states_3[:, :, 0], dtype=torch.long)
+    )
+    encoder_hidden_states_3 = encoder_hidden_states_3 + encoder_hidden_states_3_cond_emb
+
+    # Token reordering: [valid_image, valid_byte5, valid_mllm, padding]
+    encoder_attention_mask = encoder_attention_mask.bool()
+    encoder_attention_mask_2 = encoder_attention_mask_2.bool()
+    encoder_attention_mask_3 = encoder_attention_mask_3.bool()
+    new_encoder_hidden_states = []
+    new_encoder_attention_mask = []
+
+    for text, text_mask, text_2, text_mask_2, image, image_mask in zip(
+        encoder_hidden_states,
+        encoder_attention_mask,
+        encoder_hidden_states_2,
+        encoder_attention_mask_2,
+        encoder_hidden_states_3,
+        encoder_attention_mask_3,
+    ):
+        new_encoder_hidden_states.append(
+            torch.cat(
+                [
+                    image[image_mask],
+                    text_2[text_mask_2],
+                    text[text_mask],
+                    image[~image_mask],
+                    torch.zeros_like(text_2[~text_mask_2]),
+                    torch.zeros_like(text[~text_mask]),
+                ],
+                dim=0,
+            )
+        )
+        new_encoder_attention_mask.append(
+            torch.cat(
+                [
+                    image_mask[image_mask],
+                    text_mask_2[text_mask_2],
+                    text_mask[text_mask],
+                    image_mask[~image_mask],
+                    text_mask_2[~text_mask_2],
+                    text_mask[~text_mask],
+                ],
+                dim=0,
+            )
+        )
+
+    encoder_hidden_states = torch.stack(new_encoder_hidden_states)
+    encoder_attention_mask = torch.stack(new_encoder_attention_mask)
+
+    max_valid_encoder_tokens = int(encoder_attention_mask.sum(dim=1).max().item())
+    if max_valid_encoder_tokens < encoder_attention_mask.shape[1]:
+        encoder_hidden_states = encoder_hidden_states[:, :max_valid_encoder_tokens]
+        encoder_attention_mask = encoder_attention_mask[:, :max_valid_encoder_tokens]
+    if encoder_attention_mask.all():
+        encoder_attention_mask = None
+
+    sp_ctx = get_forward_context()
+    hidden_states_mask = None
+    if (
+        module.parallel_config is not None
+        and module.parallel_config.sequence_parallel_size > 1
+        and module.parallel_config.mask_sp_padding
+        and sp_ctx.sp_original_seq_len is not None
+        and sp_ctx.sp_padding_size > 0
+    ):
+        padded_seq_len = sp_ctx.sp_original_seq_len + sp_ctx.sp_padding_size
+        hidden_states_mask = torch.ones(
+            batch_size,
+            padded_seq_len,
+            dtype=torch.bool,
+            device=hidden_states.device,
+        )
+        hidden_states_mask[:, sp_ctx.sp_original_seq_len :] = False
+        if hidden_states_mask.all():
+            hidden_states_mask = None
+    elif (
+        module.parallel_config is not None
+        and module.parallel_config.sequence_parallel_size > 1
+        and not module.parallel_config.mask_sp_padding
+        and sp_ctx.sp_original_seq_len is not None
+        and sp_ctx.sp_padding_size > 0
+    ):
+        logger.warning_once(
+            "SP auto-padding applied %d token(s) in the TeaCache-extracted forward; "
+            "padding tokens are not masked from attention (mask_sp_padding=False). "
+            "Set parallel_config.mask_sp_padding=True to restore strict masking.",
+            sp_ctx.sp_padding_size,
+            sp_ctx.sp_original_seq_len,
+            module.parallel_config.sequence_parallel_size,
+        )
+
+    def run_transformer_blocks():
+        h, e = hidden_states, encoder_hidden_states
+        for block in module.transformer_blocks:
+            h, e = block(h, e, temb, encoder_attention_mask, image_rotary_emb, hidden_states_mask=hidden_states_mask)
+        return (h, e)
+
+    def postprocess(h: torch.Tensor) -> Any:
+        h = module.norm_out(h, temb)
+        h = module.proj_out(h)
+        h = h.reshape(
+            batch_size, post_patch_num_frames, post_patch_height, post_patch_width, -1, p_t, p_h, p_w
+        )
+        h = h.permute(0, 4, 1, 5, 2, 6, 3, 7)
+        h = h.flatten(6, 7).flatten(4, 5).flatten(2, 3)
+        if not return_dict:
+            return (h,)
+        return Transformer2DModelOutput(sample=h)
+
+    return CacheContext(
+        modulated_input=temb,
+        hidden_states=hidden_states,
+        encoder_hidden_states=encoder_hidden_states,
+        temb=temb,
+        run_transformer_blocks=run_transformer_blocks,
+        postprocess=postprocess,
+    )
+
+
 # Registry for model-specific extractors
 # Key: Transformer class name
 # Value: extractor function with signature (module, *args, **kwargs) -> CacheContext
@@ -1679,6 +1884,7 @@ EXTRACTOR_REGISTRY: dict[str, Callable] = {
     "FluxTransformer2DModel": extract_flux_context,
     "SenseNovaU1ForCausalLM": extract_sensenova_u1_context,
     "MiniMaxH3DiTModel": extract_minimax_h3_context,
+    "HunyuanVideo15Transformer3DModel": extract_hunyuan_video_15_context,
     # Future models:
     # "CogVideoXTransformer3DModel": extract_cogvideox_context,
 }
