@@ -173,6 +173,8 @@ CLAUDE.md
 !.claude/skills/review-pr/SKILL.md
 !.claude/skills/review-pr/references/
 !.claude/skills/review-pr/references/*.md
+!.claude/skills/eliminate-device-bubbles/
+!.claude/skills/eliminate-device-bubbles/SKILL.md
 
 # Codex
 AGENTS.md

@@ -37,6 +37,41 @@ from vllm_omni.platforms import current_omni_platform
 
 logger = logging.getLogger(__name__)
 
+_PromptEmbeds = tuple[
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor | None,
+    torch.Tensor | None,
+    torch.Tensor | None,
+    torch.Tensor | None,
+]
+_PromptEmbedsWithTokenCounts = tuple[
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor | None,
+    torch.Tensor | None,
+    torch.Tensor | None,
+    torch.Tensor | None,
+    tuple[int, ...],
+    tuple[int, ...] | None,
+]
+
+
+def _combine_valid_token_counts(
+    primary_counts: tuple[int, ...],
+    secondary_counts: tuple[int, ...],
+) -> tuple[int, ...]:
+    """Combine host token counts without silently truncating a batch."""
+    if len(primary_counts) != len(secondary_counts):
+        raise ValueError(
+            f"token count sources must have the same batch size, got {len(primary_counts)} and {len(secondary_counts)}"
+        )
+    return tuple(primary + secondary for primary, secondary in zip(primary_counts, secondary_counts))
+
 
 def retrieve_latents(
     encoder_output: torch.Tensor,
@@ -225,7 +260,7 @@ class HunyuanVideo15Pipeline(
         device: torch.device,
         dtype: torch.dtype,
         num_hidden_layers_to_skip: int = 2,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, tuple[int, ...]]:
         prompt_formatted = format_text_input(prompt, self.system_message)
 
         text_inputs = self.tokenizer.apply_chat_template(
@@ -253,16 +288,21 @@ class HunyuanVideo15Pipeline(
             prompt_embeds = prompt_embeds[:, crop_start:]
             prompt_attention_mask = prompt_attention_mask[:, crop_start:]
 
-        return prompt_embeds.to(dtype=dtype), prompt_attention_mask
+        host_mask = text_inputs.attention_mask
+        if crop_start is not None and crop_start > 0:
+            host_mask = host_mask[:, crop_start:]
+        valid_token_counts = tuple(int(count) for count in host_mask.sum(dim=1).tolist())
+        return prompt_embeds.to(dtype=dtype), prompt_attention_mask, valid_token_counts
 
     def _get_byte5_prompt_embeds(
         self,
         prompt: list[str],
         device: torch.device,
         dtype: torch.dtype,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, tuple[int, ...]]:
         prompt_embeds_list = []
         prompt_embeds_mask_list = []
+        valid_token_counts = []
 
         for p in prompt:
             glyph_text = extract_glyph_texts(p)
@@ -274,6 +314,7 @@ class HunyuanVideo15Pipeline(
                     dtype=dtype,
                 )
                 glyph_text_embeds_mask = torch.zeros((1, self.tokenizer_2_max_length), device=device, dtype=torch.int64)
+                valid_token_counts.append(0)
             else:
                 txt_tokens = self.tokenizer_2(
                     glyph_text,
@@ -282,7 +323,9 @@ class HunyuanVideo15Pipeline(
                     truncation=True,
                     add_special_tokens=True,
                     return_tensors="pt",
-                ).to(device)
+                )
+                valid_token_counts.append(int(txt_tokens.attention_mask.sum().item()))
+                txt_tokens = txt_tokens.to(device)
 
                 glyph_text_embeds = self.text_encoder_2(
                     input_ids=txt_tokens.input_ids,
@@ -294,7 +337,11 @@ class HunyuanVideo15Pipeline(
             prompt_embeds_list.append(glyph_text_embeds)
             prompt_embeds_mask_list.append(glyph_text_embeds_mask)
 
-        return torch.cat(prompt_embeds_list, dim=0), torch.cat(prompt_embeds_mask_list, dim=0)
+        return (
+            torch.cat(prompt_embeds_list, dim=0),
+            torch.cat(prompt_embeds_mask_list, dim=0),
+            tuple(valid_token_counts),
+        )
 
     def encode_prompt(
         self,
@@ -303,20 +350,13 @@ class HunyuanVideo15Pipeline(
         dtype: torch.dtype,
         negative_prompt: str | list[str] | None = None,
         do_classifier_free_guidance: bool = False,
-    ) -> tuple[
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor | None,
-        torch.Tensor | None,
-        torch.Tensor | None,
-        torch.Tensor | None,
-    ]:
+        return_token_counts: bool = False,
+    ) -> _PromptEmbeds | _PromptEmbedsWithTokenCounts:
         prompt = [prompt] if isinstance(prompt, str) else prompt
 
-        prompt_embeds, prompt_embeds_mask = self._get_mllm_prompt_embeds(prompt, device, dtype)
-        prompt_embeds_2, prompt_embeds_mask_2 = self._get_byte5_prompt_embeds(prompt, device, dtype)
+        prompt_embeds, prompt_embeds_mask, prompt_counts = self._get_mllm_prompt_embeds(prompt, device, dtype)
+        prompt_embeds_2, prompt_embeds_mask_2, prompt_counts_2 = self._get_byte5_prompt_embeds(prompt, device, dtype)
+        prompt_valid_token_counts = _combine_valid_token_counts(prompt_counts, prompt_counts_2)
 
         # Cast masks to model dtype to match diffusers behaviour
         prompt_embeds_mask = prompt_embeds_mask.to(dtype=dtype)
@@ -326,24 +366,31 @@ class HunyuanVideo15Pipeline(
         negative_prompt_embeds_mask = None
         negative_prompt_embeds_2 = None
         negative_prompt_embeds_mask_2 = None
+        negative_valid_token_counts = None
 
         if do_classifier_free_guidance and negative_prompt is not None:
             negative_prompt = [negative_prompt] if isinstance(negative_prompt, str) else negative_prompt
-            negative_prompt_embeds, negative_prompt_embeds_mask = self._get_mllm_prompt_embeds(
+            negative_prompt_embeds, negative_prompt_embeds_mask, negative_counts = self._get_mllm_prompt_embeds(
                 negative_prompt, device, dtype
             )
-            negative_prompt_embeds_2, negative_prompt_embeds_mask_2 = self._get_byte5_prompt_embeds(
+            negative_prompt_embeds_2, negative_prompt_embeds_mask_2, negative_counts_2 = self._get_byte5_prompt_embeds(
                 negative_prompt, device, dtype
             )
+            negative_valid_token_counts = _combine_valid_token_counts(negative_counts, negative_counts_2)
             negative_prompt_embeds_mask = negative_prompt_embeds_mask.to(dtype=dtype)
             negative_prompt_embeds_mask_2 = negative_prompt_embeds_mask_2.to(dtype=dtype)
         elif do_classifier_free_guidance:
-            negative_prompt_embeds, negative_prompt_embeds_mask = self._get_mllm_prompt_embeds([""], device, dtype)
-            negative_prompt_embeds_2, negative_prompt_embeds_mask_2 = self._get_byte5_prompt_embeds([""], device, dtype)
+            negative_prompt_embeds, negative_prompt_embeds_mask, negative_counts = self._get_mllm_prompt_embeds(
+                [""], device, dtype
+            )
+            negative_prompt_embeds_2, negative_prompt_embeds_mask_2, negative_counts_2 = self._get_byte5_prompt_embeds(
+                [""], device, dtype
+            )
+            negative_valid_token_counts = _combine_valid_token_counts(negative_counts, negative_counts_2)
             negative_prompt_embeds_mask = negative_prompt_embeds_mask.to(dtype=dtype)
             negative_prompt_embeds_mask_2 = negative_prompt_embeds_mask_2.to(dtype=dtype)
 
-        return (
+        result = (
             prompt_embeds,
             prompt_embeds_mask,
             prompt_embeds_2,
@@ -353,6 +400,9 @@ class HunyuanVideo15Pipeline(
             negative_prompt_embeds_2,
             negative_prompt_embeds_mask_2,
         )
+        if return_token_counts:
+            return (*result, prompt_valid_token_counts, negative_valid_token_counts)
+        return result
 
     def prepare_latents(
         self,
@@ -440,12 +490,15 @@ class HunyuanVideo15Pipeline(
             negative_prompt_embeds_mask,
             negative_prompt_embeds_2,
             negative_prompt_embeds_mask_2,
+            prompt_valid_token_counts,
+            negative_valid_token_counts,
         ) = self.encode_prompt(
             prompt=prompt,
             device=device,
             dtype=dtype,
             negative_prompt=negative_prompt,
             do_classifier_free_guidance=do_cfg,
+            return_token_counts=True,
         )
 
         batch_size = prompt_embeds.shape[0]
@@ -462,8 +515,8 @@ class HunyuanVideo15Pipeline(
         )
         cond_latents, mask = self.prepare_cond_latents_and_mask(latents, dtype, device)
 
-        # Image embeds (zeros for T2V, no mask — let the transformer detect T2V
-        # via the all-zeros check, matching the diffusers reference behaviour)
+        # T2V has no valid image tokens. Pass that host-known fact explicitly
+        # so the transformer does not inspect a device tensor in Python.
         image_embeds = torch.zeros(
             batch_size,
             self.vision_num_semantic_tokens,
@@ -471,7 +524,12 @@ class HunyuanVideo15Pipeline(
             dtype=dtype,
             device=device,
         )
-
+        image_embeds_mask = torch.zeros(
+            batch_size,
+            self.vision_num_semantic_tokens,
+            dtype=prompt_embeds_mask.dtype,
+            device=device,
+        )
         # Timesteps — the scheduler handles flow_shift via its config (`shift` param).
         # We just provide unshifted linear sigmas, matching the diffusers reference.
         sigmas = np.linspace(1.0, 0.0, num_steps + 1)[:-1]
@@ -503,6 +561,8 @@ class HunyuanVideo15Pipeline(
                     "encoder_hidden_states_2": prompt_embeds_2,
                     "encoder_attention_mask_2": prompt_embeds_mask_2,
                     "image_embeds": image_embeds,
+                    "image_embeds_mask": image_embeds_mask,
+                    "encoder_valid_token_counts": prompt_valid_token_counts,
                     "return_dict": False,
                 }
 
@@ -517,6 +577,8 @@ class HunyuanVideo15Pipeline(
                         "encoder_hidden_states_2": negative_prompt_embeds_2,
                         "encoder_attention_mask_2": negative_prompt_embeds_mask_2,
                         "image_embeds": image_embeds,
+                        "image_embeds_mask": image_embeds_mask,
+                        "encoder_valid_token_counts": negative_valid_token_counts,
                         "return_dict": False,
                     }
 

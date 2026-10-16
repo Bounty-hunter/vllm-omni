@@ -39,6 +39,38 @@ if TYPE_CHECKING:
 logger = init_logger(__name__)
 
 
+def _trim_encoder_context(
+    encoder_hidden_states: torch.Tensor,
+    encoder_attention_mask: torch.Tensor,
+    valid_token_counts: tuple[int, ...] | list[int] | None = None,
+) -> tuple[torch.Tensor, torch.Tensor | None]:
+    """Trim reordered context, using host counts when the caller has them."""
+    if valid_token_counts is None:
+        max_valid_tokens = int(encoder_attention_mask.sum(dim=1).max().item())
+        all_tokens_valid = bool(encoder_attention_mask.all())
+    else:
+        if len(valid_token_counts) != encoder_hidden_states.shape[0]:
+            raise ValueError(
+                "valid_token_counts must contain one value per batch item, "
+                f"got {len(valid_token_counts)} for batch size {encoder_hidden_states.shape[0]}"
+            )
+        total_tokens = encoder_hidden_states.shape[1]
+        if any(count < 0 or count > total_tokens for count in valid_token_counts):
+            raise ValueError(f"valid_token_counts must be in [0, {total_tokens}], got {valid_token_counts}")
+        max_valid_tokens = max(valid_token_counts, default=0)
+        # Reordering packs valid tokens at the start of every row. After
+        # trimming to the longest row, no mask is needed only when all rows
+        # have that same valid length.
+        all_tokens_valid = all(count == max_valid_tokens for count in valid_token_counts)
+
+    if max_valid_tokens < encoder_attention_mask.shape[1]:
+        encoder_hidden_states = encoder_hidden_states[:, :max_valid_tokens]
+        encoder_attention_mask = encoder_attention_mask[:, :max_valid_tokens]
+    if all_tokens_valid:
+        encoder_attention_mask = None
+    return encoder_hidden_states, encoder_attention_mask
+
+
 class HunyuanVideo15PatchEmbed(nn.Module):
     def __init__(
         self,
@@ -697,6 +729,7 @@ class HunyuanVideo15Transformer3DModel(nn.Module):
         image_embeds_mask: torch.Tensor | None = None,
         attention_kwargs: dict[str, Any] | None = None,
         return_dict: bool = True,
+        encoder_valid_token_counts: tuple[int, ...] | list[int] | None = None,
     ) -> torch.Tensor | Transformer2DModelOutput:
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
         p_t, p_h, p_w = self.patch_size_t, self.patch_size, self.patch_size
@@ -805,12 +838,11 @@ class HunyuanVideo15Transformer3DModel(nn.Module):
         encoder_hidden_states = torch.stack(new_encoder_hidden_states)
         encoder_attention_mask = torch.stack(new_encoder_attention_mask)
 
-        max_valid_encoder_tokens = int(encoder_attention_mask.sum(dim=1).max().item())
-        if max_valid_encoder_tokens < encoder_attention_mask.shape[1]:
-            encoder_hidden_states = encoder_hidden_states[:, :max_valid_encoder_tokens]
-            encoder_attention_mask = encoder_attention_mask[:, :max_valid_encoder_tokens]
-        if encoder_attention_mask.all():
-            encoder_attention_mask = None
+        encoder_hidden_states, encoder_attention_mask = _trim_encoder_context(
+            encoder_hidden_states,
+            encoder_attention_mask,
+            encoder_valid_token_counts,
+        )
 
         ctx = get_forward_context()
         hidden_states_mask = None

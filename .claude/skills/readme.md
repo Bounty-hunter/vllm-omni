@@ -34,6 +34,9 @@ self-check.
 - [`diffusion-perf-opt`](diffusion-perf-opt/SKILL.md): guides diffusion model
   performance optimization, including profiling traces, parallel strategies,
   stage timing analysis, and benchmark-driven tuning
+- [`eliminate-device-bubbles`](eliminate-device-bubbles/SKILL.md): diagnoses
+  accelerator idle gaps by correlating Python/CPU stacks, launch lead,
+  transfers, synchronization, and device traces, then validates lossless fixes
 - [`find-simplifications`](find-simplifications/SKILL.md): finds evidence-backed
   opportunities to remove or merge dead, duplicated, speculative,
   over-generalized, or unnecessarily defensive vLLM-Omni code
