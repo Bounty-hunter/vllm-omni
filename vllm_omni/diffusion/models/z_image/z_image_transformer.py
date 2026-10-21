@@ -888,6 +888,7 @@ class ZImageTransformer2DModel(CachedTransformer):
         f_patch_size: int,
         all_image_ref: list[torch.Tensor | None] | None = None,
         all_cap_feats_2: list[torch.Tensor | None] | None = None,
+        image_layout_cache: dict[str, object] | None = None,
     ):
         pH = pW = patch_size
         pF = f_patch_size
@@ -907,7 +908,29 @@ class ZImageTransformer2DModel(CachedTransformer):
         if all_cap_feats_2 is None:
             all_cap_feats_2 = [None] * len(all_image)
 
-        for image, cap_feat, cap_feat_2, image_ref in zip(all_image, all_cap_feats, all_cap_feats_2, all_image_ref):
+        layout_signatures = []
+        for image, cap_feat, cap_feat_2, image_ref in zip(
+            all_image,
+            all_cap_feats,
+            all_cap_feats_2,
+            all_image_ref,
+        ):
+            C, F, H, W = image.size()
+            if image_ref is not None:
+                ref_C, ref_F, ref_H, ref_W = image_ref.size()
+                if (C, H, W) != (ref_C, ref_H, ref_W):
+                    raise ValueError("Reference image channels and spatial dimensions must match the latent input.")
+                F += ref_F
+            cap_ori_len = len(cap_feat) + (len(cap_feat_2) if cap_feat_2 is not None else 0)
+            cap_padded_len = cap_ori_len + (-cap_ori_len) % SEQ_MULTI_OF
+            layout_signatures.append((C, F, H, W, cap_padded_len, patch_size, f_patch_size, device))
+
+        cached_patchify = image_layout_cache.get("patchify") if image_layout_cache is not None else None
+        reuse_layout = isinstance(cached_patchify, dict) and cached_patchify.get("signatures") == layout_signatures
+
+        for item_index, (image, cap_feat, cap_feat_2, image_ref) in enumerate(
+            zip(all_image, all_cap_feats, all_cap_feats_2, all_image_ref)
+        ):
             ### Process Caption
             cap_ori_len = len(cap_feat) + (len(cap_feat_2) if cap_feat_2 is not None else 0)
             cap_padding_len = (-cap_ori_len) % SEQ_MULTI_OF
@@ -941,7 +964,6 @@ class ZImageTransformer2DModel(CachedTransformer):
             if image_ref is not None:
                 image = torch.cat([image, image_ref], dim=1)
             C, F, H, W = image.size()
-            all_image_size.append((F, H, W))
             F_tokens, H_tokens, W_tokens = F // pF, H // pH, W // pW
 
             image = image.view(C, F_tokens, pF, H_tokens, pH, W_tokens, pW)
@@ -951,35 +973,48 @@ class ZImageTransformer2DModel(CachedTransformer):
             image_ori_len = len(image)
             image_padding_len = (-image_ori_len) % SEQ_MULTI_OF
 
-            image_ori_pos_ids = self.create_coordinate_grid(
-                size=(F_tokens, H_tokens, W_tokens),
-                start=(cap_ori_len + cap_padding_len + 1, 0, 0),
-                device=device,
-            ).flatten(0, 2)
-            image_padding_pos_ids = (
-                self.create_coordinate_grid(
-                    size=(1, 1, 1),
-                    start=(0, 0, 0),
+            if reuse_layout:
+                all_image_size.append(cached_patchify["image_sizes"][item_index])
+                all_image_pos_ids.append(cached_patchify["position_ids"][item_index])
+                all_image_pad_mask.append(cached_patchify["padding_masks"][item_index])
+            else:
+                all_image_size.append((F, H, W))
+                image_ori_pos_ids = self.create_coordinate_grid(
+                    size=(F_tokens, H_tokens, W_tokens),
+                    start=(cap_ori_len + cap_padding_len + 1, 0, 0),
                     device=device,
+                ).flatten(0, 2)
+                image_padding_pos_ids = (
+                    self.create_coordinate_grid(
+                        size=(1, 1, 1),
+                        start=(0, 0, 0),
+                        device=device,
+                    )
+                    .flatten(0, 2)
+                    .repeat(image_padding_len, 1)
                 )
-                .flatten(0, 2)
-                .repeat(image_padding_len, 1)
-            )
-            image_padded_pos_ids = torch.cat([image_ori_pos_ids, image_padding_pos_ids], dim=0)
-            all_image_pos_ids.append(image_padded_pos_ids)
-            # pad mask
-            all_image_pad_mask.append(
-                torch.cat(
-                    [
-                        torch.zeros((image_ori_len,), dtype=torch.bool, device=device),
-                        torch.ones((image_padding_len,), dtype=torch.bool, device=device),
-                    ],
-                    dim=0,
+                all_image_pos_ids.append(torch.cat([image_ori_pos_ids, image_padding_pos_ids], dim=0))
+                all_image_pad_mask.append(
+                    torch.cat(
+                        [
+                            torch.zeros((image_ori_len,), dtype=torch.bool, device=device),
+                            torch.ones((image_padding_len,), dtype=torch.bool, device=device),
+                        ],
+                        dim=0,
+                    )
                 )
-            )
             # padded feature
             image_padded_feat = torch.cat([image, image[-1:].repeat(image_padding_len, 1)], dim=0)
             all_image_out.append(image_padded_feat)
+
+        if image_layout_cache is not None and not reuse_layout:
+            image_layout_cache.clear()
+            image_layout_cache["patchify"] = {
+                "signatures": layout_signatures,
+                "image_sizes": all_image_size,
+                "position_ids": all_image_pos_ids,
+                "padding_masks": all_image_pad_mask,
+            }
 
         return (
             all_image_out,
@@ -1001,6 +1036,7 @@ class ZImageTransformer2DModel(CachedTransformer):
         f_patch_size=1,
         ref_x: list[torch.Tensor | None] | None = None,
         cap_feats_2: list[torch.Tensor] | None = None,
+        image_layout_cache: dict[str, object] | None = None,
     ):
         assert patch_size in self.all_patch_size
         assert f_patch_size in self.all_f_patch_size
@@ -1019,7 +1055,15 @@ class ZImageTransformer2DModel(CachedTransformer):
             x_inner_pad_mask,
             cap_inner_pad_mask,
             cap_feats_2,
-        ) = self.patchify_and_embed(x, cap_feats, patch_size, f_patch_size, ref_x, cap_feats_2)
+        ) = self.patchify_and_embed(
+            x,
+            cap_feats,
+            patch_size,
+            f_patch_size,
+            ref_x,
+            cap_feats_2,
+            image_layout_cache,
+        )
 
         # x embed & refine
         x_item_seqlens = [len(_) for _ in x]
@@ -1044,18 +1088,29 @@ class ZImageTransformer2DModel(CachedTransformer):
             x,
         )
         x = list(x.split(x_item_seqlens, dim=0))
-        x_cos, x_sin = self.rope_embedder(torch.cat(x_pos_ids, dim=0))
-        x_cos = list(x_cos.split(x_item_seqlens, dim=0))
-        x_sin = list(x_sin.split(x_item_seqlens, dim=0))
-
         x = pad_sequence(x, batch_first=True, padding_value=0.0)
-        x_cos = pad_sequence(x_cos, batch_first=True, padding_value=0.0)
-        x_sin = pad_sequence(x_sin, batch_first=True, padding_value=0.0)
-        x_attn_mask = torch.zeros((bsz, x_max_item_seqlen), dtype=torch.bool, device=device)
-        for i, seq_len in enumerate(x_item_seqlens):
-            x_attn_mask[i, :seq_len] = 1
-            if self.alignment_padding_mode == ZERO_MASKED_PADDING:
-                x_attn_mask[i, :seq_len].masked_fill_(x_inner_pad_mask[i], False)
+        cached_forward = image_layout_cache.get("forward") if image_layout_cache is not None else None
+        forward_signature = (tuple(x_item_seqlens), tuple(x_size), device, self.alignment_padding_mode)
+        if isinstance(cached_forward, dict) and cached_forward.get("signature") == forward_signature:
+            x_cos = cached_forward["cos"]
+            x_sin = cached_forward["sin"]
+            x_attn_mask = cached_forward["attention_mask"]
+        else:
+            x_cos, x_sin = self.rope_embedder(torch.cat(x_pos_ids, dim=0))
+            x_cos = pad_sequence(list(x_cos.split(x_item_seqlens, dim=0)), batch_first=True, padding_value=0.0)
+            x_sin = pad_sequence(list(x_sin.split(x_item_seqlens, dim=0)), batch_first=True, padding_value=0.0)
+            x_attn_mask = torch.zeros((bsz, x_max_item_seqlen), dtype=torch.bool, device=device)
+            for i, seq_len in enumerate(x_item_seqlens):
+                x_attn_mask[i, :seq_len] = 1
+                if self.alignment_padding_mode == ZERO_MASKED_PADDING:
+                    x_attn_mask[i, :seq_len].masked_fill_(x_inner_pad_mask[i], False)
+            if image_layout_cache is not None:
+                image_layout_cache["forward"] = {
+                    "signature": forward_signature,
+                    "cos": x_cos,
+                    "sin": x_sin,
+                    "attention_mask": x_attn_mask,
+                }
 
         for layer in self.noise_refiner:
             x = layer(x, x_attn_mask, x_cos, x_sin, adaln_input)

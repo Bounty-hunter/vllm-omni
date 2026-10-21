@@ -50,6 +50,17 @@ from vllm_omni.model_executor.model_loader.weight_utils import (
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 
+def _get_image_layout_cache(
+    transformer: nn.Module,
+    caches: dict[bool, dict[str, object]],
+    apply_cfg: bool,
+) -> dict[str, object] | None:
+    """Return request-local static layout storage for the native Z-Image model."""
+    if type(transformer) is not ZImageTransformer2DModel:
+        return None
+    return caches.setdefault(apply_cfg, {})
+
+
 def _postprocess_to_pil_via_uint8(
     images: torch.Tensor,
     image_processor: VaeImageProcessor,
@@ -634,6 +645,12 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
         if not isinstance(t_norm_list, list):
             t_norm_list = [t_norm_list]
 
+        # Image token positions, padding masks, rotary gathers, and attention
+        # masks depend on request layout rather than latent values or timestep.
+        # Keep each CFG shape in request-local storage so no state crosses
+        # requests and subclasses retain their existing forward contract.
+        image_layout_caches: dict[bool, dict[str, object]] = {}
+
         # 6. Denoising loop
         for i, t in enumerate(timesteps):
             if self.interrupt:
@@ -677,11 +694,24 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
             if getattr(self, "_uses_cudagraph_trees", False):
                 # check Ming-Image
                 torch.compiler.cudagraph_mark_step_begin()
-            model_out_list = self.transformer(
-                latent_model_input_list,
-                timestep_model_input,
-                prompt_embeds_model_input,
-            )[0]
+            image_layout_cache = _get_image_layout_cache(
+                self.transformer,
+                image_layout_caches,
+                apply_cfg,
+            )
+            if image_layout_cache is None:
+                model_out_list = self.transformer(
+                    latent_model_input_list,
+                    timestep_model_input,
+                    prompt_embeds_model_input,
+                )[0]
+            else:
+                model_out_list = self.transformer(
+                    latent_model_input_list,
+                    timestep_model_input,
+                    prompt_embeds_model_input,
+                    image_layout_cache=image_layout_cache,
+                )[0]
 
             if apply_cfg:
                 # Perform CFG
