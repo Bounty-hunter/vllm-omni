@@ -761,7 +761,7 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
             )
             self.vae.decoder.forward = torch.compile(
                 self.vae.decoder.forward,
-                mode="reduce-overhead",
+                mode="max-autotune",
                 fullgraph=False,
                 dynamic=False,
             )
