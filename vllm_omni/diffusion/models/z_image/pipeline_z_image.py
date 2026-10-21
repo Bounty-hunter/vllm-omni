@@ -25,6 +25,7 @@ import PIL.Image
 import torch
 import torch.nn as nn
 from diffusers.image_processor import VaeImageProcessor
+from diffusers.models.autoencoders.vae import DiagonalGaussianDistribution
 from diffusers.schedulers import FlowMatchEulerDiscreteScheduler
 from diffusers.utils import logging
 from diffusers.utils.torch_utils import randn_tensor
@@ -51,6 +52,18 @@ logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 _IMAGE_PREPROCESS_CACHE_SIZE = 4
 _ImagePreprocessCacheKey = tuple[str, tuple[int, int], int, int, str, bytes]
+_VaePosteriorCacheKey = tuple[_ImagePreprocessCacheKey, torch.dtype]
+
+
+def _pil_image_preprocess_cache_key(
+    image: PIL.Image.Image,
+    height: int,
+    width: int,
+    device: torch.device,
+) -> _ImagePreprocessCacheKey | None:
+    if image.mode != "RGB":
+        return None
+    return (image.mode, image.size, height, width, str(device), image.tobytes())
 
 
 def _preprocess_pil_image_with_cache(
@@ -60,14 +73,15 @@ def _preprocess_pil_image_with_cache(
     width: int,
     device: torch.device,
     cache: dict[_ImagePreprocessCacheKey, torch.Tensor],
+    cache_key: _ImagePreprocessCacheKey | None = None,
 ) -> torch.Tensor:
     """Reuse exact RGB preprocessing results across repeated requests."""
-    cache_key = None
-    if image.mode == "RGB":
+    if cache_key is None:
         # Keep the full source bytes in the key so cache correctness does not
         # depend on a content-hash collision. Target size and device complete
         # the preprocessing identity for this pipeline instance.
-        cache_key = (image.mode, image.size, height, width, str(device), image.tobytes())
+        cache_key = _pil_image_preprocess_cache_key(image, height, width, device)
+    if cache_key is not None:
         cached = cache.pop(cache_key, None)
         if cached is not None:
             cache[cache_key] = cached
@@ -79,6 +93,36 @@ def _preprocess_pil_image_with_cache(
             cache.pop(next(iter(cache)))
         cache[cache_key] = result
     return result
+
+
+def _encode_vae_image_with_cache(
+    vae: DistributedAutoencoderKL,
+    image: torch.Tensor,
+    generator: torch.Generator | list[torch.Generator] | None,
+    cache_key: _ImagePreprocessCacheKey | None,
+    cache: dict[_VaePosteriorCacheKey, torch.Tensor],
+) -> torch.Tensor:
+    """Reuse exact VAE posterior parameters while sampling fresh latents."""
+    posterior_cache_key = None if cache_key is None else (cache_key, image.dtype)
+    parameters = None
+    if posterior_cache_key is not None:
+        parameters = cache.pop(posterior_cache_key, None)
+        if parameters is not None:
+            cache[posterior_cache_key] = parameters
+
+    if parameters is None:
+        posterior = vae.encode(image).latent_dist
+        if posterior_cache_key is None:
+            return posterior.sample(generator)
+        # Compiled VAE outputs may reuse graph-owned storage on the next call.
+        # Keep an independent snapshot, but still sample on every request so
+        # generator consumption and img2img stochastic semantics are unchanged.
+        parameters = posterior.parameters.detach().clone()
+        if len(cache) >= _IMAGE_PREPROCESS_CACHE_SIZE:
+            cache.pop(next(iter(cache)))
+        cache[posterior_cache_key] = parameters
+
+    return DiagonalGaussianDistribution(parameters).sample(generator)
 
 
 def _postprocess_to_pil_via_uint8(
@@ -288,6 +332,7 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
 
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor * 2, do_convert_rgb=True)
         self._image_preprocess_cache: dict[_ImagePreprocessCacheKey, torch.Tensor] = {}
+        self._vae_posterior_cache: dict[_VaePosteriorCacheKey, torch.Tensor] = {}
 
     def encode_prompt(
         self,
@@ -386,6 +431,7 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
         latents=None,
         image=None,
         timestep=None,
+        image_cache_key: _ImagePreprocessCacheKey | None = None,
     ):
         height = 2 * (int(height) // (self.vae_scale_factor * 2))
         width = 2 * (int(width) // (self.vae_scale_factor * 2))
@@ -405,7 +451,13 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
                     ]
                     image_latents = torch.cat(image_latents, dim=0)
                 else:
-                    image_latents = retrieve_latents(self.vae.encode(image), generator=generator)
+                    image_latents = _encode_vae_image_with_cache(
+                        self.vae,
+                        image,
+                        generator,
+                        image_cache_key,
+                        self._vae_posterior_cache,
+                    )
 
                 image_latents = (image_latents - self.vae.config.shift_factor) * self.vae.config.scaling_factor
             else:
@@ -473,6 +525,7 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
         negative_prompt_embeds = None
 
         image = None
+        image_cache_key = None
         if req.prompts:
             if len(req.prompts) > 1:
                 logger.warning(
@@ -565,6 +618,7 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
 
             # Prepare image for VAE encoding using image_processor
             if not isinstance(image, torch.Tensor):
+                image_cache_key = _pil_image_preprocess_cache_key(image, height, width, device)
                 image = _preprocess_pil_image_with_cache(
                     image,
                     self.image_processor,
@@ -572,6 +626,7 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
                     width,
                     device,
                     self._image_preprocess_cache,
+                    image_cache_key,
                 )
 
             # Initialize scheduler kwargs for img2img
@@ -616,6 +671,7 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
                 latents,
                 image,
                 latent_timestep,
+                image_cache_key,
             )
         else:
             latents = self.prepare_latents(
