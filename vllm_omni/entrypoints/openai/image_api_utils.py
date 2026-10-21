@@ -21,11 +21,10 @@ LONGEVITY:
 See ``openai/README.md`` and ``images/README.md`` (utils vs helpers, no overlap).
 """
 
+import base64
 import io
 import struct
 import zlib
-
-import base64
 
 import PIL.Image
 
