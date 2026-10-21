@@ -50,6 +50,17 @@ from vllm_omni.model_executor.model_loader.weight_utils import (
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 
+def _tokenize_prompt_batch(tokenizer, prompt: list[str], max_sequence_length: int):
+    """Pad only to this request batch's longest prompt, while retaining truncation."""
+    return tokenizer(
+        prompt,
+        padding="longest",
+        max_length=max_sequence_length,
+        truncation=True,
+        return_tensors="pt",
+    )
+
+
 def _postprocess_to_pil_via_uint8(
     images: torch.Tensor,
     image_processor: VaeImageProcessor,
@@ -318,12 +329,10 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
             )
             prompt[i] = prompt_item
 
-        text_inputs = self.tokenizer(
+        text_inputs = _tokenize_prompt_batch(
+            self.tokenizer,
             prompt,
-            padding="max_length",
-            max_length=max_sequence_length,
-            truncation=True,
-            return_tensors="pt",
+            max_sequence_length,
         )
 
         text_input_ids = text_inputs.input_ids.to(device)
