@@ -766,13 +766,13 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
         if next(self.vae.parameters()).device.type == "cuda":
             self.vae.encoder.forward = torch.compile(
                 self.vae.encoder.forward,
-                mode="reduce-overhead",
+                mode="max-autotune",
                 fullgraph=False,
                 dynamic=False,
             )
             self.vae.decoder.forward = torch.compile(
                 self.vae.decoder.forward,
-                mode="reduce-overhead",
+                mode="max-autotune",
                 fullgraph=False,
                 dynamic=False,
             )
