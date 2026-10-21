@@ -96,8 +96,10 @@ def _preprocess_pil_image_on_device(
     device: torch.device,
 ) -> torch.Tensor:
     """Preprocess a PIL image without materializing float pixels on the host."""
-    image = image_processor.resize(image, height, width, resize_mode="default")
-    image = image_processor.convert_to_rgb(image)
+    if image.size != (width, height):
+        image = image_processor.resize(image, height, width, resize_mode="default")
+    if image.mode != "RGB":
+        image = image_processor.convert_to_rgb(image)
     image_array = np.array(image, dtype=np.uint8, copy=True)
 
     # Transfer packed uint8 pixels before conversion, reducing this request-boundary
