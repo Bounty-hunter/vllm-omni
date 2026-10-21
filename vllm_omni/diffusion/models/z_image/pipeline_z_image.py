@@ -104,7 +104,8 @@ def _preprocess_pil_image_on_device(
     # H2D copy to one quarter of the float32 preprocessing path's size.
     image_tensor = torch.from_numpy(image_array).unsqueeze(0).to(device=device)
     image_tensor = image_tensor.permute(0, 3, 1, 2).to(dtype=torch.float32)
-    return image_tensor.mul_(2.0 / 255.0).sub_(1.0)
+    image_tensor.div_(255.0)
+    return image_tensor.mul_(2.0).sub_(1.0)
 
 
 # Copied from diffusers
