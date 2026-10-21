@@ -980,9 +980,7 @@ class ZImageTransformer2DModel(CachedTransformer):
             )
             # padded feature
             image_padded_feat = (
-                torch.cat([image, image[-1:].repeat(image_padding_len, 1)], dim=0)
-                if image_padding_len
-                else image
+                torch.cat([image, image[-1:].repeat(image_padding_len, 1)], dim=0) if image_padding_len else image
             )
             all_image_out.append(image_padded_feat)
 
@@ -1123,16 +1121,23 @@ class ZImageTransformer2DModel(CachedTransformer):
         ref_x: list[torch.Tensor | None] | None = None,
         cap_feats_2: list[torch.Tensor] | None = None,
         caption_context: ZImageCaptionContext | None = None,
+        latent_repeat_count: int = 1,
     ):
         assert patch_size in self.all_patch_size
         assert f_patch_size in self.all_f_patch_size
+        if latent_repeat_count not in (1, 2):
+            raise ValueError(f"Unsupported latent repeat count: {latent_repeat_count}.")
+        if latent_repeat_count == 2 and len(x) != 1:
+            raise ValueError("Shared CFG latent preparation currently requires a single latent input.")
 
-        bsz = len(x)
+        latent_bsz = len(x)
+        bsz = latent_bsz * latent_repeat_count
         device = x[0].device
         t = t * self.t_scale
         t = self.t_embedder(t)
 
         cached_cap_seqlens = caption_context[3] if caption_context is not None else None
+        latent_cap_seqlens = cached_cap_seqlens[:latent_bsz] if cached_cap_seqlens is not None else None
         (
             x,
             cap_feats,
@@ -1149,7 +1154,7 @@ class ZImageTransformer2DModel(CachedTransformer):
             f_patch_size,
             ref_x,
             cap_feats_2,
-            cached_cap_seqlens,
+            latent_cap_seqlens,
         )
 
         # x embed & refine
@@ -1188,14 +1193,22 @@ class ZImageTransformer2DModel(CachedTransformer):
         x = pad_sequence(x, batch_first=True, padding_value=0.0)
         x_cos = pad_sequence(x_cos, batch_first=True, padding_value=0.0)
         x_sin = pad_sequence(x_sin, batch_first=True, padding_value=0.0)
-        x_attn_mask = torch.zeros((bsz, x_max_item_seqlen), dtype=torch.bool, device=device)
+        x_attn_mask = torch.zeros((latent_bsz, x_max_item_seqlen), dtype=torch.bool, device=device)
         for i, seq_len in enumerate(x_item_seqlens):
             x_attn_mask[i, :seq_len] = 1
             if self.alignment_padding_mode == ZERO_MASKED_PADDING:
                 x_attn_mask[i, :seq_len].masked_fill_(x_inner_pad_mask[i], False)
 
         for layer in self.noise_refiner:
-            x = layer(x, x_attn_mask, x_cos, x_sin, adaln_input)
+            x = layer(x, x_attn_mask, x_cos, x_sin, adaln_input[:latent_bsz])
+
+        if latent_repeat_count == 2:
+            x = x.repeat(2, 1, 1)
+            x_cos = x_cos.repeat(2, 1, 1)
+            x_sin = x_sin.repeat(2, 1, 1)
+            x_attn_mask = x_attn_mask.repeat(2, 1)
+            x_item_seqlens *= 2
+            x_size *= 2
 
         if caption_context is None:
             caption_context = self._refine_caption_context(
