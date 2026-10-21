@@ -49,6 +49,37 @@ from vllm_omni.model_executor.model_loader.weight_utils import (
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
+_IMAGE_PREPROCESS_CACHE_SIZE = 4
+_ImagePreprocessCacheKey = tuple[str, tuple[int, int], int, int, str, bytes]
+
+
+def _preprocess_pil_image_with_cache(
+    image: PIL.Image.Image,
+    image_processor: VaeImageProcessor,
+    height: int,
+    width: int,
+    device: torch.device,
+    cache: dict[_ImagePreprocessCacheKey, torch.Tensor],
+) -> torch.Tensor:
+    """Reuse exact RGB preprocessing results across repeated requests."""
+    cache_key = None
+    if image.mode == "RGB":
+        # Keep the full source bytes in the key so cache correctness does not
+        # depend on a content-hash collision. Target size and device complete
+        # the preprocessing identity for this pipeline instance.
+        cache_key = (image.mode, image.size, height, width, str(device), image.tobytes())
+        cached = cache.pop(cache_key, None)
+        if cached is not None:
+            cache[cache_key] = cached
+            return cached
+
+    result = image_processor.preprocess(image, height, width).to(dtype=torch.float32, device=device)
+    if cache_key is not None:
+        if len(cache) >= _IMAGE_PREPROCESS_CACHE_SIZE:
+            cache.pop(next(iter(cache)))
+        cache[cache_key] = result
+    return result
+
 
 def _postprocess_to_pil_via_uint8(
     images: torch.Tensor,
@@ -256,6 +287,7 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
         )
 
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor * 2, do_convert_rgb=True)
+        self._image_preprocess_cache: dict[_ImagePreprocessCacheKey, torch.Tensor] = {}
 
     def encode_prompt(
         self,
@@ -533,8 +565,14 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
 
             # Prepare image for VAE encoding using image_processor
             if not isinstance(image, torch.Tensor):
-                init_image = self.image_processor.preprocess(image, height, width)
-                image = init_image.to(dtype=torch.float32, device=device)
+                image = _preprocess_pil_image_with_cache(
+                    image,
+                    self.image_processor,
+                    height,
+                    width,
+                    device,
+                    self._image_preprocess_cache,
+                )
 
             # Initialize scheduler kwargs for img2img
             mu = calculate_shift(
