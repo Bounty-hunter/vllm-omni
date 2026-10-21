@@ -50,6 +50,29 @@ from vllm_omni.model_executor.model_loader.weight_utils import (
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 
+def _encode_qwen3_hidden_states(
+    text_encoder: nn.Module,
+    input_ids: torch.Tensor,
+    attention_mask: torch.Tensor,
+) -> torch.Tensor:
+    """Return the Qwen3 conditioning layer without unused cache or logits."""
+    base_model = getattr(text_encoder, "model", None)
+    if getattr(getattr(text_encoder, "config", None), "model_type", None) == "qwen3" and base_model is not None:
+        outputs = base_model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            output_hidden_states=True,
+            use_cache=False,
+        )
+    else:
+        outputs = text_encoder(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            output_hidden_states=True,
+        )
+    return outputs.hidden_states[-2]
+
+
 def _postprocess_to_pil_via_uint8(
     images: torch.Tensor,
     image_processor: VaeImageProcessor,
@@ -329,11 +352,11 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
         text_input_ids = text_inputs.input_ids.to(device)
         prompt_masks = text_inputs.attention_mask.to(device).bool()
 
-        prompt_embeds = self.text_encoder(
-            input_ids=text_input_ids,
-            attention_mask=prompt_masks,
-            output_hidden_states=True,
-        ).hidden_states[-2]
+        prompt_embeds = _encode_qwen3_hidden_states(
+            self.text_encoder,
+            text_input_ids,
+            prompt_masks,
+        )
 
         embeddings_list = []
 
