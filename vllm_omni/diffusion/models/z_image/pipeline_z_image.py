@@ -50,6 +50,22 @@ from vllm_omni.model_executor.model_loader.weight_utils import (
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 
+def _get_or_prepare_caption_context(
+    transformer: nn.Module,
+    cache: dict[bool, tuple],
+    apply_cfg: bool,
+    prompt_embeds: list[torch.Tensor],
+    device: torch.device,
+):
+    if type(transformer) is not ZImageTransformer2DModel:
+        return None
+    caption_context = cache.get(apply_cfg)
+    if caption_context is None:
+        caption_context = transformer.prepare_caption_context(prompt_embeds, device)
+        cache[apply_cfg] = caption_context
+    return caption_context
+
+
 def get_post_process_func(
     od_config: OmniDiffusionConfig,
 ):
@@ -617,6 +633,12 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
         if not isinstance(t_norm_list, list):
             t_norm_list = [t_norm_list]
 
+        # Caption features and their two context-refiner blocks are independent
+        # of the latent and timestep. Keep the cache request-local, and only use
+        # it for the native Z-Image transformer: subclasses can inject additional
+        # per-step conditions in their forward methods.
+        caption_context_cache: dict[bool, tuple] = {}
+
         # 6. Denoising loop
         for i, t in enumerate(timesteps):
             if self.interrupt:
@@ -660,11 +682,27 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
             if getattr(self, "_uses_cudagraph_trees", False):
                 # check Ming-Image
                 torch.compiler.cudagraph_mark_step_begin()
-            model_out_list = self.transformer(
-                latent_model_input_list,
-                timestep_model_input,
+
+            caption_context = _get_or_prepare_caption_context(
+                self.transformer,
+                caption_context_cache,
+                apply_cfg,
                 prompt_embeds_model_input,
-            )[0]
+                device,
+            )
+            if caption_context is None:
+                model_out_list = self.transformer(
+                    latent_model_input_list,
+                    timestep_model_input,
+                    prompt_embeds_model_input,
+                )[0]
+            else:
+                model_out_list = self.transformer(
+                    latent_model_input_list,
+                    timestep_model_input,
+                    prompt_embeds_model_input,
+                    caption_context=caption_context,
+                )[0]
 
             if apply_cfg:
                 # Perform CFG
