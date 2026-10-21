@@ -256,6 +256,7 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
         )
 
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor * 2, do_convert_rgb=True)
+        self._negative_prompt_cache: dict[tuple[tuple[str, ...], int, str], list[torch.Tensor]] = {}
 
     def encode_prompt(
         self,
@@ -277,13 +278,31 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
             assert len(prompt) == len(negative_prompt)
 
             if prompt_embeds is None and negative_prompt_embeds is None:
+                cache_key = (
+                    tuple(negative_prompt),
+                    max_sequence_length,
+                    str(device or self._execution_device),
+                )
+                cached_negative_embeds = self._negative_prompt_cache.get(cache_key)
+                if cached_negative_embeds is not None:
+                    prompt_embeds = self._encode_prompt(
+                        prompt=prompt,
+                        device=device,
+                        max_sequence_length=max_sequence_length,
+                    )
+                    return prompt_embeds, cached_negative_embeds
+
                 batch_size = len(prompt)
                 combined_embeds = self._encode_prompt(
                     prompt=[*prompt, *negative_prompt],
                     device=device,
                     max_sequence_length=max_sequence_length,
                 )
-                return combined_embeds[:batch_size], combined_embeds[batch_size:]
+                negative_prompt_embeds = combined_embeds[batch_size:]
+                if len(self._negative_prompt_cache) >= 8:
+                    self._negative_prompt_cache.pop(next(iter(self._negative_prompt_cache)))
+                self._negative_prompt_cache[cache_key] = negative_prompt_embeds
+                return combined_embeds[:batch_size], negative_prompt_embeds
 
         prompt_embeds = self._encode_prompt(
             prompt=prompt,
