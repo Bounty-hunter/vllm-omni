@@ -268,6 +268,23 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
         max_sequence_length: int = 512,
     ):
         prompt = [prompt] if isinstance(prompt, str) else prompt
+
+        if do_classifier_free_guidance:
+            if negative_prompt is None:
+                negative_prompt = ["" for _ in prompt]
+            else:
+                negative_prompt = [negative_prompt] if isinstance(negative_prompt, str) else negative_prompt
+            assert len(prompt) == len(negative_prompt)
+
+            if prompt_embeds is None and negative_prompt_embeds is None:
+                batch_size = len(prompt)
+                combined_embeds = self._encode_prompt(
+                    prompt=[*prompt, *negative_prompt],
+                    device=device,
+                    max_sequence_length=max_sequence_length,
+                )
+                return combined_embeds[:batch_size], combined_embeds[batch_size:]
+
         prompt_embeds = self._encode_prompt(
             prompt=prompt,
             device=device,
@@ -276,11 +293,6 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
         )
 
         if do_classifier_free_guidance:
-            if negative_prompt is None:
-                negative_prompt = ["" for _ in prompt]
-            else:
-                negative_prompt = [negative_prompt] if isinstance(negative_prompt, str) else negative_prompt
-            assert len(prompt) == len(negative_prompt)
             negative_prompt_embeds = self._encode_prompt(
                 prompt=negative_prompt,
                 device=device,
