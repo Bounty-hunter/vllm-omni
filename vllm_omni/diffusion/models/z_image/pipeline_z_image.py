@@ -50,6 +50,21 @@ from vllm_omni.model_executor.model_loader.weight_utils import (
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 
+def _postprocess_to_pil_via_uint8(
+    images: torch.Tensor,
+    image_processor: VaeImageProcessor,
+) -> list[PIL.Image.Image]:
+    images = image_processor.postprocess(images, output_type="pt")
+    images = images.permute(0, 2, 3, 1).to(
+        dtype=torch.float32,
+        memory_format=torch.contiguous_format,
+    )
+    images = images.mul_(255).round_().to(dtype=torch.uint8).cpu().numpy()
+    if images.shape[-1] == 1:
+        return [PIL.Image.fromarray(image.squeeze(), mode="L") for image in images]
+    return [PIL.Image.fromarray(image) for image in images]
+
+
 def get_post_process_func(
     od_config: OmniDiffusionConfig,
 ):
@@ -68,7 +83,9 @@ def get_post_process_func(
     def post_process_func(
         images: torch.Tensor,
     ):
-        return image_processor.postprocess(images)
+        if images.device.type != "cuda":
+            return image_processor.postprocess(images)
+        return _postprocess_to_pil_via_uint8(images, image_processor)
 
     return post_process_func
 
