@@ -895,6 +895,7 @@ class ZImageTransformer2DModel(CachedTransformer):
         f_patch_size: int,
         all_image_ref: list[torch.Tensor | None] | None = None,
         all_cap_feats_2: list[torch.Tensor | None] | None = None,
+        cap_padded_lens: list[int] | None = None,
     ):
         pH = pW = patch_size
         pF = f_patch_size
@@ -908,16 +909,23 @@ class ZImageTransformer2DModel(CachedTransformer):
         if all_image_ref is None:
             all_image_ref = [None] * len(all_image)
 
-        (
-            all_cap_feats_out,
-            all_cap_pos_ids,
-            all_cap_pad_mask,
-            all_cap_feats_2_out,
-        ) = self._prepare_caption_inputs(all_cap_feats, device, all_cap_feats_2)
+        if cap_padded_lens is None:
+            (
+                all_cap_feats_out,
+                all_cap_pos_ids,
+                all_cap_pad_mask,
+                all_cap_feats_2_out,
+            ) = self._prepare_caption_inputs(all_cap_feats, device, all_cap_feats_2)
+            cap_padded_lens = [len(item) for item in all_cap_pos_ids]
+        else:
+            if len(cap_padded_lens) != len(all_image):
+                raise ValueError("Caption context batch size must match the latent batch size.")
+            all_cap_feats_out = []
+            all_cap_pos_ids = []
+            all_cap_pad_mask = []
+            all_cap_feats_2_out = []
 
-        for image, cap_pos_ids, image_ref in zip(all_image, all_cap_pos_ids, all_image_ref):
-            cap_padded_len = len(cap_pos_ids)
-
+        for image, cap_padded_len, image_ref in zip(all_image, cap_padded_lens, all_image_ref):
             ### Process Image
             if image_ref is not None:
                 image = torch.cat([image, image_ref], dim=1)
@@ -1108,6 +1116,7 @@ class ZImageTransformer2DModel(CachedTransformer):
         t = t * self.t_scale
         t = self.t_embedder(t)
 
+        cached_cap_seqlens = caption_context[3] if caption_context is not None else None
         (
             x,
             cap_feats,
@@ -1117,7 +1126,15 @@ class ZImageTransformer2DModel(CachedTransformer):
             x_inner_pad_mask,
             cap_inner_pad_mask,
             cap_feats_2,
-        ) = self.patchify_and_embed(x, cap_feats, patch_size, f_patch_size, ref_x, cap_feats_2)
+        ) = self.patchify_and_embed(
+            x,
+            cap_feats,
+            patch_size,
+            f_patch_size,
+            ref_x,
+            cap_feats_2,
+            cached_cap_seqlens,
+        )
 
         # x embed & refine
         x_item_seqlens = [len(_) for _ in x]
