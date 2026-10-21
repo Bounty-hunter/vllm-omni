@@ -736,8 +736,6 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
         else:
             latents = latents.to(self.vae.dtype)
             latents = (latents / self.vae.config.scaling_factor) + self.vae.config.shift_factor
-            if next(self.vae.parameters()).device.type == "cuda":
-                latents = latents.contiguous(memory_format=torch.channels_last)
 
             image = self.vae.decode(latents, return_dict=False)[0]
             # image = self.image_processor.postprocess(image, output_type=output_type)
@@ -748,8 +746,6 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         loader = AutoWeightsLoader(self)
         loaded_weights = loader.load_weights(weights)
-        if next(self.vae.parameters()).device.type == "cuda":
-            self.vae.to(memory_format=torch.channels_last)
         # Record components loaded by diffusers submodules to satisfy strict checks.
         loaded_weights |= {f"vae.{name}" for name, _ in self.vae.named_parameters()}
         # downstream pipelines (e.g. MingImagePipeline) may set ``self.text_encoder = None`` when they
