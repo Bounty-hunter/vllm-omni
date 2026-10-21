@@ -286,11 +286,16 @@ class FlashInferAttentionImpl(AttentionImpl):
             * sequence_length
         )
 
+    @torch.compiler.disable
     def _ensure_plan(
         self,
         key: _WrapperPlanKey,
         flat_mask: torch.Tensor | None,
     ) -> None:
+        # Planning compares shape-derived Python state and mutates the wrapper
+        # cache.  Dynamic regional compilation represents those dimensions as
+        # SymInts, which cannot participate in the dataclass equality check
+        # below while Dynamo is tracing.
         key_changed = key != self._plan_key
         if not key_changed and flat_mask is None:
             return

@@ -110,3 +110,56 @@ def test_hopper_explicit_flashinfer_is_mask_capable(monkeypatch):
     spec = AttentionSpec(backend="FLASHINFER_ATTN")
 
     assert FlashInferAttentionBackend.supports_attention_mask(spec) is True
+
+
+def test_flashinfer_plan_cache_runs_outside_dynamic_compile(monkeypatch):
+    impl = _impl()
+    impl.device = torch.device("cpu")
+    impl._qo_indptr = None
+    impl._kv_indptr = None
+    impl._plan_key = None
+    planning_compile_states = []
+
+    monkeypatch.setattr(
+        impl,
+        "_make_indptr",
+        lambda batch_size, sequence_length: torch.arange(batch_size + 1, dtype=torch.int32) * sequence_length,
+    )
+    monkeypatch.setattr(
+        impl,
+        "_plan_wrapper",
+        lambda key, flat_mask: planning_compile_states.append(torch.compiler.is_compiling()),
+    )
+
+    def run(tensor):
+        batch_size, sequence_length, num_heads, head_dim = tensor.shape
+        impl._ensure_plan(
+            FlashInferAttentionImpl._WrapperPlanKey(
+                batch_size=batch_size,
+                qo_len=sequence_length,
+                kv_len=sequence_length,
+                num_q_heads=num_heads,
+                num_kv_heads=num_heads,
+                head_dim_qk=head_dim,
+                head_dim_k=head_dim,
+                head_dim_vo=head_dim,
+                q_dtype=tensor.dtype,
+                k_dtype=tensor.dtype,
+                v_dtype=tensor.dtype,
+                o_dtype=tensor.dtype,
+                causal=False,
+                softmax_scale=0.5,
+                has_custom_mask=False,
+            ),
+            None,
+        )
+        return tensor + 1
+
+    compiled = torch.compile(run, backend="eager", dynamic=True)
+    first = torch.randn(1, 2, 2, 8)
+    second = torch.randn(2, 3, 2, 8)
+    torch.testing.assert_close(compiled(first), run(first))
+    torch.testing.assert_close(compiled(second), run(second))
+
+    assert planning_compile_states
+    assert not any(planning_compile_states)
