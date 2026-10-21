@@ -14,7 +14,6 @@ from io import BytesIO
 from typing import Any, Final, cast
 
 import jinja2
-import nvtx
 import torch
 from fastapi import Request
 from openai.types.chat.chat_completion_audio import ChatCompletionAudio as OpenAIChatCompletionAudio
@@ -3140,11 +3139,10 @@ class OmniOpenAIServingChat(OpenAIServingChat, AudioMixin):
         # Convert images to base64
         image_contents = []
         for img in images:
-            with nvtx.annotate("chat.encode_image_png_base64"):
-                with BytesIO() as buffer:
-                    img.save(buffer, format="PNG")
-                    img_bytes = buffer.getvalue()
-                img_base64 = base64.b64encode(img_bytes).decode("utf-8")
+            with BytesIO() as buffer:
+                img.save(buffer, format="PNG")
+                img_bytes = buffer.getvalue()
+            img_base64 = base64.b64encode(img_bytes).decode("utf-8")
             image_contents.append(
                 {
                     "type": "image_url",

@@ -19,7 +19,6 @@ from types import AsyncGeneratorType
 from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
-import nvtx
 import PIL.Image
 import torch
 from vllm.config import VllmConfig
@@ -659,22 +658,19 @@ class DiffusionEngine:
                 postprocess_kwargs: dict[str, object] = {}
                 if self._post_process_accepts_sampling_params:
                     postprocess_kwargs["sampling_params"] = request.sampling_params
-                with nvtx.annotate("diffusion.model_postprocess"):
-                    outputs = self.post_process_func(output_data, **postprocess_kwargs)
+                outputs = self.post_process_func(output_data, **postprocess_kwargs)
             else:
                 outputs = output_data
 
-        with nvtx.annotate("diffusion.normalize_postprocess"):
-            postprocess_output = normalize_diffusion_postprocess_output(outputs)
+        postprocess_output = normalize_diffusion_postprocess_output(outputs)
 
-        with nvtx.annotate("diffusion.format_outputs"):
-            return format_diffusion_outputs(
-                request=request,
-                od_config=self.od_config,
-                diffusion_output=output,
-                output_data=output_data,
-                postprocess_output=postprocess_output,
-            )
+        return format_diffusion_outputs(
+            request=request,
+            od_config=self.od_config,
+            diffusion_output=output,
+            output_data=output_data,
+            postprocess_output=postprocess_output,
+        )
 
     def _busy_loop(self):
         assert self.stop_event is not None
