@@ -256,6 +256,7 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
         )
 
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor * 2, do_convert_rgb=True)
+        self._negative_prompt_cache: dict[tuple[tuple[str, ...], int, str], list[torch.Tensor]] = {}
 
     def encode_prompt(
         self,
@@ -281,12 +282,22 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
             else:
                 negative_prompt = [negative_prompt] if isinstance(negative_prompt, str) else negative_prompt
             assert len(prompt) == len(negative_prompt)
-            negative_prompt_embeds = self._encode_prompt(
-                prompt=negative_prompt,
-                device=device,
-                prompt_embeds=negative_prompt_embeds,
-                max_sequence_length=max_sequence_length,
-            )
+            if negative_prompt_embeds is None:
+                cache_key = (
+                    tuple(negative_prompt),
+                    max_sequence_length,
+                    str(device or self._execution_device),
+                )
+                negative_prompt_embeds = self._negative_prompt_cache.get(cache_key)
+                if negative_prompt_embeds is None:
+                    negative_prompt_embeds = self._encode_prompt(
+                        prompt=negative_prompt,
+                        device=device,
+                        max_sequence_length=max_sequence_length,
+                    )
+                    if len(self._negative_prompt_cache) >= 8:
+                        self._negative_prompt_cache.pop(next(iter(self._negative_prompt_cache)))
+                    self._negative_prompt_cache[cache_key] = negative_prompt_embeds
         else:
             negative_prompt_embeds = []
         return prompt_embeds, negative_prompt_embeds
