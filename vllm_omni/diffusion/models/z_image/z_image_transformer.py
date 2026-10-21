@@ -76,6 +76,18 @@ ZImageCaptionContext = tuple[
 ]
 
 
+def _has_image_alignment_padding(
+    item_seqlens: list[int],
+    image_sizes: list[tuple[int, int, int]],
+    patch_size: int,
+    f_patch_size: int,
+) -> bool:
+    return any(
+        seq_len != (frames // f_patch_size) * (height // patch_size) * (width // patch_size)
+        for seq_len, (frames, height, width) in zip(item_seqlens, image_sizes)
+    )
+
+
 class UnifiedPrepare(nn.Module):
     """Prepares unified tensors for transformer blocks.
 
@@ -967,7 +979,11 @@ class ZImageTransformer2DModel(CachedTransformer):
                 )
             )
             # padded feature
-            image_padded_feat = torch.cat([image, image[-1:].repeat(image_padding_len, 1)], dim=0)
+            image_padded_feat = (
+                torch.cat([image, image[-1:].repeat(image_padding_len, 1)], dim=0)
+                if image_padding_len
+                else image
+            )
             all_image_out.append(image_padded_feat)
 
         return (
@@ -1147,17 +1163,23 @@ class ZImageTransformer2DModel(CachedTransformer):
         # Match t_embedder output dtype to x for layerwise casting compatibility
         adaln_input = t.type_as(x)
         # Use torch.where instead of x[mask]= to avoid aten::index_put_/nonzero and cudaStreamSynchronize
-        x_pad_mask = torch.cat(x_inner_pad_mask)
-        x_padding = (
-            self.x_pad_token.expand(x.shape[0], -1)
-            if self.alignment_padding_mode == LEARNED_PADDING
-            else torch.zeros_like(x)
-        )
-        x = torch.where(
-            x_pad_mask.unsqueeze(1).expand_as(x),
-            x_padding,
-            x,
-        )
+        if _has_image_alignment_padding(
+            x_item_seqlens,
+            x_size,
+            patch_size,
+            f_patch_size,
+        ):
+            x_pad_mask = torch.cat(x_inner_pad_mask)
+            x_padding = (
+                self.x_pad_token.expand(x.shape[0], -1)
+                if self.alignment_padding_mode == LEARNED_PADDING
+                else torch.zeros_like(x)
+            )
+            x = torch.where(
+                x_pad_mask.unsqueeze(1).expand_as(x),
+                x_padding,
+                x,
+            )
         x = list(x.split(x_item_seqlens, dim=0))
         x_cos, x_sin = self.rope_embedder(torch.cat(x_pos_ids, dim=0))
         x_cos = list(x_cos.split(x_item_seqlens, dim=0))
