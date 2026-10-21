@@ -112,3 +112,19 @@ def test_request_cache_reuses_cfg_variants_and_skips_subclasses(monkeypatch):
     subclass = FakeSubclass()
     assert pipeline_z_image._get_or_prepare_caption_context(subclass, {}, False, prompt_embeds, device) is None
     assert subclass.calls == 0
+
+
+def test_cfg_latent_path_is_shared_only_for_equal_padded_caption_lengths(monkeypatch):
+    class FakeTransformer(nn.Module):
+        pass
+
+    class FakeSubclass(FakeTransformer):
+        pass
+
+    monkeypatch.setattr(pipeline_z_image, "ZImageTransformer2DModel", FakeTransformer)
+    transformer = FakeTransformer()
+
+    assert pipeline_z_image._can_share_cfg_latent_path(transformer, (None, None, None, [32, 32]), 1)
+    assert not pipeline_z_image._can_share_cfg_latent_path(transformer, (None, None, None, [32, 64]), 1)
+    assert not pipeline_z_image._can_share_cfg_latent_path(transformer, (None, None, None, [32, 32]), 2)
+    assert not pipeline_z_image._can_share_cfg_latent_path(FakeSubclass(), (None, None, None, [32, 32]), 1)

@@ -66,6 +66,18 @@ def _get_or_prepare_caption_context(
     return caption_context
 
 
+def _can_share_cfg_latent_path(
+    transformer: nn.Module,
+    caption_context: tuple | None,
+    actual_batch_size: int,
+) -> bool:
+    """Whether both CFG branches have an identical pre-caption latent path."""
+    if type(transformer) is not ZImageTransformer2DModel or caption_context is None or actual_batch_size != 1:
+        return False
+    caption_lengths = caption_context[3]
+    return len(caption_lengths) == 2 and caption_lengths[0] == caption_lengths[1]
+
+
 def _postprocess_to_pil_via_uint8(
     images: torch.Tensor,
     image_processor: VaeImageProcessor,
@@ -683,14 +695,29 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
             latents_typed = latents.to(self.od_config.dtype)
 
             if apply_cfg:
-                repeat_dims = (2,) + (1,) * (latents_typed.ndim - 1)
-                latent_model_input = latents_typed.repeat(*repeat_dims)
                 prompt_embeds_model_input = prompt_embeds + negative_prompt_embeds
                 timestep_model_input = timestep.repeat(2)
             else:
-                latent_model_input = latents_typed
                 prompt_embeds_model_input = prompt_embeds
                 timestep_model_input = timestep
+
+            caption_context = _get_or_prepare_caption_context(
+                self.transformer,
+                caption_context_cache,
+                apply_cfg,
+                prompt_embeds_model_input,
+                device,
+            )
+            share_cfg_latent_path = apply_cfg and _can_share_cfg_latent_path(
+                self.transformer,
+                caption_context,
+                actual_batch_size,
+            )
+            if apply_cfg and not share_cfg_latent_path:
+                repeat_dims = (2,) + (1,) * (latents_typed.ndim - 1)
+                latent_model_input = latents_typed.repeat(*repeat_dims)
+            else:
+                latent_model_input = latents_typed
 
             if latent_model_input.ndim == 4:
                 latent_model_input = latent_model_input.unsqueeze(2)
@@ -700,13 +727,6 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
                 # check Ming-Image
                 torch.compiler.cudagraph_mark_step_begin()
 
-            caption_context = _get_or_prepare_caption_context(
-                self.transformer,
-                caption_context_cache,
-                apply_cfg,
-                prompt_embeds_model_input,
-                device,
-            )
             if caption_context is None:
                 model_out_list = self.transformer(
                     latent_model_input_list,
@@ -719,6 +739,7 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
                     timestep_model_input,
                     prompt_embeds_model_input,
                     caption_context=caption_context,
+                    latent_repeat_count=2 if share_cfg_latent_path else 1,
                 )[0]
 
             if apply_cfg:
