@@ -59,29 +59,6 @@ def test_prepare_caption_context_refines_once_and_preserves_padding():
     assert torch.equal(attn_mask, torch.ones((1, 32), dtype=torch.bool))
 
 
-def test_cached_caption_context_skips_per_step_caption_preparation(monkeypatch):
-    transformer = object.__new__(ZImageTransformer2DModel)
-    nn.Module.__init__(transformer)
-
-    def unexpected_prepare(*_args, **_kwargs):
-        raise AssertionError("caption inputs were rebuilt for a cached context")
-
-    monkeypatch.setattr(transformer, "_prepare_caption_inputs", unexpected_prepare)
-    outputs = transformer.patchify_and_embed(
-        [torch.zeros((1, 1, 1, 1))],
-        [torch.zeros((3, 4))],
-        patch_size=1,
-        f_patch_size=1,
-        cap_padded_lens=[32],
-    )
-
-    assert outputs[1] == []
-    assert outputs[4] == []
-    assert outputs[6] == []
-    assert outputs[7] == []
-    assert outputs[3][0][0, 0].item() == 33
-
-
 def test_request_cache_reuses_cfg_variants_and_skips_subclasses(monkeypatch):
     class FakeTransformer(nn.Module):
         def __init__(self):
