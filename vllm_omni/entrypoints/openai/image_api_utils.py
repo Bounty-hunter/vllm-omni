@@ -23,43 +23,11 @@ See ``openai/README.md`` and ``images/README.md`` (utils vs helpers, no overlap)
 
 import base64
 import io
-import struct
-import zlib
 
 import PIL.Image
 
 SUPPORTED_LAYERED_RESOLUTIONS = (640, 1024)
 SUPPORTED_LAYERED_LAYERS_RANGE = range(2, 11)
-
-_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
-
-
-def _png_chunk(chunk_type: bytes, data: bytes) -> bytes:
-    return struct.pack(">I", len(data)) + chunk_type + data + struct.pack(">I", zlib.crc32(chunk_type + data))
-
-
-def _encode_rgb_png_level_zero(image: PIL.Image.Image) -> bytes:
-    """Encode an 8-bit RGB image as a filter-none, zlib-level-0 PNG."""
-    width, height = image.size
-    row_bytes = width * 3
-    pixels = image.tobytes()
-    scanlines = bytearray((row_bytes + 1) * height)
-    source = memoryview(pixels)
-    target = memoryview(scanlines)
-    for row in range(height):
-        source_start = row * row_bytes
-        target_start = row * (row_bytes + 1) + 1
-        target[target_start : target_start + row_bytes] = source[source_start : source_start + row_bytes]
-
-    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
-    return b"".join(
-        (
-            _PNG_SIGNATURE,
-            _png_chunk(b"IHDR", ihdr),
-            _png_chunk(b"IDAT", zlib.compress(scanlines, level=0)),
-            _png_chunk(b"IEND", b""),
-        )
-    )
 
 
 def parse_size(size_str: str) -> tuple[int, int]:
@@ -144,6 +112,7 @@ def encode_image_base64_with_compression(
     Returns:
         Base64-encoded image string.
     """
+    buffer = io.BytesIO()
     image = prepare_image_for_output_format(image, format)
     pil_format = "jpeg" if format == "jpg" else format
     save_kwargs = {}
@@ -152,10 +121,6 @@ def encode_image_base64_with_compression(
     elif format == "png":
         save_kwargs["compress_level"] = max(0, min(9, 9 - output_compression // 11))
 
-    if pil_format == "png" and image.mode == "RGB" and save_kwargs["compress_level"] == 0:
-        return base64.b64encode(_encode_rgb_png_level_zero(image)).decode("ascii")
-
-    buffer = io.BytesIO()
     image.save(buffer, format=pil_format, **save_kwargs)
     buffer.seek(0)
     return base64.b64encode(buffer.read()).decode("utf-8")

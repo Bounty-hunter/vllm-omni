@@ -42,31 +42,9 @@ def test_png_output_compression_maps_to_compress_level(image):
 
     # Level-0 PNG barely compresses; the mapped level-9 encode is smaller.
     assert len(small) < len(fast)
-    # Both encodings must remain lossless. The level-0 fast path intentionally
-    # emits filter-none scanlines, so its encoded byte length need not match
-    # Pillow's encoder.
-    decoded = Image.open(io.BytesIO(base64.b64decode(fast)))
-    assert decoded.mode == image.mode
-    assert decoded.size == image.size
-    assert decoded.tobytes() == image.tobytes()
+    # The mapping must produce the same sizes as the equivalent compress_level.
+    assert len(fast) == encode(100)
     assert len(small) == encode(1)
-
-
-def test_png_fast_path_preserves_rgb_pixels(image):
-    encoded = encode_image_base64_with_compression(image, format="png", output_compression=99)
-    decoded = Image.open(io.BytesIO(base64.b64decode(encoded)))
-
-    assert decoded.mode == "RGB"
-    assert decoded.tobytes() == image.tobytes()
-
-
-def test_png_non_rgb_uses_compatible_fallback(image):
-    rgba = image.convert("RGBA")
-    encoded = encode_image_base64_with_compression(rgba, format="png", output_compression=100)
-    decoded = Image.open(io.BytesIO(base64.b64decode(encoded)))
-
-    assert decoded.mode == "RGBA"
-    assert decoded.tobytes() == rgba.tobytes()
 
 
 def test_jpeg_output_compression_maps_to_quality(image):
