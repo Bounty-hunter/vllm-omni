@@ -60,7 +60,7 @@ def _compile_qwen3_text_encoder_layers(text_encoder: nn.Module) -> int:
     for layer in layers:
         layer.forward = torch.compile(
             layer.forward,
-            mode="reduce-overhead",
+            mode="default",
             fullgraph=False,
             dynamic=False,
         )

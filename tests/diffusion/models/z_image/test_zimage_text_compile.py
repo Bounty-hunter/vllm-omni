@@ -33,7 +33,7 @@ def test_compile_qwen3_text_encoder_layers_is_regional_and_static(monkeypatch):
     assert len(calls) == 2
     assert all(
         kwargs == {
-            "mode": "reduce-overhead",
+            "mode": "default",
             "fullgraph": False,
             "dynamic": False,
         }
