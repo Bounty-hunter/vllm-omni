@@ -50,6 +50,23 @@ from vllm_omni.model_executor.model_loader.weight_utils import (
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 
+def _compile_qwen3_text_encoder_layers(text_encoder: nn.Module) -> int:
+    """Compile repeated Qwen3 decoder layers while leaving model glue eager."""
+    if getattr(getattr(text_encoder, "config", None), "model_type", None) != "qwen3":
+        return 0
+    layers = getattr(getattr(text_encoder, "model", None), "layers", None)
+    if not isinstance(layers, nn.ModuleList):
+        return 0
+    for layer in layers:
+        layer.forward = torch.compile(
+            layer.forward,
+            mode="reduce-overhead",
+            fullgraph=False,
+            dynamic=False,
+        )
+    return len(layers)
+
+
 def _postprocess_to_pil_via_uint8(
     images: torch.Tensor,
     image_processor: VaeImageProcessor,
@@ -752,6 +769,8 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
         # bring their own conditioning path.
         if self.text_encoder is not None:
             loaded_weights |= {f"text_encoder.{name}" for name, _ in self.text_encoder.named_parameters()}
+            if next(self.text_encoder.parameters()).device.type == "cuda":
+                _compile_qwen3_text_encoder_layers(self.text_encoder)
         if next(self.vae.parameters()).device.type == "cuda":
             self.vae.encoder.forward = torch.compile(
                 self.vae.encoder.forward,
