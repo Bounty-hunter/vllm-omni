@@ -50,6 +50,11 @@ from vllm_omni.diffusion.forward_context import (
     get_forward_context,
     is_forward_context_available,
 )
+from vllm_omni.diffusion.layers.fused_qk_norm_rope import (
+    _fused_cuda_supported,
+    fused_qk_norm_rope,
+    fused_qk_norm_rope_min_tokens,
+)
 from vllm_omni.diffusion.layers.rope import RotaryEmbedding, apply_rope_to_qk
 from vllm_omni.model_executor.layers.timestep_embedding import timestep_embedding
 
@@ -59,6 +64,8 @@ SEQ_MULTI_OF = 32
 LEARNED_PADDING = "learned"
 ZERO_MASKED_PADDING = "zero_masked"
 logger = init_logger(__name__)
+
+_FUSED_QK_NORM_ROPE_MIN_TOKENS = 2048
 
 
 class UnifiedPrepare(nn.Module):
@@ -339,10 +346,30 @@ class ZImageAttention(nn.Module):
         key = key.unflatten(-1, (self.to_qkv.num_kv_heads, -1))
         value = value.unflatten(-1, (self.to_qkv.num_kv_heads, -1))
 
-        query = self.norm_q(query)
-        key = self.norm_k(key)
-
-        query, key = apply_rope_to_qk(self.rope, query, key, (cos, sin))
+        batch, seq_len, num_heads, head_dim = query.shape
+        tokens = batch * seq_len
+        rotary_dim = cos.shape[-1] * 2
+        if (
+            tokens >= fused_qk_norm_rope_min_tokens(_FUSED_QK_NORM_ROPE_MIN_TOKENS)
+            and _fused_cuda_supported(query, key, head_dim, rotary_dim, interleaved=True)
+        ):
+            num_kv_heads = key.shape[2]
+            rope_table = torch.cat((cos, sin), dim=-1).reshape(tokens, rotary_dim)
+            query, key = fused_qk_norm_rope(
+                query.reshape(tokens, num_heads, head_dim),
+                key.reshape(tokens, num_kv_heads, head_dim),
+                self.norm_q.weight,
+                self.norm_k.weight,
+                rope_table,
+                self.norm_q.variance_epsilon,
+                interleaved=True,
+            )
+            query = query.reshape(batch, seq_len, num_heads, head_dim)
+            key = key.reshape(batch, seq_len, num_kv_heads, head_dim)
+        else:
+            query = self.norm_q(query)
+            key = self.norm_k(key)
+            query, key = apply_rope_to_qk(self.rope, query, key, (cos, sin))
         # Cast to correct dtype
         dtype = query.dtype
         query, key = query.to(dtype), key.to(dtype)
