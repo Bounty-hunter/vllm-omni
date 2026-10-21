@@ -762,7 +762,7 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
             self.vae.decoder.forward = torch.compile(
                 self.vae.decoder.forward,
                 mode="reduce-overhead",
-                fullgraph=False,
+                fullgraph=True,
                 dynamic=False,
             )
         return loaded_weights
