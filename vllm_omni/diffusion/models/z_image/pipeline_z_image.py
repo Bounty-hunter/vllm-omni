@@ -21,6 +21,7 @@ import os
 from collections.abc import Callable, Iterable
 from typing import Any, ClassVar
 
+import numpy as np
 import PIL.Image
 import torch
 import torch.nn as nn
@@ -85,6 +86,25 @@ def calculate_shift(
     b = base_shift - m * base_seq_len
     mu = image_seq_len * m + b
     return mu
+
+
+def _preprocess_pil_image_on_device(
+    image: PIL.Image.Image,
+    image_processor: VaeImageProcessor,
+    height: int,
+    width: int,
+    device: torch.device,
+) -> torch.Tensor:
+    """Preprocess a PIL image without materializing float pixels on the host."""
+    image = image_processor.resize(image, height, width, resize_mode="default")
+    image = image_processor.convert_to_rgb(image)
+    image_array = np.array(image, dtype=np.uint8, copy=True)
+
+    # Transfer packed uint8 pixels before conversion, reducing this request-boundary
+    # H2D copy to one quarter of the float32 preprocessing path's size.
+    image_tensor = torch.from_numpy(image_array).unsqueeze(0).to(device=device)
+    image_tensor = image_tensor.permute(0, 3, 1, 2).to(dtype=torch.float32)
+    return image_tensor.mul_(2.0 / 255.0).sub_(1.0)
 
 
 # Copied from diffusers
@@ -515,7 +535,15 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
                 image = image[0]
 
             # Prepare image for VAE encoding using image_processor
-            if not isinstance(image, torch.Tensor):
+            if isinstance(image, PIL.Image.Image):
+                image = _preprocess_pil_image_on_device(
+                    image,
+                    self.image_processor,
+                    height,
+                    width,
+                    device,
+                )
+            elif not isinstance(image, torch.Tensor):
                 init_image = self.image_processor.preprocess(image, height, width)
                 image = init_image.to(dtype=torch.float32, device=device)
 
