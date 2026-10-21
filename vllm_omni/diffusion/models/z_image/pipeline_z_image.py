@@ -753,6 +753,12 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
         if self.text_encoder is not None:
             loaded_weights |= {f"text_encoder.{name}" for name, _ in self.text_encoder.named_parameters()}
         if next(self.vae.parameters()).device.type == "cuda":
+            self.vae.encoder.forward = torch.compile(
+                self.vae.encoder.forward,
+                mode="reduce-overhead",
+                fullgraph=False,
+                dynamic=False,
+            )
             self.vae.decoder.forward = torch.compile(
                 self.vae.decoder.forward,
                 mode="reduce-overhead",
