@@ -25,10 +25,7 @@ import io
 import struct
 import zlib
 
-try:
-    import pybase64 as base64
-except ImportError:  # pragma: no cover - vLLM installs pybase64
-    import base64
+import base64
 
 import PIL.Image
 
