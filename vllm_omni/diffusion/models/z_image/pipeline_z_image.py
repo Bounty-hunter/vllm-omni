@@ -49,6 +49,20 @@ from vllm_omni.model_executor.model_loader.weight_utils import (
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
+_COMPILED_FORWARD_MARKER = "_vllm_omni_forward_compiled"
+
+
+def _compile_forward_once(module: nn.Module, *, mode: str) -> None:
+    if getattr(module, _COMPILED_FORWARD_MARKER, False):
+        return
+    module.forward = torch.compile(
+        module.forward,
+        mode=mode,
+        fullgraph=False,
+        dynamic=False,
+    )
+    setattr(module, _COMPILED_FORWARD_MARKER, True)
+
 
 def _compile_qwen3_text_base_model(text_encoder: nn.Module) -> bool:
     """Compile the complete Qwen3 base model to remove per-layer Python dispatch."""
@@ -57,12 +71,7 @@ def _compile_qwen3_text_base_model(text_encoder: nn.Module) -> bool:
     base_model = getattr(text_encoder, "model", None)
     if not isinstance(base_model, nn.Module):
         return False
-    base_model.forward = torch.compile(
-        base_model.forward,
-        mode="default",
-        fullgraph=False,
-        dynamic=False,
-    )
+    _compile_forward_once(base_model, mode="default")
     return True
 
 
@@ -92,6 +101,22 @@ def _can_share_cfg_latent_path(
         return False
     caption_lengths = caption_context[3]
     return len(caption_lengths) == 2 and caption_lengths[0] == caption_lengths[1]
+
+
+def _apply_step_callback_outputs(
+    callback_outputs: dict[str, Any],
+    latents: torch.Tensor,
+    prompt_embeds: list[torch.Tensor],
+    negative_prompt_embeds: list[torch.Tensor],
+    caption_context_cache: dict[bool, tuple],
+) -> tuple[torch.Tensor, list[torch.Tensor], list[torch.Tensor]]:
+    conditioning_updated = "prompt_embeds" in callback_outputs or "negative_prompt_embeds" in callback_outputs
+    latents = callback_outputs.pop("latents", latents)
+    prompt_embeds = callback_outputs.pop("prompt_embeds", prompt_embeds)
+    negative_prompt_embeds = callback_outputs.pop("negative_prompt_embeds", negative_prompt_embeds)
+    if conditioning_updated:
+        caption_context_cache.clear()
+    return latents, prompt_embeds, negative_prompt_embeds
 
 
 def _postprocess_to_pil_via_uint8(
@@ -538,7 +563,13 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
         cfg_normalization = req.sampling_params.cfg_normalize
         cfg_truncation = req.sampling_params.extra_args.get("cfg_truncation", 1.0)
         joint_attention_kwargs: dict[str, Any] | None = None
-        callback_on_step_end: Callable[[int, int, dict], None] | None = None
+        callback_on_step_end: (
+            Callable[
+                [nn.Module, int, torch.Tensor, dict[str, torch.Tensor]],
+                dict[str, Any],
+            ]
+            | None
+        ) = None
         callback_on_step_end_tensor_inputs = ["latents"]
         output_type = req.sampling_params.output_type or "pil"
 
@@ -813,9 +844,13 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
                     callback_kwargs[k] = locals()[k]
                 callback_outputs = callback_on_step_end(self, i, t, callback_kwargs)
 
-                latents = callback_outputs.pop("latents", latents)
-                prompt_embeds = callback_outputs.pop("prompt_embeds", prompt_embeds)
-                negative_prompt_embeds = callback_outputs.pop("negative_prompt_embeds", negative_prompt_embeds)
+                latents, prompt_embeds, negative_prompt_embeds = _apply_step_callback_outputs(
+                    callback_outputs,
+                    latents,
+                    prompt_embeds,
+                    negative_prompt_embeds,
+                    caption_context_cache,
+                )
 
         if output_type == "latent":
             image = latents
@@ -841,16 +876,7 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
             if next(self.text_encoder.parameters()).device.type == "cuda":
                 _compile_qwen3_text_base_model(self.text_encoder)
         if next(self.vae.parameters()).device.type == "cuda":
-            self.vae.encoder.forward = torch.compile(
-                self.vae.encoder.forward,
-                mode="max-autotune",
-                fullgraph=False,
-                dynamic=False,
-            )
-            self.vae.decoder.forward = torch.compile(
-                self.vae.decoder.forward,
-                mode="max-autotune",
-                fullgraph=False,
-                dynamic=False,
-            )
+            _compile_forward_once(self.vae.encoder, mode="max-autotune")
+            _compile_forward_once(self.vae.decoder, mode="max-autotune")
+        self._negative_prompt_cache.clear()
         return loaded_weights

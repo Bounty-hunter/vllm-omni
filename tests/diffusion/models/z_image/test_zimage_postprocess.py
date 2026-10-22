@@ -29,6 +29,5 @@ def test_uint8_postprocess_matches_diffusers(dtype: torch.dtype):
 
         assert len(expected) == len(actual)
         assert all(
-            np.array_equal(np.asarray(left), np.asarray(right))
-            for left, right in zip(expected, actual, strict=True)
+            np.array_equal(np.asarray(left), np.asarray(right)) for left, right in zip(expected, actual, strict=True)
         )

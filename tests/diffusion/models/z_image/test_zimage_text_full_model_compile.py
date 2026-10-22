@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 
-from types import SimpleNamespace
+from dataclasses import dataclass
 
 import pytest
 import torch.nn as nn
@@ -11,14 +11,19 @@ from vllm_omni.diffusion.models.z_image import pipeline_z_image
 pytestmark = [pytest.mark.core_model, pytest.mark.cpu, pytest.mark.diffusion]
 
 
+@dataclass
+class _TextConfig:
+    model_type: str
+
+
 class _TextEncoder(nn.Module):
     def __init__(self, model_type: str = "qwen3"):
         super().__init__()
-        self.config = SimpleNamespace(model_type=model_type)
+        self.config = _TextConfig(model_type=model_type)
         self.model = nn.Linear(2, 2)
 
 
-def test_compile_qwen3_text_base_model_is_static(monkeypatch):
+def test_compile_qwen3_text_base_model_is_static_and_idempotent(monkeypatch):
     encoder = _TextEncoder()
     calls = []
 
@@ -28,6 +33,7 @@ def test_compile_qwen3_text_base_model_is_static(monkeypatch):
 
     monkeypatch.setattr(pipeline_z_image.torch, "compile", fake_compile)
 
+    assert pipeline_z_image._compile_qwen3_text_base_model(encoder)
     assert pipeline_z_image._compile_qwen3_text_base_model(encoder)
     assert len(calls) == 1
     assert calls[0][1] == {

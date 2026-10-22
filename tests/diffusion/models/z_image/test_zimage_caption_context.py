@@ -97,7 +97,7 @@ def test_request_cache_reuses_cfg_variants_and_skips_subclasses(monkeypatch):
 
     monkeypatch.setattr(pipeline_z_image, "ZImageTransformer2DModel", FakeTransformer)
     transformer = FakeTransformer()
-    cache = {}
+    cache: dict[bool, tuple] = {}
     prompt_embeds = [torch.zeros((3, 4))]
     device = torch.device("cpu")
 
@@ -128,3 +128,44 @@ def test_cfg_latent_path_is_shared_only_for_equal_padded_caption_lengths(monkeyp
     assert not pipeline_z_image._can_share_cfg_latent_path(transformer, (None, None, None, [32, 64]), 1)
     assert not pipeline_z_image._can_share_cfg_latent_path(transformer, (None, None, None, [32, 32]), 2)
     assert not pipeline_z_image._can_share_cfg_latent_path(FakeSubclass(), (None, None, None, [32, 32]), 1)
+
+
+@pytest.mark.parametrize("updated_key", ["prompt_embeds", "negative_prompt_embeds"])
+def test_callback_conditioning_update_invalidates_caption_context(updated_key: str):
+    latents = torch.zeros(1)
+    prompt_embeds = [torch.zeros((2, 4))]
+    negative_prompt_embeds = [torch.ones((2, 4))]
+    replacement = [torch.full((2, 4), 2.0)]
+    caption_context_cache = {False: ("positive",), True: ("cfg",)}
+
+    outputs = {updated_key: replacement}
+    _, actual_prompt, actual_negative = pipeline_z_image._apply_step_callback_outputs(
+        outputs,
+        latents,
+        prompt_embeds,
+        negative_prompt_embeds,
+        caption_context_cache,
+    )
+
+    assert actual_prompt is (replacement if updated_key == "prompt_embeds" else prompt_embeds)
+    assert actual_negative is (replacement if updated_key == "negative_prompt_embeds" else negative_prompt_embeds)
+    assert caption_context_cache == {}
+
+
+def test_latent_only_callback_keeps_caption_context_cache():
+    latents = torch.zeros(1)
+    replacement = torch.ones(1)
+    prompt_embeds = [torch.zeros((2, 4))]
+    negative_prompt_embeds = [torch.ones((2, 4))]
+    caption_context_cache = {False: ("positive",)}
+
+    actual_latents, _, _ = pipeline_z_image._apply_step_callback_outputs(
+        {"latents": replacement},
+        latents,
+        prompt_embeds,
+        negative_prompt_embeds,
+        caption_context_cache,
+    )
+
+    assert actual_latents is replacement
+    assert caption_context_cache == {False: ("positive",)}
