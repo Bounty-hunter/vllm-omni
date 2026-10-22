@@ -77,14 +77,16 @@ transformer layerwise offload.
 
 | Item | Value |
 | --- | --- |
+| Container image | `quay.io/ascend/vllm-omni:nightly-20261021-24f0cf3-a5` |
+| Image ID | `sha256:b67691b85280a9d59cbef51cced3f721a599fd6f1cae2e1b134adf3f4f122f24` |
 | Container OS | Ubuntu 22.04.5 LTS |
 | Host OS | openEuler 24.03 LTS-SP2 |
 | Python | 3.12.13 |
-| Ascend runtime | CANN 9.1; driver supplied by the host |
+| Ascend runtime | CANN 9.1.0; driver supplied by the host |
 | PyTorch / torch_npu | 2.10.0+cpu / 2.10.0.post4 |
-| vLLM | 0.31.0, commit `db9527a4` |
-| vLLM-Ascend | Commit `e2591273` |
-| vLLM-Omni | This PR; merged upstream `main` commit `03c33481` |
+| vLLM | 0.32.0+empty, commit `5df63a72` |
+| vLLM-Ascend | Commit `450e55698` |
+| vLLM-Omni | This PR; merged upstream `main` commit `0da1d831` |
 
 The `+cpu` suffix is the PyTorch wheel version in the Ascend image; NPU
 execution uses `torch_npu`.
