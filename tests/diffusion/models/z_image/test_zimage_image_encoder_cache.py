@@ -43,7 +43,7 @@ def _pipeline_with_fake_vae():
     pipeline.vae = _FakeVae()
     pipeline.vae_scale_factor = 1
     pipeline.scheduler = types.SimpleNamespace(scale_noise=lambda image_latents, _timestep, _noise: image_latents)
-    pipeline._image_encoder_cache = {}
+    pipeline._prepared_image_cache = {}
     return pipeline
 
 
@@ -59,10 +59,11 @@ def test_image_encoder_cache_key_tracks_pixels_and_target_shape():
     assert key != _image_encoder_cache_key(first, 32, 16, torch.bfloat16, device)
 
 
-def test_cached_encoder_output_is_reused_but_posterior_is_resampled():
+def test_cached_prepared_image_still_encodes_and_resamples_each_request():
     pipeline = _pipeline_with_fake_vae()
     image = torch.zeros((1, 3, 2, 2))
     cache_key = (b"same-image",)
+    cached = pipeline._get_or_cache_prepared_image(image, cache_key)
 
     first = pipeline.prepare_latents(
         1,
@@ -72,10 +73,10 @@ def test_cached_encoder_output_is_reused_but_posterior_is_resampled():
         torch.float32,
         torch.device("cpu"),
         None,
-        image=image,
+        image=cached,
         timestep=torch.zeros(1),
-        image_encoder_cache_key=cache_key,
     )
+    cached_again = pipeline._get_or_cache_prepared_image(None, cache_key)
     second = pipeline.prepare_latents(
         1,
         4,
@@ -84,24 +85,24 @@ def test_cached_encoder_output_is_reused_but_posterior_is_resampled():
         torch.float32,
         torch.device("cpu"),
         None,
-        image=None,
+        image=cached_again,
         timestep=torch.zeros(1),
-        image_encoder_cache_key=cache_key,
     )
 
-    assert pipeline.vae.encode_calls == 1
+    assert cached_again is cached
+    assert pipeline.vae.encode_calls == 2
     assert pipeline.vae.output.latent_dist.sample_calls == 2
     assert torch.equal(first, torch.ones_like(first))
     assert torch.equal(second, torch.full_like(second, 2.0))
 
 
-def test_image_encoder_cache_is_bounded_and_lru():
+def test_prepared_image_cache_is_bounded_and_lru():
     pipeline = _pipeline_with_fake_vae()
     image = torch.zeros((1, 3, 2, 2))
 
-    first = pipeline._get_or_encode_image(image, ("first",))
-    pipeline._get_or_encode_image(image, ("second",))
-    assert pipeline._get_or_encode_image(None, ("first",)) is first
-    pipeline._get_or_encode_image(image, ("third",))
+    first = pipeline._get_or_cache_prepared_image(image, ("first",))
+    pipeline._get_or_cache_prepared_image(image, ("second",))
+    assert pipeline._get_or_cache_prepared_image(None, ("first",)) is first
+    pipeline._get_or_cache_prepared_image(image, ("third",))
 
-    assert list(pipeline._image_encoder_cache) == [("first",), ("third",)]
+    assert list(pipeline._prepared_image_cache) == [("first",), ("third",)]
