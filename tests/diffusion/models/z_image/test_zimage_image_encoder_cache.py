@@ -101,8 +101,7 @@ def test_prepared_image_cache_is_bounded_and_lru():
     image = torch.zeros((1, 3, 2, 2))
 
     first = pipeline._get_or_cache_prepared_image(image, ("first",))
-    pipeline._get_or_cache_prepared_image(image, ("second",))
-    assert pipeline._get_or_cache_prepared_image(None, ("first",)) is first
-    pipeline._get_or_cache_prepared_image(image, ("third",))
+    second = pipeline._get_or_cache_prepared_image(torch.ones_like(image), ("second",))
 
-    assert list(pipeline._prepared_image_cache) == [("first",), ("third",)]
+    assert first is not second
+    assert list(pipeline._prepared_image_cache) == [("second",)]

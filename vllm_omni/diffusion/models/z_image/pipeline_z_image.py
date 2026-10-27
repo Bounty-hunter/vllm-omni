@@ -51,7 +51,7 @@ from vllm_omni.model_executor.model_loader.weight_utils import (
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 _COMPILED_FORWARD_MARKER = "_vllm_omni_forward_compiled"
-_PREPARED_IMAGE_CACHE_SIZE = 2
+_PREPARED_IMAGE_CACHE_SIZE = 1
 
 
 def _image_encoder_cache_key(
@@ -62,7 +62,7 @@ def _image_encoder_cache_key(
     device: torch.device,
 ) -> tuple[bytes, tuple[int, int], int, int, torch.dtype, str]:
     """Identify the pixels consumed by ``VaeImageProcessor.preprocess``."""
-    rgb_image = image.convert("RGB")
+    rgb_image = image if image.mode == "RGB" else image.convert("RGB")
     digest = hashlib.sha256(rgb_image.tobytes()).digest()
     return digest, rgb_image.size, height, width, dtype, str(device)
 
