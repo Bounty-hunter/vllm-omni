@@ -41,6 +41,7 @@ def _pipeline_with_fake_vae():
     pipeline = object.__new__(ZImagePipeline)
     nn.Module.__init__(pipeline)
     pipeline.vae = _FakeVae()
+    pipeline.vae_scale_factor = 1
     pipeline.scheduler = types.SimpleNamespace(scale_noise=lambda image_latents, _timestep, _noise: image_latents)
     pipeline._image_encoder_cache = {}
     return pipeline
