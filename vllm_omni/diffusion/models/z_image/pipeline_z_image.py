@@ -15,6 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import hashlib
 import inspect
 import json
 import os
@@ -50,6 +51,20 @@ from vllm_omni.model_executor.model_loader.weight_utils import (
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 _COMPILED_FORWARD_MARKER = "_vllm_omni_forward_compiled"
+_IMAGE_ENCODER_CACHE_SIZE = 2
+
+
+def _image_encoder_cache_key(
+    image: PIL.Image.Image,
+    height: int,
+    width: int,
+    dtype: torch.dtype,
+    device: torch.device,
+) -> tuple[bytes, tuple[int, int], int, int, torch.dtype, str]:
+    """Identify the pixels consumed by ``VaeImageProcessor.preprocess``."""
+    rgb_image = image.convert("RGB")
+    digest = hashlib.sha256(rgb_image.tobytes()).digest()
+    return digest, rgb_image.size, height, width, dtype, str(device)
 
 
 def _compile_forward_once(module: nn.Module, *, mode: str) -> None:
@@ -326,6 +341,26 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
 
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor * 2, do_convert_rgb=True)
         self._negative_prompt_cache: dict[tuple[tuple[str, ...], int, str], list[torch.Tensor]] = {}
+        self._image_encoder_cache: dict[tuple, Any] = {}
+
+    def _get_or_encode_image(
+        self,
+        image: torch.Tensor | None,
+        cache_key: tuple | None,
+    ) -> Any:
+        if cache_key is not None:
+            cached = self._image_encoder_cache.pop(cache_key, None)
+            if cached is not None:
+                self._image_encoder_cache[cache_key] = cached
+                return cached
+        if image is None:
+            raise ValueError("An image tensor is required when the encoder cache misses.")
+        encoder_output = self.vae.encode(image)
+        if cache_key is not None:
+            self._image_encoder_cache[cache_key] = encoder_output
+            while len(self._image_encoder_cache) > _IMAGE_ENCODER_CACHE_SIZE:
+                self._image_encoder_cache.pop(next(iter(self._image_encoder_cache)))
+        return encoder_output
 
     def encode_prompt(
         self,
@@ -434,18 +469,24 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
         latents=None,
         image=None,
         timestep=None,
+        image_encoder_cache_key: tuple | None = None,
     ):
         height = 2 * (int(height) // (self.vae_scale_factor * 2))
         width = 2 * (int(width) // (self.vae_scale_factor * 2))
 
         shape = (batch_size, num_channels_latents, height, width)
 
-        if image is not None:
+        if image is not None or image_encoder_cache_key is not None:
             if latents is not None:
                 return latents.to(device=device, dtype=dtype)
 
-            image = image.to(device=device, dtype=dtype)
-            if image.shape[1] != num_channels_latents:
+            if image is not None:
+                image = image.to(device=device, dtype=dtype)
+            if image_encoder_cache_key is not None:
+                encoder_output = self._get_or_encode_image(image, image_encoder_cache_key)
+                image_latents = retrieve_latents(encoder_output, generator=generator)
+                image_latents = (image_latents - self.vae.config.shift_factor) * self.vae.config.scaling_factor
+            elif image is not None and image.shape[1] != num_channels_latents:
                 if isinstance(generator, list):
                     image_latents = [
                         retrieve_latents(self.vae.encode(image[i : i + 1]), generator=generator[i])
@@ -456,8 +497,10 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
                     image_latents = retrieve_latents(self.vae.encode(image), generator=generator)
 
                 image_latents = (image_latents - self.vae.config.shift_factor) * self.vae.config.scaling_factor
-            else:
+            elif image is not None:
                 image_latents = image
+            else:
+                raise AssertionError("Image conditioning requires pixels or an encoder cache key.")
 
             if batch_size > image_latents.shape[0] and batch_size % image_latents.shape[0] == 0:
                 additional_image_per_prompt = batch_size // image_latents.shape[0]
@@ -618,9 +661,22 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
                 image = image[0]
 
             # Prepare image for VAE encoding using image_processor
+            image_encoder_cache_key = None
+            prepared_image = image
             if not isinstance(image, torch.Tensor):
-                init_image = self.image_processor.preprocess(image, height, width)
-                image = init_image.to(dtype=torch.float32, device=device)
+                if isinstance(image, PIL.Image.Image) and not isinstance(generator, list):
+                    image_encoder_cache_key = _image_encoder_cache_key(
+                        image,
+                        height,
+                        width,
+                        prompt_embeds[0].dtype,
+                        device,
+                    )
+                if image_encoder_cache_key not in self._image_encoder_cache:
+                    init_image = self.image_processor.preprocess(image, height, width)
+                    prepared_image = init_image.to(dtype=torch.float32, device=device)
+                else:
+                    prepared_image = None
 
             # Initialize scheduler kwargs for img2img
             mu = calculate_shift(
@@ -662,8 +718,9 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
                 device,
                 generator,
                 latents,
-                image,
+                prepared_image,
                 latent_timestep,
+                image_encoder_cache_key,
             )
         else:
             latents = self.prepare_latents(
@@ -879,4 +936,5 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
             _compile_forward_once(self.vae.encoder, mode="max-autotune")
             _compile_forward_once(self.vae.decoder, mode="max-autotune")
         self._negative_prompt_cache.clear()
+        self._image_encoder_cache.clear()
         return loaded_weights
