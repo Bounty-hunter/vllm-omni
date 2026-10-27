@@ -257,10 +257,19 @@ if HAS_TRITON:
                 tl.where(dims < rotary_dim, dims - rotary_half, 0),
             )
             is_first = dims < rotary_half
-        pair_offsets = in_row * in_stride_t + heads[:, None] * in_stride_h + pair_dims[None, :] * in_stride_d
-        pair_x = tl.load(in_ptr + pair_offsets, mask=mask, other=0.0).to(tl.float32)
-        pair_weight = tl.load(weight_ptr + pair_dims, mask=pair_dims < head_dim, other=0.0).to(tl.float32)
-        pair_normalized = (pair_x * inv_rms[:, None] * pair_weight[None, :]).to(tl.bfloat16)
+        if interleaved:
+            # Adjacent-pair RoPE only permutes lanes already resident in this
+            # normalized tile. Gathering them here avoids reloading the same
+            # activation and norm-weight rows from global memory.
+            pair_indices = tl.broadcast_to(pair_dims[None, :], normalized.shape)
+            pair_normalized = tl.gather(normalized, pair_indices, axis=1)
+        else:
+            pair_offsets = (
+                in_row * in_stride_t + heads[:, None] * in_stride_h + pair_dims[None, :] * in_stride_d
+            )
+            pair_x = tl.load(in_ptr + pair_offsets, mask=mask, other=0.0).to(tl.float32)
+            pair_weight = tl.load(weight_ptr + pair_dims, mask=pair_dims < head_dim, other=0.0).to(tl.float32)
+            pair_normalized = (pair_x * inv_rms[:, None] * pair_weight[None, :]).to(tl.bfloat16)
         table_offsets = out_row * rope_stride_t + freq_dims
         cos = tl.load(rope_table_ptr + table_offsets).to(tl.float32)
         sin = tl.load(rope_table_ptr + table_offsets + rotary_half).to(tl.float32)
