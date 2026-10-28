@@ -438,8 +438,8 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
             return_tensors="pt",
         )
 
-        text_input_ids = text_inputs.input_ids.to(device)
-        prompt_masks = text_inputs.attention_mask.to(device).bool()
+        text_input_ids = text_inputs.input_ids.to(device, non_blocking=True)
+        prompt_masks = text_inputs.attention_mask.to(device, non_blocking=True).bool()
 
         prompt_embeds = self.text_encoder(
             input_ids=text_input_ids,
