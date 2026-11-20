@@ -48,7 +48,7 @@ class PackedForward(nn.Module):
 def record(**values):
     destination = Path(os.environ["HCMS_MATRIX_AUDIT"])
     destination.mkdir(parents=True, exist_ok=True)
-    row = dict(rank=dist.get_rank(), **values)
+    row = dict(rank=dist.get_rank(), pid=os.getpid(), **values)
     with (destination / f"rank{dist.get_rank()}.jsonl").open("a") as stream:
         stream.write(json.dumps(row, default=str) + "\n")
     print("HEAD_MATRIX_AUDIT " + json.dumps(row, default=str), flush=True)
@@ -222,8 +222,20 @@ def install(pipeline):
                 )
                 token = _ACTIVE.set(state)
                 native._SELECTED_CHUNKS = str(extra["chunks"])
+                if extra.get("trace_start"):
+                    torch.accelerator.synchronize()
+                    dist.barrier()
+                    if dist.get_rank() == 0:
+                        torch.cuda.profiler.start()
+                    dist.barrier()
                 with torch.cuda.nvtx.range(f"request/{extra['label']}"):
                     result = original_forward(request)
+                if extra.get("trace_stop"):
+                    torch.accelerator.synchronize()
+                    dist.barrier()
+                    if dist.get_rank() == 0:
+                        torch.cuda.profiler.stop()
+                    dist.barrier()
                 if state["fallbacks"]:
                     raise RuntimeError(f"The direct CE comparison fell back {state['fallbacks']} times")
                 stats = {

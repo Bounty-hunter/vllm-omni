@@ -35,6 +35,7 @@ def main():
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--rounds", type=int, default=8)
     parser.add_argument("--warmups", type=int, default=3)
+    parser.add_argument("--profile", action="store_true", help="Mark a separate diagnostic run for Nsight capture")
     args = parser.parse_args()
     config = json.loads(args.config.read_text())
     args.out.mkdir(parents=True, exist_ok=True)
@@ -70,13 +71,17 @@ def main():
                     names.reverse()
                 runs += [("paired", name, index, 42) for name in names]
             runs += [("correctness", name, seed - 43, seed) for seed in (43, 44) for name in variants]
-            for phase, name, index, seed in runs:
+            paired_positions = [position for position, run in enumerate(runs) if run[0] == "paired"]
+            for position, (phase, name, index, seed) in enumerate(runs):
                 extra = dict(
                     variants[name],
                     case=case["id"],
                     variant=name,
                     label=f"{case['id']}-{phase}-{name}-i{index}",
                     audit=index == 0,
+                    trace=args.profile,
+                    trace_start=args.profile and case is config["cases"][0] and position == paired_positions[0],
+                    trace_stop=args.profile and case is config["cases"][-1] and position == paired_positions[-1],
                 )
                 params = OmniDiffusionSamplingParams(**case["sampling"], seed=seed, extra_args=extra)
                 started = time.perf_counter()
@@ -100,6 +105,7 @@ def main():
                     phase=phase,
                     index=index,
                     seed=seed,
+                    profile=args.profile,
                     e2e_ms=elapsed_ms,
                     shapes=shapes,
                     dtypes=dtypes,
