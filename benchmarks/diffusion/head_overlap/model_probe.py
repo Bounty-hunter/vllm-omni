@@ -14,7 +14,7 @@ import torch
 import torch.distributed as dist
 from torch import nn
 
-from vllm_omni.diffusion.cuda_graph import GraphedForward
+from vllm_omni.diffusion.cuda_graph import GraphedForward, clone_static
 from vllm_omni.diffusion.distributed.parallel_state import get_world_group
 
 _ACTIVE = ContextVar("head_matrix_request", default=None)
@@ -52,6 +52,21 @@ def record(**values):
     with (destination / f"rank{dist.get_rank()}.jsonl").open("a") as stream:
         stream.write(json.dumps(row, default=str) + "\n")
     print("HEAD_MATRIX_AUDIT " + json.dumps(row, default=str), flush=True)
+
+
+def assert_equal(actual, expected):
+    if isinstance(actual, torch.Tensor):
+        torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+    elif isinstance(actual, dict):
+        assert actual.keys() == expected.keys()
+        for key in actual:
+            assert_equal(actual[key], expected[key])
+    elif isinstance(actual, (tuple, list)):
+        assert len(actual) == len(expected)
+        for item, reference in zip(actual, expected, strict=True):
+            assert_equal(item, reference)
+    else:
+        assert actual == expected
 
 
 def install(pipeline):
@@ -117,7 +132,12 @@ def install(pipeline):
                 if mask is not None and bool(mask.all()):
                     kwargs = dict(kwargs, encoder_hidden_states_mask=None)
                 graph = graphs.get(state["variant"])
+                reference = None
                 if graph is None:
+                    # Symmetric allocation/rendezvous belongs before the graph
+                    # class's synchronization probe, not inside capture. Clone
+                    # the inputs so this reference cannot alter the live call.
+                    reference = original(*clone_static(args), **clone_static(kwargs))
                     graph = graphs[state["variant"]] = StableGraph(
                         PackedForward(original),
                         device=torch.cuda.current_stream().device,
@@ -133,6 +153,8 @@ def install(pipeline):
                     raise RuntimeError(f"Requested graph was not captured: {component}")
                 if graph.captures > captures_before and state["direct_calls"] == calls_before:
                     raise RuntimeError(f"The graph did not capture direct CE attention: {component}")
+                if reference is not None:
+                    assert_equal(result, reference)
                 if graph.captures > captures_before:
                     record(
                         kind="capture",
