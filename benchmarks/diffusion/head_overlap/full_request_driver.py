@@ -34,7 +34,7 @@ def main():
         dtype="bfloat16",
         diffusion_attention_config={"default": "FLASH_ATTN"},
         enable_diffusion_pipeline_profiler=False,
-        additional_config={"text_encoder_cudnn_sdp": False},
+        additional_config={"text_encoder_cudnn_sdp": False, "vae_tile_parallel": True},
         log_stats=False,
         init_timeout=900,
         stage_init_timeout=900,

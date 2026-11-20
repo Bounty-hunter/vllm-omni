@@ -28,13 +28,15 @@
     },
     "e2e.py": {
       "measured_source_sha256": "59d3c99ae9b00cd029412a8e22f2269165aea4b4c2c2b0f9846218d8bb5f8754",
-      "published_source_sha256": "0501943bff850bc2a9790aaa9f9d595efa51ab61f0ed822e52d5ed55959ad00b",
-      "algorithm_ast_equal_after_device_api_normalization": true
+      "published_source_sha256": "56caf06ed66240a5a3f3b0367a48d104ce624c6303e322dfdb3febdf27b4e819",
+      "algorithm_ast_equal_after_device_api_normalization": false,
+      "configuration_note": "Explicit vae_tile_parallel=True equals the image-pipeline default used by historical runs; no model GPU rerun for this explicit-default change."
     },
     "full_request_driver.py": {
       "measured_source_sha256": "c172e988647136791c3924163f35f53cdcbc716b2b4fff338a423b88d1822678",
-      "published_source_sha256": "baf0e4dd3093f2dcf22f1046b570b8aff6fe4a91008753cd52d90ec395626a73",
-      "algorithm_ast_equal_after_device_api_normalization": false
+      "published_source_sha256": "b1387c0cbc46ad662320f1e75f51baa4bed0bdf3f9ccc046e2ac86c0c12482f7",
+      "algorithm_ast_equal_after_device_api_normalization": false,
+      "configuration_note": "Explicit vae_tile_parallel=True equals the image-pipeline default used by historical runs; no model GPU rerun for this explicit-default change."
     },
     "profile_full_request.py": {
       "measured_source_sha256": "8e068e0c6e39c49f92000944e208a47a5a70ea8871bafd34c30a8e4d2e8b6a9d",
@@ -65,12 +67,13 @@
   "publication_changes": [
     "SPDX headers, formatting and import order",
     "Portable accelerator equivalents for device selection and synchronization",
-    "Full-request driver model path and optional expected hash are CLI arguments"
+    "Full-request driver model path and optional expected hash are CLI arguments",
+    "Both model drivers explicitly retain the existing vae_tile_parallel=True default in their recorded configurations"
   ],
   "publication_checks": {
     "gpu_retest": false,
     "gpu_retest_note": "Devices were occupied; recorded GPU results belong to the measured-source hashes above.",
     "core_schedule_ast_unchanged": true,
-    "driver_changes": "Only model path and optional expected hash CLI parameters; no new performance acceptance claim."
+    "driver_changes": "Model path and optional expected hash CLI parameters; explicit existing VAE tile-parallel default; no new model performance acceptance claim."
   }
 }

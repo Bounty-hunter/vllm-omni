@@ -48,7 +48,7 @@ def main():
         kwargs["enforce_eager"] = True
     if a.h3:
         # cuDNN encoder determinism is held fixed in both A/B arms.
-        kwargs["additional_config"] = {"text_encoder_cudnn_sdp": False}
+        kwargs["additional_config"] = {"text_encoder_cudnn_sdp": False, "vae_tile_parallel": True}
     print("CONFIG " + json.dumps(kwargs), flush=True)
     omni = Omni(**kwargs)
     records = []

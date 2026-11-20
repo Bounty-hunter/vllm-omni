@@ -58,6 +58,26 @@ The image checkpoint has six fused PDD heads and requires its six-step
 schedule. A four-step trace below is a window within a normal six-step
 request, not a four-step generation.
 
+H3-Image's VAE tile parallelism already defaults to enabled across the DiT
+group. Both drivers explicitly retain `vae_tile_parallel=True` so this
+condition appears in their recorded configurations. The historical runs
+omitted that key and used the same enabled default. This is the image VAE's
+tile distribution, not the generic `vae_patch_parallel_size` path; it uses
+the existing two workers. VAE tiling and CUDA-graph settings stay identical
+between overlap and serial runs.
+
+Resolution sweeps must use the generated canvas rather than the requested
+output size. H3-Image defaults to a minimum generation area of 2048²: a 1024²
+request still generates on a 2048² canvas. Lowering `min_generation_area`
+changes the workload and requires separate output-quality evaluation.
+
+Online FP8 in this image pipeline is wired to the DiT linears. It does not
+pass that configuration to the text encoder, and the direct overlap probe
+requires BF16 attention inputs. Faster linears may increase communication's
+share of request latency without changing the communication bytes or the
+time available to hide them inside attention. FP8 model quality and E2E
+overlap gains are not qualified by the BF16 experiments here.
+
 ## Controlled microbenchmark
 
 Run this on the unpatched library prototype. The runner selects the direct
@@ -160,7 +180,16 @@ Graph microbenchmark medians in milliseconds, with independent output storage:
 | Shape | Optimized whole | Same two groups, serial | Two groups, overlap |
 | --- | ---: | ---: | ---: |
 | Qwen-shaped 16384 + 512 joint | 3.81598 | 3.89911 | 3.68721 |
+| H3-shaped 4128, 16 padding | 0.63140 | 0.72146 | 0.62742 |
 | H3-shaped 16416, 16 padding | 6.75507 | 6.79179 | 6.44428 |
+
+The isolated CE / (attention + CE) ratio is 30.5% for the 4128-token case
+and 9.3% for 16416 tokens. These are isolated-work ratios, not full-request
+communication shares. At 4128 tokens, splitting adds 90.06 µs to the serial
+path and overlapping reduces that split path by 94.04 µs, leaving 3.98 µs
+net. At 16416 tokens those differences are 36.72, 347.51 and 310.79 µs.
+Thus a higher communication fraction alone does not identify a useful
+overlap workload. The eager 4128-token case regressed by 1.26 µs.
 
 H3 4096 engine-request medians for A1/B1/B2/A2 were
 5925.730/5918.882/5869.468/5906.826 ms. The forward/reverse comparisons reduced
