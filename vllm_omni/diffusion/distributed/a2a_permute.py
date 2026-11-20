@@ -64,7 +64,7 @@ class _SymmWorkspace:
 # A single grow-only byte workspace per device/process-group. Shape changes
 # reuse a typed view into the workspace instead of retaining one allocation per
 # historical request shape.
-_SYMM_WORKSPACES: dict[tuple[torch.device, str], _SymmWorkspace] = {}
+_SYMM_WORKSPACES: dict[tuple[torch.device, str] | tuple[torch.device, str, str], _SymmWorkspace] = {}
 
 
 class _Extent3D(ctypes.Structure):
@@ -167,7 +167,12 @@ def _required_nbytes(shape: tuple[int, ...], dtype: torch.dtype) -> int:
 
 
 def _get_symm_buffer(
-    symm_shape: tuple[int, ...], dtype: torch.dtype, device: torch.device, group_name: str
+    symm_shape: tuple[int, ...],
+    dtype: torch.dtype,
+    device: torch.device,
+    group_name: str,
+    *,
+    workspace_slot: str | None = None,
 ) -> torch.Tensor:
     """Get a typed view from a grow-only symmetric-memory workspace.
 
@@ -176,7 +181,7 @@ def _get_symm_buffer(
     requests at or below the peak capacity take no synchronization path.
     """
     device = torch.device(device)
-    key = (device, group_name)
+    key = (device, group_name) if workspace_slot is None else (device, group_name, workspace_slot)
     required_bytes = _required_nbytes(symm_shape, dtype)
     stream_id = torch.cuda.current_stream(device).cuda_stream
     with _WORKSPACE_LOCK:
@@ -240,6 +245,9 @@ def clear_a2a_permute_workspaces() -> None:
             torch.accelerator.synchronize(device)
         count = len(_SYMM_WORKSPACES)
         _SYMM_WORKSPACES.clear()
+    head_overlap_module = sys.modules.get("vllm_omni.diffusion.attention.parallel.head_overlap")
+    if head_overlap_module is not None:
+        head_overlap_module._COMM_STREAMS.clear()
     logger.info("[a2a_permute] Released %d symmetric-memory workspace(s)", count)
 
 
@@ -256,6 +264,9 @@ class _CEPlan:
         self.runtime = _ce_runtime()
         self.reverse = reverse
         self.graph: torch.cuda.CUDAGraph | None = None
+        # The head pipeline fences all consumers before reusing these slots.
+        # Functional custom ops keep allocating independent outputs by default.
+        self.output_buffers: dict[int, torch.Tensor] = {}
         self.coalesce_inputs = len(inputs) == 3 and inputs[0].shape == inputs[1].shape == inputs[2].shape
         limit = _CE_QKV_GRAPH_MAX_INPUT_BYTES if self.coalesce_inputs else _CE_GRAPH_MAX_INPUT_BYTES
         self.use_graph = max(x.nbytes for x in inputs) <= limit
@@ -285,11 +296,17 @@ class _CEPlan:
                 self.operations[peer].append((index, offset, args))
             section += x.nbytes
 
-    def run(self, inputs):
+    def run(self, inputs, *, output_slot: int | None = None):
+        output = None
+        if output_slot is not None:
+            output = self.output_buffers.get(output_slot)
+            if output is None:
+                output = torch.empty_like(self.shared)
+                self.output_buffers[output_slot] = output
         # An outer graph already amortizes submission costs. Avoid nested
         # capture and staging in that case; large requests use direct CE.
         if not self.use_graph or torch.cuda.is_current_stream_capturing():
-            return self._run_eager(inputs)
+            return self._run_eager(inputs) if output is None else self._run_eager(inputs, output=output)
         if self.graph is None:
             if self.coalesce_inputs:
                 batch, sequence, heads, dim = inputs[0].shape
@@ -317,11 +334,14 @@ class _CEPlan:
         self.graph.replay()
         # The next exchange's initial barrier protects this copy-out. Clone
         # directly from symmetric memory to avoid retaining a graph output.
-        return self.shared.clone()
+        if output is None:
+            return self.shared.clone()
+        output.copy_(self.shared)
+        return output
 
-    def _run_eager(self, inputs, *, copy_out=True):
+    def _run_eager(self, inputs, *, copy_out=True, output=None):
         pointers = [x.data_ptr() for x in inputs]
-        out = torch.empty_like(self.shared) if copy_out else None
+        out = output if output is not None else (torch.empty_like(self.shared) if copy_out else None)
         runtime = self.runtime
 
         def emit(peer, stream):
@@ -345,16 +365,28 @@ class _CEPlan:
         self.done.record(self.transfer)
         self.current.wait_event(self.done)
         self.handle.barrier()
-        # Ordinary outputs survive later exchanges and satisfy custom-op aliasing.
+        # Default outputs survive later exchanges and satisfy custom-op aliasing.
+        # Explicit output slots are private to the caller-fenced head pipeline.
         if out is not None:
             out.copy_(self.shared)
         return out
 
 
-def _exchange_ce(inputs, group_name: str, world_size: int, reverse: bool = False) -> torch.Tensor:
+def _exchange_ce(
+    inputs,
+    group_name: str,
+    world_size: int,
+    reverse: bool = False,
+    *,
+    workspace_slot: str | None = None,
+    output_slot: int | None = None,
+) -> torch.Tensor:
     # Reuse a validated plan before repeating layout and workspace bookkeeping.
     plan_key = (reverse, len(inputs))
-    workspace = _SYMM_WORKSPACES.get((inputs[0].device, group_name))
+    workspace_key = (inputs[0].device, group_name)
+    if workspace_slot is not None:
+        workspace_key += (workspace_slot,)
+    workspace = _SYMM_WORKSPACES.get(workspace_key)
     if workspace is not None:
         plan = workspace.ce_plans.get(plan_key)
         signature = tuple((x.shape, x.stride(), x.dtype) for x in inputs)
@@ -362,7 +394,7 @@ def _exchange_ce(inputs, group_name: str, world_size: int, reverse: bool = False
             stream_id = torch.cuda.current_stream(inputs[0].device).cuda_stream
             if workspace.stream_id != stream_id:
                 raise RuntimeError("a2a_permute workspace must be used from a single CUDA stream")
-            return plan.run(inputs)
+            return plan.run(inputs) if output_slot is None else plan.run(inputs, output_slot=output_slot)
     _ce_runtime()
     # Preserve regular row-strided QKV views; pack only unsupported layouts.
     inputs = tuple(
@@ -374,8 +406,13 @@ def _exchange_ce(inputs, group_name: str, world_size: int, reverse: bool = False
         for x in inputs
     )
     first = inputs[0]
-    shared = _get_symm_buffer((sum(x.numel() for x in inputs),), first.dtype, first.device, group_name)
-    workspace = _SYMM_WORKSPACES[(first.device, group_name)]
+    if workspace_slot is None:
+        shared = _get_symm_buffer((sum(x.numel() for x in inputs),), first.dtype, first.device, group_name)
+    else:
+        shared = _get_symm_buffer(
+            (sum(x.numel() for x in inputs),), first.dtype, first.device, group_name, workspace_slot=workspace_slot
+        )
+    workspace = _SYMM_WORKSPACES[workspace_key]
     if workspace.ce_stream is None:
         workspace.ce_stream = torch.cuda.Stream(device=first.device)
     signature = tuple((x.shape, x.stride(), x.dtype) for x in inputs)
@@ -383,7 +420,7 @@ def _exchange_ce(inputs, group_name: str, world_size: int, reverse: bool = False
     if plan is None or plan.signature != signature:
         plan = _CEPlan(inputs, shared, workspace.handle, world_size, reverse, workspace.ce_stream)
         workspace.ce_plans[plan_key] = plan
-    return plan.run(inputs)
+    return plan.run(inputs) if output_slot is None else plan.run(inputs, output_slot=output_slot)
 
 
 @torch.library.custom_op("vllm_omni_a2a::ulysses_qkv_ce", mutates_args=(), device_types="cuda")

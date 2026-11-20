@@ -1,0 +1,58 @@
+Final experimental schedule: fence and lifetime argument
+
+Assumptions
+- All ranks call the same head-group schedule on one owning compute stream.
+- Each head group owns a distinct forward buffer. Output assembly uses a
+  separate symmetric buffer; it never aliases any forward buffer.
+- The public native wrapper returns an independent clone on compute.
+- Every reverse source stays alive until compute's final wait is enqueued.
+- Shape changes synchronize before releasing the previous fixed plan.
+
+Input-buffer reuse
+1. A call's final peer fence follows every reverse transfer.
+2. Each reverse transfer waits for the corresponding attention-produced event.
+3. Hence completion of the final peer fence implies that all ranks finished
+   every attention read from the current call's private input buffers.
+4. Compute waits for that final fence before returning. The following call's
+   local prefill and producer event follow this wait on the same compute stream.
+5. New local or peer writes to input buffers therefore cannot overwrite a
+   previous attention consumer, even when the host queues calls ahead.
+
+Output-buffer reuse
+1. After the final wait, the native wrapper clones the assembled output on
+   compute. This clone is the only post-return reader of the private output pool.
+2. The next call's local input prefill follows that clone on compute.
+3. The peer communication stream waits for completion of this local prefill
+   before sending F0 and entering F0's incoming-data-ready peer fence.
+4. Completion of F0's fence therefore also acknowledges completion of every
+   rank's previous output clone.
+5. All new attention groups depend on F0-ready, directly or through the owning
+   compute stream. Every new reverse transfer depends on its attention output.
+6. No new reverse write can overwrite another rank's previous output clone.
+
+The preceding final fence protects old input readers; the next F0-ready fence
+protects old output copy-outs. An additional entry peer barrier is redundant.
+For two groups this leaves two forward-ready fences and one final output fence.
+No incoming-data-ready or final-output-ready fence is removed.
+
+Independent output ownership
+The public wrapper's clone preserves outputs held across later calls. Later
+projection kernels read this independent tensor, not the transport output pool.
+The lower-level profiling plan explicitly returns pooled storage. Its caller
+must consume/copy it on the owning compute stream before the next invocation.
+
+CUDA allocator lifetime
+Raw CE reads are not visible to PyTorch's allocator. The Python source list
+retains each attention output through insertion of compute's final wait. Storage
+freed afterward can only be reused after this wait on the same compute stream,
+which also orders all reverse reads. No per-layer record_stream retention is
+needed; this avoids keeping temporary storage alive across many DiT layers.
+
+Adversarial validation
+stress_fences.py alternates two immutable input sets, deliberately delays both
+CPU and GPU output consumers on different ranks, queues 16 calls without an
+inter-iteration host barrier, then compares every saved output bitwise to a
+fully synchronized reference. This targets the output-copy-out race directly.
+The independent global-reference suite also covers layout changes, 2/4 groups,
+GQA/mask/rear-joint fallbacks and the single-compute-stream guard.
+Consult the final run log for actual validation results.
