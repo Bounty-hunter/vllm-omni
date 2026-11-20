@@ -94,6 +94,15 @@ def graph_call(original, graphs, component, *args, **kwargs):
     if not graph.enabled or not graph.num_graphs:
         raise RuntimeError(f"Requested graph was not captured: {component}")
     if graph.captures > captures_before and state["direct_calls"] == calls_before:
+        record(
+            kind="capture_rejected",
+            component=component,
+            variant=state["variant"],
+            direct_calls=state["direct_calls"],
+            fallbacks=state["fallbacks"],
+            qkv_shapes=sorted(state["shapes"]),
+            graph_stats=graph.stats(),
+        )
         raise RuntimeError(f"The graph did not capture direct CE attention: {component}")
     if reference is not None:
         assert_equal(result, reference)
@@ -185,7 +194,7 @@ def install(pipeline):
             def capability_hook(
                 attention, args, component=name, attention_name=attention_name, registration=registration
             ):
-                if torch.cuda.is_current_stream_capturing():
+                if _ACTIVE.get() is None or torch.cuda.is_current_stream_capturing():
                     return
                 active = attention._get_active_parallel_strategy()
                 metadata = args[3] if len(args) > 3 else None

@@ -1,13 +1,5 @@
 {
   "engine": {
-    "parallel_config": {
-      "ulysses_degree": 2,
-      "ulysses_a2a_permute": true,
-      "ulysses_head_chunks": 2,
-      "text_encoder_tp_size": 1,
-      "tensor_parallel_size": 1,
-      "vae_patch_parallel_size": 2
-    },
     "dtype": "bfloat16",
     "quantization_config": {
       "transformer": {
@@ -21,7 +13,17 @@
     "enforce_eager": true,
     "log_stats": false,
     "init_timeout": 900,
-    "stage_init_timeout": 900
+    "stage_init_timeout": 900,
+    "ulysses_degree": 2,
+    "ulysses_a2a_permute": true,
+    "ulysses_head_chunks": 2,
+    "text_encoder_tp_size": 1,
+    "tensor_parallel_size": 1,
+    "vae_patch_parallel_size": 2,
+    "num_gpus": 2,
+    "devices": "0,1",
+    "distributed_executor_backend": "mp",
+    "max_num_seqs": 1
   },
   "prompt": {
     "prompt": "Two anthropomorphic cats in boxing gear on a spotlighted stage.",
