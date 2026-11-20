@@ -70,11 +70,13 @@ def assert_equal(actual, expected):
 
 
 def install(pipeline):
+    # Import the patched attention owner before the native probe, whose
+    # microbenchmark utilities also reference that owner during import.
+    head = importlib.import_module("vllm_omni.diffusion.attention.parallel.head_overlap")
     import native_prefilled as native
     from prefilled_probe import PrefilledPipeline
     from schedule_probe import run as scheduled
 
-    head = importlib.import_module("vllm_omni.diffusion.attention.parallel.head_overlap")
     original_native = native.run
 
     def scheduled_call(plan):
