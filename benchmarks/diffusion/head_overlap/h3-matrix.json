@@ -17,7 +17,7 @@
       "default": "FLASH_ATTN"
     },
     "enable_diffusion_pipeline_profiler": false,
-    "enforce_eager": true,
+    "enforce_eager": false,
     "additional_config": {
       "text_encoder_cudnn_sdp": false,
       "vae_tile_parallel": true,
