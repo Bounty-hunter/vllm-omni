@@ -12,7 +12,12 @@ submits attention before the next input exchange, returns the preceding
 output during the next attention, and retains three peer fences for two
 groups. See [FENCE-PROOF.txt](FENCE-PROOF.txt) for reuse and lifetime ordering.
 
-This is an experiment snapshot, with no stable service speedup accepted.
+This is an experiment snapshot. The unprofiled model matrix is recorded in
+[MATRIX-RESULTS.txt](MATRIX-RESULTS.txt), with samples and source identities in
+[model-matrix-summary.json](evidence/model-matrix-summary.json). H3-Image
+FP8 SP4 at 3072 and 4096 reduced request latency by 4.38% and 3.01%,
+respectively, in a 30-pair confirmation. These are explicit offline graph
+experiments; no default-service speedup is accepted.
 CUDA BF16 batch-one MHA with dense or front-joint inputs is the direct probe's
 tested scope. Unsupported layouts use the generic fallback. Compiled
 attention retains the conservative library fallback. NPU, video, hybrid
@@ -32,10 +37,45 @@ parallelism, HTTP serving and concurrent requests are not qualified.
 - `export_rich_request.py`: complete request-zero traces retaining stacks.
 - `analyze_probe.py` and `analyze_edges.py`: device/runtime correlation.
 
-The two `.patch` files contain the exact temporary integration used by the
-experiments. Apply one at a time in an isolated checkout. Undo it before
-switching probes. They are kept explicit to avoid installing diagnostic
+The `.patch` files contain explicit temporary integration used by the
+experiments. The model matrix composes `native-probe.patch` with the appropriate
+graph adapter; the historical full-request patch is a separate integration.
+Apply them only in an isolated checkout and undo them before switching probes.
+They are kept explicit to avoid installing diagnostic
 instrumentation in the library's default path.
+
+## Unprofiled model matrix
+
+`model_matrix.py` alternates complete requests after both paths warm in the
+same process, checks output hashes at three seeds, and writes raw samples
+after the request timer. The default run does not start a profiler.
+Frozen configs include `h3-sp4-confirm.json`, `h3-bf16-matrix.json`,
+`qwen-edit-matrix.json`, `flux-bf16-confirm.json`, and `wan-matrix.json`.
+
+For example, in an isolated checkout with four scheduled CUDA devices:
+
+```bash
+export PROBE_DIR="$PWD/benchmarks/diffusion/head_overlap"
+export PYTHONPATH="$PROBE_DIR${PYTHONPATH:+:$PYTHONPATH}"
+export HCMS_GRAPH_OUTPUT="$RUN_DIR/audit"
+export HCMS_EXPECTED_FP8=260 HCMS_EXPECTED_VAE_WORLD=4
+git apply "$PROBE_DIR/native-probe.patch"
+git apply "$PROBE_DIR/h3-graph-probe.patch"
+python "$PROBE_DIR/model_matrix.py" --model "$H3_IMAGE_MODEL" \
+  --config "$PROBE_DIR/h3-sp4-confirm.json" \
+  --out "$RUN_DIR/results" --rounds 30 --warmups 5
+git apply --reverse "$PROBE_DIR/h3-graph-probe.patch"
+git apply --reverse "$PROBE_DIR/native-probe.patch"
+```
+
+For the other models, compose `native-probe.patch` with `model-probe.patch`
+instead and set `HCMS_MATRIX_AUDIT` to the output audit directory. Qwen also
+requires `qwen-block-graph.patch`; it captures the original block loop while
+keeping conditioning preparation outside the graph. Undo patches in reverse
+order. Wan uses flat deployment parallel arguments because its registered
+pipeline does not consume the generic nested `parallel_config` override.
+Use a task-local `TRITON_CACHE_DIR` on local storage when the shared cache
+reports stale file handles. This changes compilation storage, not the kernels.
 
 ## Staging and graph-private output experiment
 
