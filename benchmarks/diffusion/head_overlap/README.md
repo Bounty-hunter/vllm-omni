@@ -163,6 +163,37 @@ overlap gains are not qualified by the BF16 experiments here.
 
 ## Controlled microbenchmark
 
+## Reproducible model matrix
+
+The fixed H3 block-graph integration and interleaved request driver are now
+included in the branch. Use an isolated checkout, applying `native-probe.patch`
+followed by `h3-graph-probe.patch`. The latter explicitly installs the diagnostic
+H3 adapter; undo both patches after the run. Set `PROBE_DIR` on `PYTHONPATH`
+before starting workers. `MODEL_PATH` must resolve the complete image checkpoint
+and its encoder dependencies.
+
+```bash
+git apply "$PROBE_DIR/native-probe.patch"
+git apply "$PROBE_DIR/h3-graph-probe.patch"
+export HCMS_EXPECTED_FP8=260
+export HCMS_EXPECTED_VAE_WORLD=2
+export HCMS_GRAPH_OUTPUT=/path/to/fresh/audit
+python "$PROBE_DIR/model_matrix.py" --model "$MODEL_PATH" \
+  --config "$PROBE_DIR/h3-matrix.json" --out /path/to/fresh/results
+```
+
+`h3-matrix.json` declares 1024², 2048², 1440×2560, 3072² and 4096² cases, with
+SP2, FP8 DiT and VAE tile parallelism. These additional shapes are a test matrix,
+not a support or speedup claim. The driver warms both variants, alternates their
+order each round, checks repeat outputs and seeds 42/43/44 bitwise, and records
+every unprofiled request. Media and sampling parameters are configuration data;
+hashing and artifact persistence are outside the `Omni.generate` timer.
+
+This adapter disables torch.compile and AdaLN memoization consistently while
+capturing only the DiT block body. The fixed-layout graph contract and peer
+fences remain the same as the recorded 2K experiment. The worker audit checks
+actual quantized module count, VAE degree, input geometry and six graph replays.
+
 Run this on the unpatched library prototype. The runner selects the direct
 schedule while retaining the original serial and generic-pipeline controls.
 
