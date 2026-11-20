@@ -56,6 +56,10 @@ def main():
                     joint_query=joint[0], joint_key=joint[1], joint_value=joint[2], joint_strategy="front"
                 )
             )
+            if total == 2112 and not joint_length:
+                metadata = AttentionMetadata(extra={"vsa_dit_seq_shape": (2, 33, 32), "preserve_vsa_all_blocks": True})
+                assert head.can_overlap(*inputs, metadata, world, 2)
+                assert not head.can_overlap(*inputs, AttentionMetadata(extra={"unknown_sparse_plan": True}), world, 2)
             q, k, v, kernel_md, context = strategy.pre_attention(*inputs, copy.copy(metadata))
             reference = strategy.post_attention(kernel(q, k, v, kernel_md), context).clone()
 
