@@ -39,7 +39,7 @@ def main():
         for frame in frames:
             expected.append(head.head_overlap(*frame, None, dist.group.WORLD, 2, kernel))
             torch.accelerator.synchronize()
-        plan = native_prefilled._PLANS[(frames[0][0].device, dist.group.WORLD.group_name)][1]
+        plan = next(plan for _, plan in native_prefilled._PLANS.values())
         snapshots = []
         for iteration in range(16):
             frame = frames[iteration % 2]

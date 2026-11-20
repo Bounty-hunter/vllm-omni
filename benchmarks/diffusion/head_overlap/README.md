@@ -37,6 +37,56 @@ experiments. Apply one at a time in an isolated checkout. Undo it before
 switching probes. They are kept explicit to avoid installing diagnostic
 instrumentation in the library's default path.
 
+## Staging and graph-private output experiment
+
+`schedule_probe.py` supplies explicit scheduling ablations over the same
+prefilled buffers, bytes and peer fences. `stage-local` starts F0 after its own
+local prefill, then places the remaining local prefill under F0 communication.
+The old schedule is retained as a control. Early peer submission and deferred
+local output copies remain separate ablations, not defaults.
+
+`native_prefilled.py` permits capture only after the fixed plan is warm and on
+its owning compute stream. It caches chunk counts separately for same-process
+comparisons. Its optional `output_slot(key)` context gives a static graph/layer
+a private symmetric output slot, allocated before capture. Reverse CE writes
+then target this slot directly. Ordinary calls retain independent output clones.
+Keys must identify one fixed layout. Consume graph-private values on the owning
+stream before replaying the slot; destroy graphs before clearing their external
+buffers. Slot residency is bounded. See the fence argument for these lifetimes.
+
+The 2026-11-20 H3-Image confirmation used true 2048², six PDD steps, SP2, FP8 DiT
+linears, BF16 FA3/CE, VAE tile parallel 2 and a graph of the 50 DiT blocks. AdaLN
+exact memoization was disabled consistently. After warming all five graphs,
+30 requests per variant were interleaved in alternating order in one process:
+
+| Graph configuration | Median `Omni.generate` latency |
+| --- | ---: |
+| One chunk, serial | 1033.917 ms |
+| Two chunks, original overlap | 1038.044 ms |
+| Two chunks, staged local prefill | 1026.799 ms |
+| Two chunks, private output slots | 1025.175 ms |
+| Two chunks, staging and output slots | 1021.551 ms |
+
+The combined probe reduced request latency by 1.20% versus one chunk and 1.59%
+versus the original overlap in this run. A separate forward/reverse block run
+also favored the combined probe, with different absolute timings; this is a
+small workload-dependent gain. Seeds 42/43/44 were RGB-bitwise equal. The graph
+capture executed 50 native calls and each request replayed six block graphs.
+The two active 50-slot variants use about 2.76 GiB of symmetric output storage
+per GPU at this canvas; selecting only one needs about 1.38 GiB.
+
+After applying `native-probe.patch`, validate normal output ownership and
+graph-private slots with asymmetric consumers on the two allocated GPUs:
+
+```bash
+torchrun --standalone --nproc-per-node=2 "$PROBE_DIR/graph_slot_stress.py"
+```
+
+This remains an explicitly integrated fixed-canvas experiment. It does not
+enable H3 DiT graphs or the direct transport in the default service path.
+CUDA 13.0's 3D batch-copy API was rejected because capture is unsupported in the
+tested runtime; no dependency change or silent eager fallback is included.
+
 ## Environment
 
 Run from the repository root in the existing editable installation, on two

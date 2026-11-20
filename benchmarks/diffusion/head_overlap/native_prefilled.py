@@ -1,16 +1,36 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
-"""Eager native-model experiment with bounded, caller-fenced buffer ownership."""
+"""Native-model experiment with prewarmed graphs and bounded output ownership."""
 
 import os
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import replace
 
 import torch
 import torch.distributed as dist
+from overlap_probe import SymmetricBuffer
 from prefilled_probe import PrefilledPipeline
 
 _PLANS = {}
+_SLOT_ARENA = {}
+_OUTPUT_SLOT = ContextVar("hcms_output_slot", default=None)
 _SELECTED_CHUNKS = os.environ.get("HCMS_NATIVE_PLAN_CHUNKS")
+
+
+@contextmanager
+def output_slot(key):
+    """Scope a static graph/layer's storage; ordinary calls remain owned.
+
+    Keys must identify one fixed layout. A graph consumes each slot on the
+    owning compute stream before replaying that slot. Destroy graphs before
+    clear() releases their external buffers. The caller bounds graph residency.
+    """
+    token = _OUTPUT_SLOT.set(key)
+    try:
+        yield
+    finally:
+        _OUTPUT_SLOT.reset(token)
 
 
 def layout(tensors):
@@ -25,6 +45,7 @@ class NativePipeline(PrefilledPipeline):
     def __init__(self, inputs, joint, pg, chunks, comm, kernel, metadata):
         self.attention_kernel, self.metadata = kernel, metadata
         super().__init__(inputs, joint, pg, chunks, self.attend)
+        self.base_output = self.output
         self.stream = comm
         tensors = inputs + (() if joint is None else joint)
         self.input_layout = layout(tensors)
@@ -56,12 +77,13 @@ class NativePipeline(PrefilledPipeline):
 
 
 def clear():
-    if _PLANS:
+    if _PLANS or _SLOT_ARENA:
         torch.accelerator.synchronize()
     for _, plan in _PLANS.values():
         # Break the bound-kernel cycle, then release all symmetric allocations.
         plan.kernel = plan.attention_kernel = plan.metadata = None
     _PLANS.clear()
+    _SLOT_ARENA.clear()
 
 
 def run(
@@ -91,7 +113,6 @@ def run(
         and all(
             x.stride(3) == 1 and x.stride(2) == x.shape[3] and x.stride(1) >= x.shape[2] * x.shape[3] for x in inputs
         )
-        and not torch.cuda.is_current_stream_capturing()
     )
     joint = None
     if md is not None:
@@ -135,23 +156,43 @@ def run(
     kernel_md = (
         None if md is None else replace(md, joint_query=None, joint_key=None, joint_value=None, extra=dict(md.extra))
     )
-    cached = _PLANS.get(key)
+    plan_key = (*key, selected_chunks)
+    cached = _PLANS.get(plan_key)
     if cached is None or cached[0] != signature:
+        if torch.cuda.is_current_stream_capturing():
+            raise RuntimeError("Native CE plan must be warmed before capture")
         print(
             f"NATIVE_PREFILLED chunks={selected_chunks} q={tuple(q.shape)} "
             f"packed={md is not None and 'cu_seqlens_q' in md.extra}",
             flush=True,
         )
         # A shape change is rare and collective, as with the existing CE
-        # workspace. Bound memory to one live plan per device/process group.
+        # workspace. Keep one live layout per device/group/chunk count.
         torch.accelerator.synchronize()
         if cached is not None:
             cached[1].kernel = cached[1].attention_kernel = cached[1].metadata = None
         plan = NativePipeline(inputs, joint, pg, selected_chunks, comm, kernel, kernel_md)
-        _PLANS[key] = (signature, plan)
+        _PLANS[plan_key] = (signature, plan)
     else:
         plan = cached[1]
         plan.bind(inputs, joint, kernel, kernel_md)
-    # Public attention results own their storage. The next layer/request can
+    # Unscoped attention results own their storage. The next layer/request can
     # reuse transport buffers only after this copy and its consumers on compute.
-    return plan().clone()
+    current_slot = _OUTPUT_SLOT.get()
+    if current_slot is None:
+        plan.output = plan.base_output
+        return plan().clone()
+    # Explicit graph-body scope: the caller consumes this layer's slot on the
+    # owning compute stream before the next entry fence. Normal calls above
+    # still return an independent tensor. No peer fence is removed.
+    slot_key = (plan_key, current_slot)
+    slot = _SLOT_ARENA.get(slot_key)
+    if slot is None:
+        if torch.cuda.is_current_stream_capturing():
+            raise RuntimeError("Output slots must be allocated before graph capture")
+        if len(_SLOT_ARENA) >= 128:
+            raise RuntimeError("The fixed-canvas experiment exceeded its output-slot budget")
+        tensor = plan.base_output.tensor
+        slot = _SLOT_ARENA[slot_key] = SymmetricBuffer(tuple(tensor.shape), tensor.dtype, tensor.device, pg)
+    plan.output = slot
+    return plan()

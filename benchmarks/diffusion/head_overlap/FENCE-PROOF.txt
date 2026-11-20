@@ -56,3 +56,32 @@ fully synchronized reference. This targets the output-copy-out race directly.
 The independent global-reference suite also covers layout changes, 2/4 groups,
 GQA/mask/rear-joint fallbacks and the single-compute-stream guard.
 Consult the final run log for actual validation results.
+
+Staged local prefill
+schedule_probe.py also tests placing only F0's local copies before enter, then
+issuing the remaining local copies on compute while F0 runs on communication.
+The previous final fence still protects every old forward-buffer reader.
+Distinct forward buffers make F1-local and F0-peer destinations disjoint; QKV
+sources were produced before enter. Every local prefill finishes on compute
+before its attention consumer. enter still follows the previous copy-out, so
+the F0-ready acknowledgement and all three peer fences remain unchanged.
+
+Explicit static-graph output slots
+native_prefilled.output_slot(key) opts a fixed graph/layer into a private
+symmetric output slot. The caller warms the slot before capture, consumes it
+on the owning compute stream, and does not expose it beyond its next replay.
+The graph records reverse writes directly to this slot instead of cloning the
+shared output pool. Ordinary, unscoped attention results still own their clone.
+
+A following F0-ready fence acknowledges that every rank reached enter after
+the preceding compute consumers. No reverse write, including a later reuse of
+the same slot, can pass that acknowledgement. Incoming reverse writes still
+finish at the slot's final output-ready peer fence before local consumption.
+Unique layer keys additionally prevent different layers from sharing storage.
+The ContextVar scope resets on exceptions; keys must identify a fixed layout.
+Destroy captured graphs before clear() synchronizes and releases their slots.
+The experiment caps residency at 128 slots and clears it on canvas changes.
+
+graph_slot_stress.py verifies both retained ordinary
+outputs and delayed slot consumers on two ranks, in eager and graph execution,
+at 1056 and 4128 physical tokens. Whole-model seeds 42/43/44 are checked separately.
