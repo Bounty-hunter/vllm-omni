@@ -161,8 +161,6 @@ share of request latency without changing the communication bytes or the
 time available to hide them inside attention. FP8 model quality and E2E
 overlap gains are not qualified by the BF16 experiments here.
 
-## Controlled microbenchmark
-
 ## Reproducible model matrix
 
 The fixed H3 block-graph integration and interleaved request driver are now
@@ -193,6 +191,8 @@ This adapter disables torch.compile and AdaLN memoization consistently while
 capturing only the DiT block body. The fixed-layout graph contract and peer
 fences remain the same as the recorded 2K experiment. The worker audit checks
 actual quantized module count, VAE degree, input geometry and six graph replays.
+
+## Controlled microbenchmark
 
 Run this on the unpatched library prototype. The runner selects the direct
 schedule while retaining the original serial and generic-pipeline controls.
