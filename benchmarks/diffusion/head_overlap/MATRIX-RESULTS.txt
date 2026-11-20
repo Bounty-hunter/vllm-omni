@@ -26,35 +26,44 @@ VAE patch parallelism 2. H3 SP4 also uses text-encoder TP4; SP2 uses TE TP2.
 Quantized rows use online FP8 DiT linears with BF16 attention/CE.
 
 All complete cases (milliseconds; positive reduction means lower latency)
-run | case | SP | requested HxW / frames | serial | overlap | reduction | faster pairs
-h3-sp2-fp8 | h3-1k | 2 | 1024x1024 | 393.570 | 388.043 | +1.40% | 7/8
-h3-sp2-fp8 | h3-2k | 2 | 2048x2048 | 1027.339 | 1021.169 | +0.60% | 7/8
-h3-sp2-fp8 | h3-landscape | 2 | 1440x2560 | 902.571 | 902.245 | +0.04% | 5/8
-h3-sp2-fp8 | h3-3k | 2 | 3072x3072 | 2380.912 | 2334.717 | +1.94% | 8/8
-h3-sp2-fp8 | h3-4k | 2 | 4096x4096 | 5019.973 | 4924.154 | +1.91% | 8/8
-h3-sp4-fp8 | h3-2k | 4 | 2048x2048 | 683.113 | 657.201 | +3.79% | 7/8
-h3-sp4-fp8 | h3-3k | 4 | 3072x3072 | 1410.213 | 1349.747 | +4.29% | 8/8
-h3-sp4-fp8 | h3-4k | 4 | 4096x4096 | 2742.744 | 2655.525 | +3.18% | 8/8
-h3-sp4-confirm | h3-3k | 4 | 3072x3072 | 1398.319 | 1337.135 | +4.38% | 30/30
-h3-sp4-confirm | h3-4k | 4 | 4096x4096 | 2727.917 | 2645.914 | +3.01% | 30/30
-h3-sp2-bf16 | h3-2k | 2 | 2048x2048 | 1288.898 | 1270.970 | +1.39% | 4/4
-h3-sp2-bf16 | h3-3k | 2 | 3072x3072 | 2947.798 | 2909.072 | +1.31% | 4/4
-h3-sp2-bf16 | h3-4k | 2 | 4096x4096 | 5951.446 | 5864.969 | +1.45% | 4/4
-qwen-edit-sp2-fp8 | qwen-edit-1k-ref1 | 2 | 1024x1024 | 1410.348 | 1419.735 | -0.67% | 2/4
-qwen-edit-sp2-fp8 | qwen-edit-1k-ref2 | 2 | 1024x1024 | 2253.226 | 2223.775 | +1.31% | 2/4
-qwen-edit-sp2-fp8 | qwen-edit-1536-ref2 | 2 | 1536x1536 | 3502.589 | 3499.043 | +0.10% | 3/4
-qwen-edit-sp2-fp8 | qwen-edit-2k-ref1 | 2 | 2048x2048 | 4224.403 | 4244.522 | -0.48% | 1/4
-flux-bf16 | flux-1k-text | 2 | 1024x1024 | 325.169 | 320.415 | +1.46% | 3/4
-flux-bf16 | flux-1k-ref1 | 2 | 1024x1024 | 940.190 | 943.903 | -0.39% | 1/4
-flux-bf16-large | flux-2k-text | 2 | 2048x2048 | 1303.101 | 1308.933 | -0.45% | 1/4
-flux-bf16-large | flux-2k-ref1 | 2 | 2048x2048 | 2684.480 | 2477.413 | +7.71% | 4/4
-flux-bf16-large | flux-3k-ref1 | 2 | 3072x3072 | 4991.574 | 4965.083 | +0.53% | 3/4
-flux-confirm | flux-2k-ref1 | 2 | 2048x2048 | 2134.520 | 2115.910 | +0.87% | 27/30
+run | case | SP | requested HxW / frames | output shape | serial | overlap | reduction | faster pairs
+h3-sp2-fp8 | h3-1k | 2 | 1024x1024 | 1024x1024x3 | 393.570 | 388.043 | +1.40% | 7/8
+h3-sp2-fp8 | h3-2k | 2 | 2048x2048 | 2048x2048x3 | 1027.339 | 1021.169 | +0.60% | 7/8
+h3-sp2-fp8 | h3-landscape | 2 | 1440x2560 | 1440x2560x3 | 902.571 | 902.245 | +0.04% | 5/8
+h3-sp2-fp8 | h3-3k | 2 | 3072x3072 | 3072x3072x3 | 2380.912 | 2334.717 | +1.94% | 8/8
+h3-sp2-fp8 | h3-4k | 2 | 4096x4096 | 4096x4096x3 | 5019.973 | 4924.154 | +1.91% | 8/8
+h3-sp4-fp8 | h3-2k | 4 | 2048x2048 | 2048x2048x3 | 683.113 | 657.201 | +3.79% | 7/8
+h3-sp4-fp8 | h3-3k | 4 | 3072x3072 | 3072x3072x3 | 1410.213 | 1349.747 | +4.29% | 8/8
+h3-sp4-fp8 | h3-4k | 4 | 4096x4096 | 4096x4096x3 | 2742.744 | 2655.525 | +3.18% | 8/8
+h3-sp4-confirm | h3-3k | 4 | 3072x3072 | 3072x3072x3 | 1398.319 | 1337.135 | +4.38% | 30/30
+h3-sp4-confirm | h3-4k | 4 | 4096x4096 | 4096x4096x3 | 2727.917 | 2645.914 | +3.01% | 30/30
+h3-sp2-bf16 | h3-2k | 2 | 2048x2048 | 2048x2048x3 | 1288.898 | 1270.970 | +1.39% | 4/4
+h3-sp2-bf16 | h3-3k | 2 | 3072x3072 | 3072x3072x3 | 2947.798 | 2909.072 | +1.31% | 4/4
+h3-sp2-bf16 | h3-4k | 2 | 4096x4096 | 4096x4096x3 | 5951.446 | 5864.969 | +1.45% | 4/4
+qwen-edit-sp2-fp8 | qwen-edit-1k-ref1 | 2 | 1024x1024 | 1024x1024x3 | 1410.348 | 1419.735 | -0.67% | 2/4
+qwen-edit-sp2-fp8 | qwen-edit-1k-ref2 | 2 | 1024x1024 | 1024x1024x3 | 2253.226 | 2223.775 | +1.31% | 2/4
+qwen-edit-sp2-fp8 | qwen-edit-1536-ref2 | 2 | 1536x1536 | 1536x1536x3 | 3502.589 | 3499.043 | +0.10% | 3/4
+qwen-edit-sp2-fp8 | qwen-edit-2k-ref1 | 2 | 2048x2048 | 2048x2048x3 | 4224.403 | 4244.522 | -0.48% | 1/4
+flux-bf16 | flux-1k-text | 2 | 1024x1024 | 1024x1024x3 | 325.169 | 320.415 | +1.46% | 3/4
+flux-bf16 | flux-1k-ref1 | 2 | 1024x1024 | 1024x1024x3 | 940.190 | 943.903 | -0.39% | 1/4
+flux-bf16-large | flux-2k-text | 2 | 2048x2048 | 2048x2048x3 | 1303.101 | 1308.933 | -0.45% | 1/4
+flux-bf16-large | flux-2k-ref1 | 2 | 2048x2048 | 2048x2048x3 | 2684.480 | 2477.413 | +7.71% | 4/4
+flux-bf16-large | flux-3k-ref1 | 2 | 3072x3072 | 3072x3072x3 | 4991.574 | 4965.083 | +0.53% | 3/4
+flux-confirm | flux-2k-ref1 | 2 | 2048x2048 | 2048x2048x3 | 2134.520 | 2115.910 | +0.87% | 27/30
+wan-sp2-fp8 | wan5b-480p-f17 | 2 | 480x832 / 17f | 1x17x480x832x3 | 738.319 | 729.942 | +1.13% | 3/4
+wan-sp2-fp8 | wan5b-480p-f33 | 2 | 480x832 / 33f | 1x33x480x832x3 | 1250.410 | 1260.423 | -0.80% | 2/4
+wan-sp2-fp8 | wan5b-480p-f65 | 2 | 480x832 / 65f | 1x65x480x832x3 | 2362.586 | 2382.259 | -0.83% | 1/4
+wan-sp2-fp8 | wan5b-720p-f33 | 2 | 720x1280 / 33f | 1x33x704x1280x3 | 2484.507 | 2461.469 | +0.93% | 2/4
 
 Interpretation and limitations
 H3 SP4's 30-pair confirmations repeat the direction and magnitude of the earlier
 eight-pair run. BF16 SP2 at 2K/3K/4K also improves, with only four pairs per case.
 Qwen-Image-Edit has no stable gain across the tested reference-image cases.
+Wan5B's four cases range from -0.83% to +1.13%, with only 1-3 of four pairs
+faster per case; no stable gain is accepted. Requested 720x1280 rounds to
+704x1280 in the existing pipeline; the output-shape column records that.
+Its global attention lengths are 1950/3510/6630/7920, so video frame count
+alone does not imply a larger attention workload than the high-resolution H3 cases.
 FLUX 2K/ref1 initially reported 7.71% in four pairs while absolute times drifted
 from about 2.2 to 3.0 seconds; that magnitude did not reproduce. Its 30-pair
 confirmation was 2134.520 -> 2115.910 ms (0.87%, 27/30 faster). This supports
@@ -92,6 +101,8 @@ Source SHA and measured-source hashes are attached per run in the JSON. The firs
 H3 SP2 FP8 sweep predates the cache-key/dtype guards; its transfer and scheduling
 kernels match the later version. All other completed model runs use the current
 native CE core. Scripts and integration patches remain explicit experiment tools.
+The final Wan rerun uses a task-local Triton cache after the shared cache
+raised OSError 116 (stale file handle); quantization and VAE parallelism stay enabled.
 
 Checkpoint identities
 MiniMaxAI/MiniMax-H3-Image: 5f90473023975e6271b0ed1dd84c4e88e4bbc6d3.
@@ -100,6 +111,6 @@ Qwen/Qwen-Image-Edit-2511: 6f3ccc0b56e431dc6a0c2b2039706d7d26f22cb9.
 black-forest-labs/FLUX.2-klein-4B: e7b7dc27f91deacad38e78976d1f2b499d76a294.
 Wan-AI/Wan2.2-TI2V-5B-Diffusers: b8fff7315c768468a5333511427288870b2e9635.
 
-23 complete case/run combinations; 646 raw requests including warm/correctness.
+27 complete case/run combinations; 718 raw requests including warm/correctness.
 AI assistance: Codex implementation, diagnostics, benchmark execution and report.
 Experiment branch only; no PR submitted.

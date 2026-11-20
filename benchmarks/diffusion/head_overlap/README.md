@@ -20,8 +20,10 @@ respectively, in a 30-pair confirmation. These are explicit offline graph
 experiments; no default-service speedup is accepted.
 CUDA BF16 batch-one MHA with dense or front-joint inputs is the direct probe's
 tested scope. Unsupported layouts use the generic fallback. Compiled
-attention retains the conservative library fallback. NPU, video, hybrid
-parallelism, HTTP serving and concurrent requests are not qualified.
+attention retains the conservative library fallback. The matrix also exercises
+Wan2.2 TI2V-5B video with FP8 DiT, SP2 and VAE2, but establishes no stable gain
+for those four cases. NPU, hybrid parallelism, HTTP serving and concurrent
+requests are not qualified.
 
 ## Files
 
