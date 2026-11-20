@@ -75,6 +75,39 @@ capture executed 50 native calls and each request replayed six block graphs.
 The two active 50-slot variants use about 2.76 GiB of symmetric output storage
 per GPU at this canvas; selecting only one needs about 1.38 GiB.
 
+A second interleaved confirmation compared a single borrowed output slot for
+the complete graph with the per-layer slots. Each layer consumes its borrowed
+attention result on compute before entering the next attention. The next F0
+peer-ready fence therefore acknowledges those consumers on every rank before
+any reverse write can reuse the slot. This narrower lifetime permits all 50
+layers to share one fixed-layout slot; no borrowed attention result may escape
+to a consumer after its next reuse. Normal calls continue to clone.
+
+| Second confirmation, 30 requests each | Median `Omni.generate` latency |
+| --- | ---: |
+| One chunk, serial | 1029.147 ms |
+| Two chunks, original overlap | 1019.619 ms |
+| Two chunks, staging and per-layer slots | 1017.590 ms |
+| Two chunks, staging and one graph slot | 1016.727 ms |
+
+The shared-slot configuration was faster than serial in 30/30 paired rounds
+and reduced its median latency by 1.21%. Its gain over original overlap was
+only 0.28%, with 17/30 faster paired rounds. Thus the additional latency gain
+over original overlap is not consistent between these confirmations. Treat
+the repeatable roughly 1.2% result as a comparison to serial, rather than a
+universal gain over an already-overlapping route. Seeds 42/43/44 remained
+RGB-bitwise equal. One slot needs 29,589,504 bytes, or 28.2 MiB/GPU, at 2048².
+Asymmetric delayed consumers also passed with a single reused slot at both
+1056 and 4128 tokens, in eager and graph modes.
+
+A separate FA3-only graph control, with no CE, peer fence or local copy, used
+the schedule microbenchmark's packed layout `[0, N-16, N]`. At 4128 tokens,
+28 heads and head dimension 128, one attention took about 384–390 us, while
+two sequential 14-head attentions took about 443–451 us. Their outputs were
+bitwise equal. This isolates a substantial splitting tax even without
+communication; it does not attribute all model-trace FA3 growth to contention.
+Profiler activity sums remain diagnostics, separate from request latency.
+
 After applying `native-probe.patch`, validate normal output ownership and
 graph-private slots with asymmetric consumers on the two allocated GPUs:
 

@@ -82,6 +82,20 @@ The ContextVar scope resets on exceptions; keys must identify a fixed layout.
 Destroy captured graphs before clear() synchronizes and releases their slots.
 The experiment caps residency at 128 slots and clears it on canvas changes.
 
+Optional single-slot graph lifetime
+A fixed-canvas graph may instead reuse one output key across layers when its
+attention consumers finish on compute before the next attention's enter.
+Those consumers precede enter on compute; F0-ready runs after that enter on
+communication and acknowledges all ranks. Every following reverse write is
+ordered after F0-ready. Thus no rank can overwrite a preceding layer's borrowed
+output until all ranks have acknowledged its consumers, even with asymmetric
+progress. The final output-ready fence still protects incoming current writes.
+This argument depends on the consumer boundary, not on different layer keys.
+It does not permit retaining borrowed attention outputs past the next reuse.
+The graph's projected hidden result has separate storage and remains its output.
+The model comparison and asymmetric delayed-consumer probe validate this
+explicit one-slot scope; ordinary attention output ownership remains unchanged.
+
 graph_slot_stress.py verifies both retained ordinary
 outputs and delayed slot consumers on two ranks, in eager and graph execution,
 at 1056 and 4128 physical tokens. Whole-model seeds 42/43/44 are checked separately.
