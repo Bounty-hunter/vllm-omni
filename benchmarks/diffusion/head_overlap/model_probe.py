@@ -69,6 +69,59 @@ def assert_equal(actual, expected):
         assert actual == expected
 
 
+def graph_call(original, graphs, component, *args, **kwargs):
+    state = _ACTIVE.get()
+    if state is None or state["mode"] == "eager":
+        return original(*args, **kwargs)
+    graph = graphs.get(state["variant"])
+    reference = None
+    if graph is None:
+        reference = original(*clone_static(args), **clone_static(kwargs))
+        graph = graphs[state["variant"]] = StableGraph(
+            PackedForward(original),
+            device=torch.cuda.current_stream().device,
+            max_entries=8,
+            warmup_iters=2,
+            name=f"head-matrix/{component}",
+            group=get_world_group().device_group,
+        )
+        graph.output_type = type(reference)
+    captures_before, calls_before = graph.captures, state["direct_calls"]
+    with torch.cuda.nvtx.range(f"DiT/{component}/graph"):
+        result = graph(packed_args=args, packed_kwargs=kwargs)
+    if isinstance(result, dict) and graph.output_type is not dict:
+        result = graph.output_type(**result)
+    if not graph.enabled or not graph.num_graphs:
+        raise RuntimeError(f"Requested graph was not captured: {component}")
+    if graph.captures > captures_before and state["direct_calls"] == calls_before:
+        raise RuntimeError(f"The graph did not capture direct CE attention: {component}")
+    if reference is not None:
+        assert_equal(result, reference)
+    if graph.captures > captures_before:
+        record(
+            kind="capture",
+            component=component,
+            variant=state["variant"],
+            direct_calls=state["direct_calls"] - calls_before,
+            qkv_shapes=sorted(state["shapes"]),
+            graph_stats=graph.stats(),
+        )
+    return result
+
+
+def transformer_blocks(owner, hidden_states, encoder_hidden_states, **kwargs):
+    def body(hidden_states, encoder_hidden_states, **kwargs):
+        for block in owner.transformer_blocks:
+            encoder_hidden_states, hidden_states = block(
+                hidden_states=hidden_states, encoder_hidden_states=encoder_hidden_states, **kwargs
+            )
+        return encoder_hidden_states, hidden_states
+
+    return graph_call(
+        body, owner._head_matrix_graphs, "transformer/blocks", hidden_states, encoder_hidden_states, **kwargs
+    )
+
+
 def install(pipeline):
     # Import the patched attention owner before the native probe, whose
     # microbenchmark utilities also reference that owner during import.
@@ -122,51 +175,14 @@ def install(pipeline):
         graphs = {}
         components[name] = graphs
 
+        if getattr(module, "_head_matrix_block_graph", False):
+            module._head_matrix_graphs = graphs
+            continue
+
         def make_forward(original, graphs, component):
             @functools.wraps(original)
             def forward(*args, **kwargs):
-                state = _ACTIVE.get()
-                if state is None or state["mode"] == "eager":
-                    return original(*args, **kwargs)
-                # The native Qwen forward makes exactly this observation before
-                # its block loop. Keep it outside capture with identical meaning.
-                mask = kwargs.get("encoder_hidden_states_mask")
-                if mask is not None and bool(mask.all()):
-                    kwargs = dict(kwargs, encoder_hidden_states_mask=None)
-                graph = graphs.get(state["variant"])
-                reference = None
-                if graph is None:
-                    # Symmetric allocation/rendezvous belongs before the graph
-                    # class's synchronization probe, not inside capture. Clone
-                    # the inputs so this reference cannot alter the live call.
-                    reference = original(*clone_static(args), **clone_static(kwargs))
-                    graph = graphs[state["variant"]] = StableGraph(
-                        PackedForward(original),
-                        device=torch.cuda.current_stream().device,
-                        max_entries=8,
-                        warmup_iters=2,
-                        name=f"head-matrix/{component}",
-                        group=get_world_group().device_group,
-                    )
-                captures_before, calls_before = graph.captures, state["direct_calls"]
-                with torch.cuda.nvtx.range(f"DiT/{component}/graph"):
-                    result = graph(packed_args=args, packed_kwargs=kwargs)
-                if not graph.enabled or not graph.num_graphs:
-                    raise RuntimeError(f"Requested graph was not captured: {component}")
-                if graph.captures > captures_before and state["direct_calls"] == calls_before:
-                    raise RuntimeError(f"The graph did not capture direct CE attention: {component}")
-                if reference is not None:
-                    assert_equal(result, reference)
-                if graph.captures > captures_before:
-                    record(
-                        kind="capture",
-                        component=component,
-                        variant=state["variant"],
-                        direct_calls=state["direct_calls"] - calls_before,
-                        qkv_shapes=sorted(state["shapes"]),
-                        graph_stats=graph.stats(),
-                    )
-                return result
+                return graph_call(original, graphs, component, *args, **kwargs)
 
             return forward
 

@@ -202,6 +202,14 @@ and capture the model forward on its fixed CE compute stream. A failed graph,
 a missing direct-CE route or a native fallback is an error, not a faster result.
 Each new graph records actual direct calls and QKV geometry in the audit.
 
+Qwen editing additionally uses `qwen-block-graph.patch`: its original timestep
+and conditioning-index preparation remains outside capture, while the shared
+probe captures the unchanged block loop. This preserves its conditioning and
+avoids capturing synchronous constant construction. The generic adapter also
+preserves structured model-output types when the graph returns cloned tensors.
+The explicit model patch permits positive sequences below the library's
+2048-token heuristic so short matrix controls exercise the requested route.
+
 The CE plan cache now retains up to 16 distinct layouts. This permits joint
 and concatenated attention to coexist without invalidating addresses retained
 by another graph. Graph owners must release their graphs before `clear()`;

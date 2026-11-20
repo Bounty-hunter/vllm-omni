@@ -1,0 +1,21 @@
+--- a/vllm_omni/diffusion/models/qwen_image/qwen_image_transformer.py
++++ b/vllm_omni/diffusion/models/qwen_image/qwen_image_transformer.py
+@@ -1564,8 +1564,10 @@
+         elif attention_kwargs is not None:
+             attention_kwargs = {k: v for k, v in attention_kwargs.items() if k != QK_NORM_ROPE_TABLE_KEY}
+ 
+-        for index_block, block in enumerate(self.transformer_blocks):
+-            encoder_hidden_states, hidden_states = block(
++        from model_probe import transformer_blocks
++
++        encoder_hidden_states, hidden_states = transformer_blocks(
++                self,
+                 hidden_states=hidden_states,
+                 encoder_hidden_states=encoder_hidden_states,
+                 encoder_hidden_states_mask=encoder_hidden_states_mask,
+@@ -1634,3 +1635,5 @@
+             loaded_params.add(original_name)
+             loaded_params.add(lookup_name)
+         return loaded_params
++
++QwenImageTransformer2DModel._head_matrix_block_graph = True

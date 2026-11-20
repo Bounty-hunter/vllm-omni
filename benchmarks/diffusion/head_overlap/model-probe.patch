@@ -1,3 +1,14 @@
+--- a/vllm_omni/diffusion/attention/parallel/head_overlap.py
++++ b/vllm_omni/diffusion/attention/parallel/head_overlap.py
+@@ -40,7 +40,7 @@
+         return False
+     if q.shape[2] % (world * chunks) or k.shape[2] % (world * chunks) or q.shape[2] % k.shape[2]:
+         return False
+-    if q.shape[2] // (world * chunks) < 4 or q.shape[1] * world < 2048:
++    if q.shape[2] // (world * chunks) < 4 or q.shape[1] == 0:
+         return False
+     if md is None:
+         return True
 --- a/vllm_omni/diffusion/worker/diffusion_model_runner.py
 +++ b/vllm_omni/diffusion/worker/diffusion_model_runner.py
 @@ -453,6 +453,8 @@
