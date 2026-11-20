@@ -18,6 +18,9 @@ def main():
     torch.accelerator.set_device_index(rank)
     dist.init_process_group("nccl")
     pg = dist.group.WORLD
+    world = dist.get_world_size(pg)
+    if world not in (2, 4):
+        raise ValueError("The layout stress qualifies SP2 and SP4")
     head = importlib.import_module("vllm_omni.diffusion.attention.parallel.head_overlap")
     import native_prefilled as native
     from overlap_probe import FlashAttentionImpl, UlyssesParallelAttention
@@ -26,13 +29,13 @@ def main():
 
     PrefilledPipeline.__call__ = lambda plan: scheduled(plan, "stage-local")
     group = SimpleNamespace(
-        ulysses_group=pg, ulysses_world_size=2, ulysses_rank=rank, ring_world_size=1, allgather_world_size=1
+        ulysses_group=pg, ulysses_world_size=world, ulysses_rank=rank, ring_world_size=1, allgather_world_size=1
     )
     strategy = UlyssesParallelAttention(group, 2, 1, False, ulysses_a2a_permute=True)
     stream = torch.cuda.Stream()
     stream.wait_stream(torch.cuda.current_stream())
     torch.cuda.set_stream(stream)
-    impl = FlashAttentionImpl(12, 128, 128**-0.5)
+    impl = FlashAttentionImpl(56 // world, 128, 128**-0.5)
 
     def kernel(q, k, v, metadata):
         return impl.forward_cuda(q, k, v, metadata)
@@ -41,9 +44,11 @@ def main():
     with torch.inference_mode():
         for total, joint_length in ((2112, 0), (2112, 17), (4128, 0)):
             torch.manual_seed(10448 + rank)
-            inputs = tuple(torch.randn(1, total // 2, 24, 128, dtype=torch.bfloat16, device="cuda") for _ in range(3))
+            inputs = tuple(
+                torch.randn(1, total // world, 56, 128, dtype=torch.bfloat16, device="cuda") for _ in range(3)
+            )
             torch.manual_seed(12345)
-            joint = tuple(torch.randn(1, joint_length, 24, 128, dtype=torch.bfloat16, device="cuda") for _ in range(3))
+            joint = tuple(torch.randn(1, joint_length, 56, 128, dtype=torch.bfloat16, device="cuda") for _ in range(3))
             metadata = (
                 None
                 if not joint_length
