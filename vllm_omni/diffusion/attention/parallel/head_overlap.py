@@ -61,6 +61,8 @@ def can_overlap(
         "vsa_h3_tile_size",
         "vsa_h3_ref_policy",
         "vsa_h3_ref_keep_rate",
+        "vsa_dit_seq_shape",
+        "preserve_vsa_all_blocks",
     }:
         return False
     if md.extra.get("kv_cache_dtype") not in (None, "auto", "float"):

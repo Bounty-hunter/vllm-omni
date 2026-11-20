@@ -174,6 +174,39 @@ def install(pipeline):
         original = module.forward
         graphs = {}
         components[name] = graphs
+        from vllm_omni.diffusion.attention.layer import Attention
+
+        for attention_name, attention in module.named_modules():
+            if not isinstance(attention, Attention) or attention.skip_sequence_parallel:
+                continue
+
+            registration = []
+
+            def capability_hook(
+                attention, args, component=name, attention_name=attention_name, registration=registration
+            ):
+                if torch.cuda.is_current_stream_capturing():
+                    return
+                active = attention._get_active_parallel_strategy()
+                metadata = args[3] if len(args) > 3 else None
+                _, backend, _ = attention.effective_attention()
+                record(
+                    kind="attention_capability",
+                    component=component,
+                    attention=attention_name,
+                    configured_strategy=type(attention.parallel_strategy).__name__,
+                    active_strategy=type(active).__name__,
+                    head_chunks=getattr(active, "head_chunks", None),
+                    use_sync=getattr(active, "_use_sync", None),
+                    backend=backend.get_name(),
+                    qkv=[list(value.shape) for value in args[:3]],
+                    dtype=str(args[0].dtype),
+                    metadata_keys=[] if metadata is None else list(metadata.extra),
+                )
+                registration[0].remove()
+
+            registration.append(attention.register_forward_pre_hook(capability_hook))
+            break
 
         if getattr(module, "_head_matrix_block_graph", False):
             module._head_matrix_graphs = graphs
