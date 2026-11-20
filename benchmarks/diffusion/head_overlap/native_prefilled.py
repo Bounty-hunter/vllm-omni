@@ -16,6 +16,7 @@ _PLANS = {}
 _SLOT_ARENA = {}
 _OUTPUT_SLOT = ContextVar("hcms_output_slot", default=None)
 _SELECTED_CHUNKS = os.environ.get("HCMS_NATIVE_PLAN_CHUNKS")
+_PLAN_LIMIT = 16
 
 
 @contextmanager
@@ -126,6 +127,7 @@ def run(
                 and joint[0].shape == joint[1].shape == joint[2].shape
                 and joint[0].shape[0] == 1
                 and joint[0].shape[2:] == q.shape[2:]
+                and all(x.dtype == q.dtype and x.device == q.device for x in joint)
                 and all(x.stride(3) == 1 and x.stride(2) == x.shape[3] for x in joint)
             )
     if not supported:
@@ -156,21 +158,24 @@ def run(
     kernel_md = (
         None if md is None else replace(md, joint_query=None, joint_key=None, joint_value=None, extra=dict(md.extra))
     )
-    plan_key = (*key, selected_chunks)
+    # Joint and concatenated attention can coexist in one captured model.
+    # A resident graph retains its CE addresses, so never replace its plan
+    # merely because the following layer has another layout.
+    plan_key = (*key, selected_chunks, signature)
     cached = _PLANS.get(plan_key)
-    if cached is None or cached[0] != signature:
+    if cached is None:
         if torch.cuda.is_current_stream_capturing():
             raise RuntimeError("Native CE plan must be warmed before capture")
+        if len(_PLANS) >= _PLAN_LIMIT:
+            raise RuntimeError("Destroy captured graphs and clear CE plans before adding more layouts")
         print(
             f"NATIVE_PREFILLED chunks={selected_chunks} q={tuple(q.shape)} "
             f"packed={md is not None and 'cu_seqlens_q' in md.extra}",
             flush=True,
         )
-        # A shape change is rare and collective, as with the existing CE
-        # workspace. Keep one live layout per device/group/chunk count.
+        # Allocations are collective and occur only before capture. Retain
+        # every live layout until its graph owner explicitly calls clear().
         torch.accelerator.synchronize()
-        if cached is not None:
-            cached[1].kernel = cached[1].attention_kernel = cached[1].metadata = None
         plan = NativePipeline(inputs, joint, pg, selected_chunks, comm, kernel, kernel_md)
         _PLANS[plan_key] = (signature, plan)
     else:

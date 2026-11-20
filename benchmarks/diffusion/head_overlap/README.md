@@ -192,6 +192,23 @@ capturing only the DiT block body. The fixed-layout graph contract and peer
 fences remain the same as the recorded 2K experiment. The worker audit checks
 actual quantized module count, VAE degree, input geometry and six graph replays.
 
+For other declared DiT components, `model-probe.patch` installs the explicit
+offline `model_probe.py` adapter after model loading. Apply it after
+`native-probe.patch`, without the H3 block patch. Set `HCMS_MATRIX_AUDIT` to a
+fresh directory and use `model_matrix.py` with the Qwen-edit, Wan or Flux
+configuration. The configurations are exploratory cases, not validated model
+support claims. They keep both comparison arms on the same uncompiled kernels
+and capture the model forward on its fixed CE compute stream. A failed graph,
+a missing direct-CE route or a native fallback is an error, not a faster result.
+Each new graph records actual direct calls and QKV geometry in the audit.
+
+The CE plan cache now retains up to 16 distinct layouts. This permits joint
+and concatenated attention to coexist without invalidating addresses retained
+by another graph. Graph owners must release their graphs before `clear()`;
+there is no automatic eviction of potentially live layouts. Normal unscoped
+attention still returns owned output storage. `layout_graph_stress.py` retains
+three dense/joint layouts and alternates them under asymmetric delays.
+
 ## Controlled microbenchmark
 
 Run this on the unpatched library prototype. The runner selects the direct

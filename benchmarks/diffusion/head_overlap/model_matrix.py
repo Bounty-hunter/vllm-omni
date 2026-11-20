@@ -71,7 +71,13 @@ def main():
                 runs += [("paired", name, index, 42) for name in names]
             runs += [("correctness", name, seed - 43, seed) for seed in (43, 44) for name in variants]
             for phase, name, index, seed in runs:
-                extra = dict(variants[name], label=f"{case['id']}-{phase}-{name}-i{index}", audit=index == 0)
+                extra = dict(
+                    variants[name],
+                    case=case["id"],
+                    variant=name,
+                    label=f"{case['id']}-{phase}-{name}-i{index}",
+                    audit=index == 0,
+                )
                 params = OmniDiffusionSamplingParams(**case["sampling"], seed=seed, extra_args=extra)
                 started = time.perf_counter()
                 outputs = omni.generate(prompt, sampling_params_list=[params])
