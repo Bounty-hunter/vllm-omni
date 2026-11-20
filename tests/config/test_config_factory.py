@@ -50,15 +50,14 @@ def test_registered_diffusion_preserves_head_chunks(chunks: int):
     caller_kwargs = filter_dataclass_kwargs(
         OrchestratorArgs, {"ulysses_degree": 2, "ulysses_a2a_permute": True, "ulysses_head_chunks": chunks}
     )
-    overrides = build_stage_runtime_overrides(0, caller_kwargs)
+    overrides = build_stage_runtime_overrides(0, filter_dataclass_kwargs(OmniEngineArgs, caller_kwargs))
     stage = StageConfig(
         stage_id=0,
         model_stage="diffusion",
         stage_type=StageType.DIFFUSION,
         runtime_overrides=overrides,
     ).to_omegaconf()
-    engine_kwargs = filter_dataclass_kwargs(OmniEngineArgs, dict(stage.engine_args))
-    parallel = DiffusionParallelConfig(**engine_kwargs["parallel_config"])
+    parallel = DiffusionParallelConfig(**stage.engine_args.parallel_config)
     assert parallel.ulysses_head_chunks == chunks
     assert parallel.ulysses_degree == 2
     assert parallel.ulysses_a2a_permute is True
