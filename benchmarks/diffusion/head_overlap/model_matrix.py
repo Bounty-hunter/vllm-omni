@@ -83,7 +83,7 @@ def main():
                     case=case["id"],
                     variant=name,
                     label=f"{case['id']}-{phase}-{name}-i{index}",
-                    audit=index == 0,
+                    audit=phase != "paired" and index == 0,
                     trace=args.profile,
                     trace_start=args.profile and case is config["cases"][0] and position == paired_positions[0],
                     trace_stop=args.profile and case is config["cases"][-1] and position == paired_positions[-1],

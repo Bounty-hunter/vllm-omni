@@ -5,6 +5,7 @@
 import argparse
 import copy
 import hashlib
+import importlib
 import json
 import os
 import statistics
@@ -32,7 +33,8 @@ def main():
     pg = dist.group.WORLD
     control = dist.new_group(backend="gloo")
     world = dist.get_world_size()
-    from native_prefilled import NativePipeline
+    importlib.import_module("vllm_omni.diffusion.attention.parallel.head_overlap")
+    from native_prefilled import NativePipeline, partition_heads
     from overlap_probe import FlashAttentionImpl, UlyssesParallelAttention
     from schedule_probe import run as scheduled
 
@@ -101,24 +103,18 @@ def main():
             q, k, v, packed_md, context = strategy.pre_attention(*inputs, copy.copy(metadata))
             expected = strategy.post_attention(impl.forward_cuda(q, k, v, packed_md), context).clone()
             packed = tuple(value.clone() for value in (q, k, v))
-            parts = [
-                tuple(
-                    value[
-                        :,
-                        :,
-                        index * (heads // world // 2) : (index + 1) * (heads // world // 2),
-                    ].contiguous()
-                    for value in packed
-                )
-                for index in range(2)
-            ]
+            head_sizes = partition_heads(heads // world, 2, case.get("head_partition"))
+            parts, offset = [], 0
+            for width in head_sizes:
+                parts.append(tuple(value[:, :, offset : offset + width].contiguous() for value in packed))
+                offset += width
 
             def kernel(q, k, v, unused_md):
                 return impl.forward_cuda(q, k, v, packed_md)
 
             whole = NativePipeline(inputs, joint, pg, 1, comm, kernel, packed_md)
-            split = NativePipeline(inputs, joint, pg, 2, comm, kernel, packed_md)
-            serial_split = NativePipeline(inputs, joint, pg, 2, comm, kernel, packed_md)
+            split = NativePipeline(inputs, joint, pg, 2, comm, kernel, packed_md, head_sizes=head_sizes)
+            serial_split = NativePipeline(inputs, joint, pg, 2, comm, kernel, packed_md, head_sizes=head_sizes)
             serial_split.overlap = False
             transport = NativePipeline(inputs, joint, pg, 1, comm, lambda q, k, v, md: q, packed_md)
 
@@ -147,10 +143,13 @@ def main():
             functions = {
                 "attention_whole": attention_whole,
                 "attention_split_serial": attention_split,
+                "attention_first": lambda: kernel(*parts[0], None),
+                "attention_last": lambda: kernel(*parts[1], None),
                 "peer_forward": peer_forward,
                 "peer_reverse": peer_reverse,
                 "transport_whole_owned": lambda: scheduled(transport, "old").clone(),
                 "core_whole_owned": lambda: scheduled(whole, "old").clone(),
+                "core_whole_borrowed": lambda: scheduled(whole, "old"),
                 "core_split_serial_owned": lambda: scheduled(serial_split, "stage-local").clone(),
                 "core_split_serial_borrowed": lambda: scheduled(serial_split, "stage-local"),
                 "core_overlap_owned": lambda: scheduled(split, "stage-local").clone(),
@@ -184,7 +183,7 @@ def main():
                 # the same power/memory state left by their predecessor.
                 offset = iteration % len(names)
                 names = names[offset:] + names[:offset]
-                if iteration % 2:
+                if (iteration // len(names)) % 2:
                     names.reverse()
                 for name in names:
                     dist.barrier(group=control)
@@ -206,16 +205,17 @@ def main():
             peer = medians["peer_forward"] + medians["peer_reverse"]
             attention = medians["attention_whole"]
             tax = medians["attention_split_serial"] - attention
-            chunk_attention = medians["attention_split_serial"] / 2
-            hideable = min(chunk_attention, medians["peer_forward"] / 2) + min(
-                chunk_attention, medians["peer_reverse"] / 2
+            first_fraction = head_sizes[0] / sum(head_sizes)
+            hideable = min(medians["attention_first"], medians["peer_forward"] * (1 - first_fraction)) + min(
+                medians["attention_last"], medians["peer_reverse"] * first_fraction
             )
             saving = medians["core_whole_owned"] - medians["core_overlap_borrowed"]
             row = dict(
                 case=case,
                 exact=True,
                 full_heads=heads // world,
-                chunk_heads=heads // world // 2,
+                chunk_heads=head_sizes[0] if head_sizes[0] == head_sizes[1] else None,
+                head_sizes=head_sizes,
                 qkv_shape=list(inputs[0].shape),
                 qkv_strides=[list(x.stride()) for x in inputs],
                 median_max_rank_us=medians,
@@ -226,6 +226,8 @@ def main():
                 ideal_hideable_peer_us=hideable,
                 ideal_hideable_minus_split_tax_us=hideable - tax,
                 measured_core_saving_us=saving,
+                measured_core_owned_saving_us=medians["core_whole_owned"] - medians["core_overlap_owned"],
+                measured_core_borrowed_saving_us=medians["core_whole_borrowed"] - medians["core_overlap_borrowed"],
                 measured_saving_vs_split_serial_us=medians["core_split_serial_borrowed"]
                 - medians["core_overlap_borrowed"],
                 # Image-token traffic only; front-joint output traffic is not
@@ -235,6 +237,8 @@ def main():
                     "Isolated peer costs include stream dependencies and required peer fences",
                     "transport control also includes local staging and owned output clone",
                     "Micro fractions are not directly measured full-request communication shares",
+                    "Unequal hideable estimate scales whole peer times by head widths; "
+                    "fixed chunk costs and interference are excluded",
                     "All core variants retain every required peer fence; no profiler is started",
                 ],
             )
