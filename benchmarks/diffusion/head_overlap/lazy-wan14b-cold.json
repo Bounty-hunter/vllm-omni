@@ -76,6 +76,32 @@
       }
     },
     {
+      "id": "wan14b-480x832-f17-cold-ab",
+      "sampling": {
+        "height": 480,
+        "width": 832,
+        "num_frames": 17,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1,
+        "fps": 16
+      },
+      "variants": {
+        "serial1": {
+          "graph_mode": "graph",
+          "chunks": 1,
+          "schedule": "stage-local-shared-slots"
+        },
+        "adaptive": {
+          "graph_mode": "graph",
+          "chunks": 1,
+          "schedule": "stage-local-shared-slots",
+          "autotune": true
+        }
+      }
+    },
+    {
       "id": "wan14b-480x832-f33-cold-ab",
       "sampling": {
         "height": 480,
@@ -128,6 +154,32 @@
       }
     },
     {
+      "id": "wan14b-480x832-f17-cold-ba",
+      "sampling": {
+        "height": 480,
+        "width": 832,
+        "num_frames": 17,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1,
+        "fps": 16
+      },
+      "variants": {
+        "adaptive": {
+          "graph_mode": "graph",
+          "chunks": 1,
+          "schedule": "stage-local-shared-slots",
+          "autotune": true
+        },
+        "serial1": {
+          "graph_mode": "graph",
+          "chunks": 1,
+          "schedule": "stage-local-shared-slots"
+        }
+      }
+    },
+    {
       "id": "wan14b-480x832-f33-cold-ba",
       "sampling": {
         "height": 480,
@@ -155,7 +207,7 @@
     }
   ],
   "measurement": {
-    "rounds": 10,
+    "rounds": 8,
     "warmups": 1,
     "seeds": [
       42,

@@ -6,7 +6,7 @@ from collections import Counter
 from dataclasses import dataclass
 from types import SimpleNamespace
 
-from lazy_head_policy import candidate_index, candidates, choose, metadata_spec, qualified_samples
+from lazy_head_policy import candidate_index, candidates, choose, metadata_spec, qualified_cycles
 
 
 class TensorLayout:
@@ -40,8 +40,11 @@ def main():
     assert metadata_spec(first) != metadata_spec(Metadata(Packed(9248, TensorLayout(2)), first.extra))
     assert not metadata_spec(object())[1]
     assert not metadata_spec({"nested": [object()]})[1]
-    assert qualified_samples([[(99, True, 1), (101, True, 1)], [(100, True, 1), (103, True, 1)]]) == [103]
-    assert qualified_samples([[(99, True, 1), (101, True, 1)], [(100, True, 1), (103, False, 1)]]) == []
+    first = [[(99, True, 1), (101, True, 1)], [(100, True, 1), (103, True, 1)]]
+    second = [[(80, True, 1), (82, True, 1)], [(81, True, 1), (83, True, 1)]]
+    assert qualified_cycles([first, second]) == [[103], [83]]
+    assert qualified_cycles([first, [second[0], [(81, True, 1), (83, False, 1)]]]) == [[], []]
+    assert qualified_cycles([first + [[(99, True, 1)]], second]) == [[103], [83]]
     for heads in (10, 12, 14):
         for tokens in (288, 1056, 1344, 2048, 7800, 8128, 9248, 14040, 16416, 20623, 26806, 47286):
             choices = candidates(heads, tokens, 128, 4 if heads != 12 else 2, 132)

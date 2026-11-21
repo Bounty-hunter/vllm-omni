@@ -42,10 +42,16 @@ def metadata_spec(value):
     return ("opaque", type(value).__module__, type(value).__qualname__), False
 
 
-def qualified_samples(rank_rows):
-    """Keep only fully queued cores on every rank, after natural cold calls."""
-    discard = 2 if len(rank_rows) >= 10 else 1
-    return [max(row[0] for row in rows) for rows in rank_rows[discard:] if all(row[1] for row in rows)]
+def qualified_cycles(choices):
+    """Pair complete rotations, discarding a cycle if any rank/choice starves.
+
+    Filtering each choice independently would compare different layer
+    neighborhoods and reintroduce position/frequency bias.
+    """
+    count = min(len(rows) for rows in choices)
+    discard = 2 if count >= 10 else 1
+    valid = [index for index in range(discard, count) if all(row[1] for rows in choices for row in rows[index])]
+    return [[max(row[0] for row in rows[index]) for index in valid] for rows in choices]
 
 
 def candidates(heads, tokens, dim, world, sms, *, flops=6e14, bandwidth=None):
@@ -346,7 +352,7 @@ class LazyHeadPolicy:
         ):
             raise RuntimeError("Ranks discovered different execution signatures/candidates")
         for index, entry in enumerate(self.entries.values()):
-            maximum = []
+            rank_rows_by_choice = []
             raw_maximum, submit_times = [], []
             for choice in range(len(entry.choices)):
                 counts = [len(peer[index][2][choice]) for peer in peers]
@@ -355,7 +361,8 @@ class LazyHeadPolicy:
                 rows = [[peer[index][2][choice][i] for peer in peers] for i in range(counts[0])]
                 raw_maximum.append([max(row[0] for row in rank_rows) for rank_rows in rows])
                 submit_times.append([max(row[2] for row in rank_rows) for rank_rows in rows])
-                maximum.append(qualified_samples(rows))
+                rank_rows_by_choice.append(rows)
+            maximum = qualified_cycles(rank_rows_by_choice)
             entry.selected = choose(maximum)
             self.reports.append(
                 dict(
@@ -365,6 +372,7 @@ class LazyHeadPolicy:
                     raw_samples_max_rank_us=raw_maximum,
                     host_submission_max_rank_us=submit_times,
                     selected=entry.choices[entry.selected],
+                    pairing="complete rotated cycles on every rank",
                 )
             )
             entry.inputs, entry.joint, entry.metadata, entry.kernel, entry.group, entry.comm = (

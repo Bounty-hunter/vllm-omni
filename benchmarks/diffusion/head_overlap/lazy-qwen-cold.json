@@ -73,6 +73,35 @@
       }
     },
     {
+      "id": "qwen-edit-1024-ref1-cold-ab",
+      "sampling": {
+        "height": 1024,
+        "width": 1024,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      },
+      "media": {
+        "image": [
+          "tests/assets/qwen_image_edit/qwen_image_edit_2511_test1.png"
+        ]
+      },
+      "variants": {
+        "serial1": {
+          "graph_mode": "graph",
+          "chunks": 1,
+          "schedule": "stage-local-shared-slots"
+        },
+        "adaptive": {
+          "graph_mode": "graph",
+          "chunks": 1,
+          "schedule": "stage-local-shared-slots",
+          "autotune": true
+        }
+      }
+    },
+    {
       "id": "qwen-edit-2048-ref1-cold-ab",
       "sampling": {
         "height": 2048,
@@ -131,6 +160,35 @@
       }
     },
     {
+      "id": "qwen-edit-1024-ref1-cold-ba",
+      "sampling": {
+        "height": 1024,
+        "width": 1024,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      },
+      "media": {
+        "image": [
+          "tests/assets/qwen_image_edit/qwen_image_edit_2511_test1.png"
+        ]
+      },
+      "variants": {
+        "adaptive": {
+          "graph_mode": "graph",
+          "chunks": 1,
+          "schedule": "stage-local-shared-slots",
+          "autotune": true
+        },
+        "serial1": {
+          "graph_mode": "graph",
+          "chunks": 1,
+          "schedule": "stage-local-shared-slots"
+        }
+      }
+    },
+    {
       "id": "qwen-edit-2048-ref1-cold-ba",
       "sampling": {
         "height": 2048,
@@ -162,7 +220,7 @@
   ],
   "cfg_note": "Explicit single-branch CFG1, matching the actual old no-negative-prompt path.",
   "measurement": {
-    "rounds": 10,
+    "rounds": 8,
     "warmups": 1,
     "seeds": [
       42,
