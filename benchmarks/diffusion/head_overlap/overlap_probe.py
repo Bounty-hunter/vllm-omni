@@ -50,7 +50,7 @@ class DirectPipeline:
     A call returns only after all incoming reverse writes have completed.
     """
 
-    def __init__(self, inputs, joint, group, chunks, kernel, *, overlap=True, head_sizes=None):
+    def __init__(self, inputs, joint, group, chunks, kernel, *, overlap=True, head_sizes=None, joint_strategy="front"):
         q = inputs[0]
         batch, local_seq, heads, dim = q.shape
         assert batch == 1 and heads % dist.get_world_size(group) == 0
@@ -59,6 +59,13 @@ class DirectPipeline:
         self.world, self.rank = dist.get_world_size(group), dist.get_rank(group)
         self.chunks, self.local_seq, self.dim = chunks, local_seq, dim
         self.joint_len = 0 if joint is None else joint[0].shape[1]
+        if joint_strategy not in ("front", "rear"):
+            raise ValueError("The direct plan requires front or rear joint placement")
+        if joint is not None and not (joint[0].shape == joint[1].shape == joint[2].shape):
+            raise ValueError("The direct plan does not yet support unequal joint Q/K/V shapes")
+        self.sequence_offset = self.joint_len if joint_strategy == "front" else 0
+        self.joint_offset = 0 if joint_strategy == "front" else local_seq * self.world
+        self.output_joint_offset = 0 if joint_strategy == "front" else local_seq
         if head_sizes is None:
             if heads % (self.world * chunks):
                 raise ValueError("Uniform groups must divide the per-rank head count")
@@ -108,7 +115,7 @@ class DirectPipeline:
                 dest = (
                     shared.handle.buffer_ptrs[peer]
                     + index * section_bytes
-                    + (self.joint_len + self.rank * self.local_seq) * width
+                    + (self.sequence_offset + self.rank * self.local_seq) * width
                 )
                 source = x.data_ptr() + (self.head_offsets[g] + peer * self.head_sizes[g]) * head_bytes
                 operations.append(self.geometry(dest, width, source, source_pitch, width, self.local_seq))
@@ -117,7 +124,7 @@ class DirectPipeline:
             if self.joint is not None:
                 j = self.joint[index]
                 source = j.data_ptr() + (self.head_offsets[g] + self.rank * self.head_sizes[g]) * head_bytes
-                dest = shared.handle.buffer_ptrs[self.rank] + index * section_bytes
+                dest = shared.handle.buffer_ptrs[self.rank] + index * section_bytes + self.joint_offset * width
                 operations.append(
                     self.geometry(
                         dest,
@@ -147,16 +154,16 @@ class DirectPipeline:
         dest_pitch = self.output.tensor.stride(1) * out.element_size()
         with self.region(f"direct/R{g}/CE-direct-output"):
             for peer in range(self.world):
-                dest = self.output.handle.buffer_ptrs[peer] + self.joint_len * dest_pitch + head_offset
-                source = out.data_ptr() + (self.joint_len + peer * self.local_seq) * source_pitch
+                dest = self.output.handle.buffer_ptrs[peer] + self.sequence_offset * dest_pitch + head_offset
+                source = out.data_ptr() + (self.sequence_offset + peer * self.local_seq) * source_pitch
                 self.emit(self.geometry(dest, dest_pitch, source, source_pitch, width, self.local_seq))
                 if self.joint_len:
-                    dest = self.output.handle.buffer_ptrs[peer] + head_offset
+                    dest = self.output.handle.buffer_ptrs[peer] + self.output_joint_offset * dest_pitch + head_offset
                     self.emit(
                         self.geometry(
                             dest,
                             dest_pitch,
-                            out.data_ptr(),
+                            out.data_ptr() + self.joint_offset * source_pitch,
                             source_pitch,
                             width,
                             self.joint_len,

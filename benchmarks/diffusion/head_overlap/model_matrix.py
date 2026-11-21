@@ -15,16 +15,30 @@ from vllm_omni.entrypoints.omni import Omni
 from vllm_omni.inputs.data import OmniDiffusionSamplingParams
 
 
-def arrays(outputs):
+def arrays(outputs, *, require_audio=False):
     result = []
+    audio_count = 0
     for output in outputs:
         for value in output.images or []:
             if isinstance(value, list):
                 result.extend(np.asarray(frame) for frame in value)
             else:
                 result.append(np.asarray(value))
-    if not result:
+        if require_audio:
+            audio = output.multimodal_output.get("audio")
+            if audio is not None:
+                for value in audio if isinstance(audio, (list, tuple)) else [audio]:
+                    if value is None:
+                        continue
+                    value = value.detach().cpu().numpy() if hasattr(value, "detach") else np.asarray(value)
+                    if not value.size:
+                        raise AssertionError("The request returned empty audio")
+                    result.append(value)
+                    audio_count += 1
+    if len(result) == audio_count:
         raise AssertionError("The request returned no image/video output")
+    if require_audio and not audio_count:
+        raise AssertionError("The request returned no audio output")
     return result
 
 
@@ -88,11 +102,13 @@ def main():
                     trace_start=args.profile and case is config["cases"][0] and position == paired_positions[0],
                     trace_stop=args.profile and case is config["cases"][-1] and position == paired_positions[-1],
                 )
-                params = OmniDiffusionSamplingParams(**case["sampling"], seed=seed, extra_args=extra)
+                sampling = dict(case["sampling"])
+                extra = dict(sampling.pop("extra_args", {}), **extra)
+                params = OmniDiffusionSamplingParams(**sampling, seed=seed, extra_args=extra)
                 started = time.perf_counter()
                 outputs = omni.generate(prompt, sampling_params_list=[params])
                 elapsed_ms = (time.perf_counter() - started) * 1000
-                values = arrays(outputs)
+                values = arrays(outputs, require_audio=config.get("require_audio", False))
                 hashes = [hashlib.sha256(value.tobytes()).hexdigest() for value in values]
                 shapes = [list(value.shape) for value in values]
                 dtypes = [str(value.dtype) for value in values]

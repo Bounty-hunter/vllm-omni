@@ -76,6 +76,7 @@ def main():
                 inputs = inputs[:2] + (projected[:, :, 2],)
             joint = None
             metadata = None
+            joint_strategy = case.get("joint_strategy", "front")
             if joint_length:
                 joint = tuple(
                     torch.randn(1, joint_length, heads, 128, device="cuda", dtype=torch.bfloat16) for _ in range(3)
@@ -86,7 +87,7 @@ def main():
                     joint_query=joint[0],
                     joint_key=joint[1],
                     joint_value=joint[2],
-                    joint_strategy="front",
+                    joint_strategy=joint_strategy,
                 )
             if padding:
                 assert joint is None
@@ -112,11 +113,14 @@ def main():
             def kernel(q, k, v, unused_md):
                 return impl.forward_cuda(q, k, v, packed_md)
 
-            whole = NativePipeline(inputs, joint, pg, 1, comm, kernel, packed_md)
-            split = NativePipeline(inputs, joint, pg, 2, comm, kernel, packed_md, head_sizes=head_sizes)
-            serial_split = NativePipeline(inputs, joint, pg, 2, comm, kernel, packed_md, head_sizes=head_sizes)
+            placement = dict(joint_strategy=joint_strategy)
+            whole = NativePipeline(inputs, joint, pg, 1, comm, kernel, packed_md, **placement)
+            split = NativePipeline(inputs, joint, pg, 2, comm, kernel, packed_md, head_sizes=head_sizes, **placement)
+            serial_split = NativePipeline(
+                inputs, joint, pg, 2, comm, kernel, packed_md, head_sizes=head_sizes, **placement
+            )
             serial_split.overlap = False
-            transport = NativePipeline(inputs, joint, pg, 1, comm, lambda q, k, v, md: q, packed_md)
+            transport = NativePipeline(inputs, joint, pg, 1, comm, lambda q, k, v, md: q, packed_md, **placement)
 
             def attention_whole():
                 return kernel(*packed, None)

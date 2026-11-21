@@ -228,13 +228,15 @@ def real_prefix_call(original, graphs, component, *args, **kwargs):
     return result
 
 
-def transformer_blocks(owner, hidden_states, encoder_hidden_states, **kwargs):
+def transformer_blocks(owner, hidden_states, encoder_hidden_states, *, hidden_first=False, **kwargs):
     def body(hidden_states, encoder_hidden_states, **kwargs):
         for block in owner.transformer_blocks:
-            encoder_hidden_states, hidden_states = block(
-                hidden_states=hidden_states, encoder_hidden_states=encoder_hidden_states, **kwargs
-            )
-        return encoder_hidden_states, hidden_states
+            result = block(hidden_states=hidden_states, encoder_hidden_states=encoder_hidden_states, **kwargs)
+            if hidden_first:
+                hidden_states, encoder_hidden_states = result
+            else:
+                encoder_hidden_states, hidden_states = result
+        return (hidden_states, encoder_hidden_states) if hidden_first else (encoder_hidden_states, hidden_states)
 
     return graph_call(
         body, owner._head_matrix_graphs, "transformer/blocks", hidden_states, encoder_hidden_states, **kwargs

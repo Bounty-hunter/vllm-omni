@@ -58,9 +58,9 @@ class NativePipeline(PrefilledPipeline):
     def geometry(dest, dpitch, source, spitch, width, rows):
         return [dest, dpitch, source, spitch, width, rows, 4]
 
-    def __init__(self, inputs, joint, pg, chunks, comm, kernel, metadata, *, head_sizes=None):
+    def __init__(self, inputs, joint, pg, chunks, comm, kernel, metadata, *, head_sizes=None, joint_strategy="front"):
         self.attention_kernel, self.metadata = kernel, metadata
-        super().__init__(inputs, joint, pg, chunks, self.attend, head_sizes=head_sizes)
+        super().__init__(inputs, joint, pg, chunks, self.attend, head_sizes=head_sizes, joint_strategy=joint_strategy)
         self.base_output = self.output
         self.stream = comm
         tensors = inputs + (() if joint is None else joint)
@@ -92,7 +92,9 @@ class NativePipeline(PrefilledPipeline):
         self.attention_kernel, self.metadata = kernel, metadata
 
 
-def prepare_plan(inputs, joint, pg, head_sizes, comm, kernel, metadata, slot_key, *, allocate=True):
+def prepare_plan(
+    inputs, joint, pg, head_sizes, comm, kernel, metadata, slot_key, *, allocate=True, joint_strategy="front"
+):
     """Bind an existing plan, or allocate it only at a shape-preparation boundary.
 
     This does not execute attention or communication. Callers own stream ordering
@@ -100,7 +102,7 @@ def prepare_plan(inputs, joint, pg, head_sizes, comm, kernel, metadata, slot_key
     """
     q = inputs[0]
     tensors = inputs + (() if joint is None else joint)
-    signature = (tuple(head_sizes), layout(tensors))
+    signature = (tuple(head_sizes), layout(tensors), joint_strategy)
     key = (q.device, pg.group_name, len(head_sizes), signature)
     cached = _PLANS.get(key)
     if cached is None:
@@ -108,7 +110,17 @@ def prepare_plan(inputs, joint, pg, head_sizes, comm, kernel, metadata, slot_key
             raise RuntimeError("CE plan was not prepared before sampling/capture")
         if len(_PLANS) >= _PLAN_LIMIT:
             raise RuntimeError("Destroy captured graphs and clear CE plans before adding more layouts")
-        plan = NativePipeline(inputs, joint, pg, len(head_sizes), comm, kernel, metadata, head_sizes=head_sizes)
+        plan = NativePipeline(
+            inputs,
+            joint,
+            pg,
+            len(head_sizes),
+            comm,
+            kernel,
+            metadata,
+            head_sizes=head_sizes,
+            joint_strategy=joint_strategy,
+        )
         _PLANS[key] = (signature, plan)
     else:
         plan = cached[1]

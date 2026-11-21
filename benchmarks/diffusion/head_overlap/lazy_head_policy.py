@@ -270,6 +270,7 @@ class LazyHeadPolicy:
             metadata,
             ("lazy", signature),
             allocate=self.phase == "discover",
+            joint_strategy="front" if md is None else md.joint_strategy,
         )
         self.stats["core_calls"] += 1
         if event_pair is not None:
@@ -333,6 +334,7 @@ class LazyHeadPolicy:
                     entry.kernel,
                     entry.metadata,
                     ("lazy", entry.signature),
+                    joint_strategy="front" if entry.metadata is None else entry.metadata.joint_strategy,
                 )
             if len(entry.choices) > 1:
                 entry.events = [

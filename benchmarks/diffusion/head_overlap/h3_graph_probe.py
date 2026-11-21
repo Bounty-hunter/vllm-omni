@@ -209,7 +209,7 @@ def run_blocks(model, hidden, *, hints, control_scale, **kwargs):
     return result
 
 
-def install(pipeline_class):
+def install(pipeline_class, *, video_pipeline=False):
     head_module = importlib.import_module("vllm_omni.diffusion.attention.parallel.head_overlap")
     import native_prefilled
     from prefilled_probe import PrefilledPipeline
@@ -269,7 +269,7 @@ def install(pipeline_class):
 
     MiniMaxH3DiTModel.forward = transformer_forward
     original_forward = pipeline_class.forward
-    original_denoise = pipeline_class._denoise
+    original_denoise = None if video_pipeline else pipeline_class._denoise
 
     @functools.wraps(original_denoise)
     def denoise(*args, **kwargs):
@@ -283,7 +283,8 @@ def install(pipeline_class):
             TIMING.append((start, end))
             return result
 
-    pipeline_class._denoise = denoise
+    if not video_pipeline:
+        pipeline_class._denoise = denoise
     audited = False
     previous_canvas = None
 
@@ -307,6 +308,8 @@ def install(pipeline_class):
         EAGER_STEPS = 0
         LEARNER = None
         canvas = (request.sampling_params.height, request.sampling_params.width)
+        if video_pipeline:
+            canvas = (*canvas, request.sampling_params.num_frames, extra.get("duration"), extra["case"])
         if previous_canvas != canvas:
             torch.accelerator.synchronize()
             entries = getattr(self.transformer, "_hcms_block_graphs", {})
@@ -317,6 +320,8 @@ def install(pipeline_class):
         if REAL_PREFIX:
             GRAPH_KEY = (*GRAPH_KEY, AUTOTUNE)
         TIMING = [] if extra.get("diagnostic") else None
+        if video_pipeline and TIMING is not None:
+            raise ValueError("Video diagnostics must use the normal request/core counters")
         native_prefilled._SELECTED_CHUNKS = str(chunks)
         cache = self.transformer.adaln_cache
         if cache.offload_weights or cache.sidecar is not None:
@@ -330,19 +335,31 @@ def install(pipeline_class):
                 and weight.dtype == torch.float8_e4m3fn
                 for module in self.transformer.modules()
             )
-            vae_world = dist.get_world_size(self._vae_group) if self._vae_group is not None else 1
+            if video_pipeline:
+                vae_world = self.video_vae.parallel_size
+                vae_graph = None
+                minimum_area = None
+                native_vae = self.video_vae._native_parallel_state()
+                if bool(native_vae["sp_enabled"]) != (vae_world > 1):
+                    raise AssertionError("Video VAE native parallel state disagrees with its adapter")
+            else:
+                vae_world = dist.get_world_size(self._vae_group) if self._vae_group is not None else 1
+                vae_graph = self._vae_cuda_graph
+                minimum_area = self.min_generation_area
             if (
                 fp8 != int(os.environ["HCMS_EXPECTED_FP8"])
                 or vae_world != int(os.environ["HCMS_EXPECTED_VAE_WORLD"])
-                or self.min_generation_area is not None
+                or minimum_area is not None
             ):
                 raise AssertionError(f"Wrong model configuration: FP8={fp8}, VAE={vae_world}")
             record(
                 "model",
                 fp8_modules=fp8,
                 vae_world=vae_world,
-                vae_graph=self._vae_cuda_graph,
-                min_generation_area=self.min_generation_area,
+                vae_graph=vae_graph,
+                min_generation_area=minimum_area,
+                pipeline=type(self).__name__,
+                video_pipeline=video_pipeline,
                 torch=torch.__version__,
                 pid=os.getpid(),
                 gpu=torch.cuda.get_device_name(),
@@ -361,13 +378,14 @@ def install(pipeline_class):
         with region(f"request/{extra['label']}"):
             result = original_forward(self, request)
         calls = NATIVE_CALLS - before
-        if MODE != "graph" and calls != 300:
-            raise AssertionError(f"Expected 300 direct CE calls, got {calls}")
+        steps = int(request.sampling_params.num_inference_steps) if video_pipeline else 6
+        if MODE != "graph" and calls != steps * len(self.transformer.blocks):
+            raise AssertionError(f"Unexpected direct CE calls for {steps} steps: {calls}")
         graph = graph_entry(getattr(self.transformer, "_hcms_block_graphs", {}))
         if MODE == "graph" and graph is None:
             raise AssertionError("Graph mode did not create a graph")
-        if MODE == "graph" and graph.replays - replays_before + EAGER_STEPS != 6:
-            raise AssertionError("Expected exactly six real denoising steps across eager and graph execution")
+        if MODE == "graph" and graph.replays - replays_before + EAGER_STEPS != steps:
+            raise AssertionError(f"Expected exactly {steps} real denoising steps across eager and graph execution")
         if extra.get("trace_stop"):
             torch.accelerator.synchronize()
             dist.barrier()
