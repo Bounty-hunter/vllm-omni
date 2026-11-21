@@ -23,8 +23,8 @@ PARTITIONS = {
     "ratio13": (1, 3),
     "ratio21": (2, 1),
     "ratio31": (3, 1),
-    "heads57": (5, 7),
-    "heads75": (7, 5),
+    "ratio15": (1, 5),
+    "ratio51": (5, 1),
 }
 
 

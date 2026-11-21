@@ -52,22 +52,22 @@
         2
       ]
     },
-    "ratio13": {
+    "ratio15": {
+      "graph_mode": "graph",
+      "chunks": 2,
+      "schedule": "stage-local-shared-slots",
+      "head_partition": [
+        1,
+        5
+      ]
+    },
+    "odd_ratio13": {
       "graph_mode": "graph",
       "chunks": 2,
       "schedule": "stage-local-shared-slots",
       "head_partition": [
         1,
         3
-      ]
-    },
-    "heads57": {
-      "graph_mode": "graph",
-      "chunks": 2,
-      "schedule": "stage-local-shared-slots",
-      "head_partition": [
-        5,
-        7
       ]
     }
   },
@@ -124,5 +124,6 @@
         "fps": 16
       }
     }
-  ]
+  ],
+  "partition_policy": "Primary partitions have even per-rank head counts: 6+6, 4+8, 2+10. Odd 3+9 is a control."
 }
