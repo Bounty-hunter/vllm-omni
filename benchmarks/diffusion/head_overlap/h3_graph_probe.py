@@ -19,6 +19,7 @@ NATIVE_CALLS = 0
 CAPTURE_CALLS = 0
 SCHEDULE = "old"
 GRAPH_KEY = None
+HEAD_PARTITION = None
 TIMING = None
 
 
@@ -167,6 +168,7 @@ def install(pipeline_class):
             raise AssertionError("Direct CE native path fell back in graph experiment")
 
         kwargs["fallback"] = fallback
+        kwargs["head_partition"] = HEAD_PARTITION
         result = original_native_run(*args, **kwargs)
         NATIVE_CALLS += 1
         CAPTURE_CALLS += int(capturing)
@@ -210,7 +212,7 @@ def install(pipeline_class):
 
     @functools.wraps(original_forward)
     def forward(self, request):
-        global MODE, TRACE, ACTIVE, SCHEDULE, GRAPH_KEY, TIMING
+        global MODE, TRACE, ACTIVE, SCHEDULE, GRAPH_KEY, HEAD_PARTITION, TIMING
         nonlocal audited, previous_canvas
         if request.is_dummy_run():
             return original_forward(self, request)
@@ -220,6 +222,7 @@ def install(pipeline_class):
         SCHEDULE = extra["schedule"]
         TRACE = bool(extra.get("trace", False))
         chunks = int(extra["chunks"])
+        HEAD_PARTITION = tuple(extra["head_partition"]) if extra.get("head_partition") else None
         canvas = (request.sampling_params.height, request.sampling_params.width)
         if previous_canvas != canvas:
             torch.accelerator.synchronize()
@@ -227,7 +230,7 @@ def install(pipeline_class):
             entries.clear()
             native_prefilled.clear()
             previous_canvas = canvas
-        GRAPH_KEY = (canvas, chunks, SCHEDULE)
+        GRAPH_KEY = (canvas, chunks, SCHEDULE, HEAD_PARTITION)
         TIMING = [] if extra.get("diagnostic") else None
         native_prefilled._SELECTED_CHUNKS = str(chunks)
         cache = self.transformer.adaln_cache
@@ -296,6 +299,7 @@ def install(pipeline_class):
                 native_python_calls=calls,
                 graph_exists=graph is not None,
                 plan_chunks=[p.chunks for p in active],
+                plan_head_sizes=[p.head_sizes for p in active],
                 qkv=[list(p.inputs[0].shape) for p in active],
                 cache_hits=cache.hits,
                 cache_misses=cache.misses,
