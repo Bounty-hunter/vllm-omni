@@ -19,8 +19,10 @@ H3 captures the original 50-block stack, Qwen the original 60-block stack after
 model preparation, and FLUX/Wan the declared transformer forward. Eager reference
 vs graph and serial vs overlap must be bitwise equal. Captures must reach direct
 CE with no fallback. Replays have no Python native calls, as expected.
-H3 uses six fixed PDD steps, Qwen eight steps with true CFG 4, FLUX four steps
-and Wan eight steps with CFG 1. No approximate step cache is enabled.
+H3 uses six fixed PDD steps, Qwen eight steps, FLUX four steps and Wan eight
+steps with CFG 1. Qwen requested true_cfg_scale=4 but had no negative prompt,
+so its actual path was single-branch. The earlier 'true CFG 4' description
+was incorrect; timing samples are unchanged. No approximate step cache is enabled.
 H3 uses its native VAE tile parallelism over SP ranks; the other families request
 VAE patch parallelism 2. H3 SP4 also uses text-encoder TP4; SP2 uses TE TP2.
 Quantized rows use online FP8 DiT linears with BF16 attention/CE.

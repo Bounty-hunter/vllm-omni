@@ -1544,7 +1544,9 @@
         1401.6866274178028,
         1437.7827011048794,
         1568.0850856006145
-      ]
+      ],
+      "effective_true_cfg": false,
+      "configuration_note": "Requested true_cfg_scale=4; no negative prompt, so only one branch executes"
     },
     {
       "run": "qwen-edit-sp2-fp8",
@@ -1624,7 +1626,9 @@
         2258.140865713358,
         2231.5824404358864,
         2213.1185363978148
-      ]
+      ],
+      "effective_true_cfg": false,
+      "configuration_note": "Requested true_cfg_scale=4; no negative prompt, so only one branch executes"
     },
     {
       "run": "qwen-edit-sp2-fp8",
@@ -1704,7 +1708,9 @@
         3493.6481676995754,
         3485.9108682721853,
         3504.4384207576513
-      ]
+      ],
+      "effective_true_cfg": false,
+      "configuration_note": "Requested true_cfg_scale=4; no negative prompt, so only one branch executes"
     },
     {
       "run": "qwen-edit-sp2-fp8",
@@ -1784,7 +1790,9 @@
         4255.769249051809,
         4233.275610953569,
         4225.84736160934
-      ]
+      ],
+      "effective_true_cfg": false,
+      "configuration_note": "Requested true_cfg_scale=4; no negative prompt, so only one branch executes"
     },
     {
       "run": "flux-bf16",

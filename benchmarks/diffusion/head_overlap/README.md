@@ -79,6 +79,37 @@ pipeline does not consume the generic nested `parallel_config` override.
 Use a task-local `TRITON_CACHE_DIR` on local storage when the shared cache
 reports stale file handles. This changes compilation storage, not the kernels.
 
+## Communication budget and splitting cost
+
+[BUDGET-ANALYSIS.txt](BUDGET-ANALYSIS.txt) separates isolated peer transport,
+attention-only splitting, and complete core execution. Wan's 6630-token
+case spends 74.48 us extra in sequential 6+6-head attention, matching its
+74.53 us half-peer budget. H3 SP4 has a much larger communication budget
+relative to the request and a smaller splitting penalty.
+
+`attention_waves.py` compares whole 12 heads with 6+6, 4+8 and 5+7 using
+the same FA3 backend, with no communication in the timed region. At 3510
+tokens, 4+8 reduces 164.89 to 126.46 us; at 6630, 5+7 reduces 490.58 to
+408.75 us. All outputs match exactly. These controls qualify attention
+partitions; unequal CE transport and its model benefit remain unimplemented.
+
+```bash
+torchrun --standalone --nproc-per-node=2 "$PROBE_DIR/core_budget.py" \
+  --cases "$PROBE_DIR/evidence/core-budget-sp2-cases.json" --out "$RUN_DIR/sp2"
+torchrun --standalone --nproc-per-node=4 "$PROBE_DIR/core_budget.py" \
+  --cases "$PROBE_DIR/evidence/core-budget-sp4-cases.json" --out "$RUN_DIR/sp4"
+torchrun --standalone --nproc-per-node=2 "$PROBE_DIR/attention_waves.py" \
+  --out "$RUN_DIR/partitions"
+```
+
+These are CUDA-event performance controls with no profiler. Raw samples,
+denominators and source metadata are in
+[core-budget-summary.json](evidence/core-budget-summary.json).
+Request communication fractions derived from these controls are estimates,
+not newly measured request profiles. The previous Qwen matrix requested
+`true_cfg_scale=4` without a negative prompt, so it actually ran a single CFG
+branch; the old timing samples stand, and the configuration description is corrected.
+
 ## Staging and graph-private output experiment
 
 `schedule_probe.py` supplies explicit scheduling ablations over the same
