@@ -313,7 +313,7 @@ class LazyHeadPolicy:
         if self.core_events is not None and self.phase == "frozen" and torch.cuda.is_current_stream_capturing():
             if audit["calls"] == min(16, entry.calls):
                 diagnostic = self.core_events[signature, choice]
-        result = scheduled(plan, "stage-local") if diagnostic is None else diagnostic.run(plan, "stage-local")
+        result = scheduled(plan, "stage-local") if diagnostic is None else diagnostic.run(plan, "stage-local", compute)
         if event_pair is not None:
             event_pair[1].record()
             submit_us = (time.perf_counter() - submitted) * 1e6
@@ -362,7 +362,7 @@ class LazyHeadPolicy:
         for entry in self.entries.values():
             slots = slots_for(entry)
             for widths in entry.choices:
-                prepare_plan(
+                plan = prepare_plan(
                     entry.inputs,
                     entry.joint,
                     entry.group,
@@ -377,7 +377,9 @@ class LazyHeadPolicy:
                 from schedule_probe import CoreEvents
 
                 for choice, widths in enumerate(entry.choices):
-                    self.core_events[entry.signature, choice] = CoreEvents(len(widths), entry.inputs[0].device)
+                    self.core_events[entry.signature, choice] = CoreEvents(
+                        len(widths), entry.inputs[0].device, plan.runtime
+                    )
             if len(entry.choices) > 1:
                 entry.events = [
                     (torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)) for _ in range(slots)

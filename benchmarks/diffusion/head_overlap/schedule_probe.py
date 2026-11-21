@@ -2,6 +2,8 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 """Narrow CE scheduling ablations; original buffers, bytes, and peer fences."""
 
+import ctypes
+
 import torch
 from prefilled_probe import PrefilledPipeline
 
@@ -20,7 +22,11 @@ VARIANTS = {
 class CoreEvents:
     """Opt-in timing of one captured layer, read at request completion only."""
 
-    def __init__(self, chunks, device):
+    def __init__(self, chunks, device, runtime):
+        self.runtime = runtime
+        self.record_external = runtime.lib.cudaEventRecordWithFlags
+        self.record_external.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint]
+        self.record_external.restype = ctypes.c_int
         self.events = {
             name: torch.Event(device=device, enable_timing=True)
             for name in (
@@ -34,33 +40,38 @@ class CoreEvents:
             event.record()
         self.recorded = False
 
-    def run(self, plan, variant):
+    def record(self, name, stream):
+        # External record nodes preserve timing handles across graph replay.
+        # Ordinary captured event dependencies do not expose replay timestamps.
+        self.runtime.CUDART_CHECK(self.record_external(self.events[name].event_id, stream.cuda_stream, 1))
+
+    def run(self, plan, variant, compute):
         originals = plan.submit_forward, plan.kernel, plan.submit_reverse
         group = 0
 
         def forward(index):
-            self.events[f"F{index}0"].record(plan.stream)
+            self.record(f"F{index}0", plan.stream)
             originals[0](index)
-            self.events[f"F{index}1"].record(plan.stream)
+            self.record(f"F{index}1", plan.stream)
 
         def attention(*args):
             nonlocal group
-            self.events[f"A{group}0"].record()
+            self.record(f"A{group}0", compute)
             output = originals[1](*args)
-            self.events[f"A{group}1"].record()
+            self.record(f"A{group}1", compute)
             group += 1
             return output
 
         def reverse(index, output):
-            self.events[f"R{index}0"].record(plan.stream)
+            self.record(f"R{index}0", plan.stream)
             originals[2](index, output)
-            self.events[f"R{index}1"].record(plan.stream)
+            self.record(f"R{index}1", plan.stream)
 
         plan.submit_forward, plan.kernel, plan.submit_reverse = forward, attention, reverse
         try:
-            self.events["begin"].record()
+            self.record("begin", compute)
             output = run(plan, variant)
-            self.events["end"].record()
+            self.record("end", compute)
             self.recorded = True
             return output
         finally:
@@ -71,7 +82,10 @@ class CoreEvents:
             return None
         if not self.events["end"].query():
             raise RuntimeError("Core diagnostics must follow the preceding request's normal output completion")
-        return {name: self.events["begin"].elapsed_time(event) * 1000 for name, event in self.events.items()}
+        offsets = {name: self.events["begin"].elapsed_time(event) * 1000 for name, event in self.events.items()}
+        if offsets["end"] <= 0 or any(not 0 <= value <= offsets["end"] for value in offsets.values()):
+            raise RuntimeError(f"Invalid replay event offsets: {offsets}")
+        return offsets
 
 
 def run(plan, variant):
