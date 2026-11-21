@@ -174,6 +174,26 @@ def main():
                 "core_overlap_owned": lambda: scheduled(split, "stage-local").clone(),
                 "core_overlap_borrowed": lambda: scheduled(split, "stage-local"),
             }
+            for variant in case.get("staging_variants", ()):
+                if variant not in ("overlap-return", "overlap-staging"):
+                    raise ValueError(f"Unknown staging ablation: {variant}")
+                functions[f"core_{variant}_borrowed"] = lambda variant=variant: scheduled(split, variant)
+            if case.get("staging_variants"):
+
+                def local_forward(plan=whole, group=0):
+                    for operation in plan.local_forward[group]:
+                        plan.emit_on(operation, stream)
+
+                def local_reverse(plan=whole, group=0):
+                    for operation in plan.reverse_operations(group, plan.parts[group][0], rank):
+                        plan.emit_on(operation, stream)
+
+                functions.update(
+                    local_forward=local_forward,
+                    local_reverse=local_reverse,
+                    local_forward_last=lambda: local_forward(split, 1),
+                    local_reverse_first=lambda: local_reverse(split, 0),
+                )
             graphs = {}
             for name, function in functions.items():
                 dist.barrier(group=control)

@@ -90,6 +90,23 @@ sources were produced before enter. Every local prefill finishes on compute
 before its attention consumer. enter still follows the previous copy-out, so
 the F0-ready acknowledgement and all three peer fences remain unchanged.
 
+Optional staging overlap ablations
+overlap-staging keeps F0-local before enter, then places each later local
+input copy on communication before that group's peer copies and ready event.
+These writes address a distinct group buffer, so they can overlap the preceding
+attention's reads. Its consumer still waits for the same forward-ready event.
+No new stream, event, allocation or peer fence is introduced.
+
+Both overlap-return and overlap-staging place nonfinal local output copies on
+communication after the corresponding produced event and peer return, while
+the next attention runs on compute. The final local copy remains on compute
+before compute's final wait; the final peer fence orders all remote writes.
+Consequently every local and incoming output write finishes before the caller
+consumes the result. F0-ready still acknowledges the previous slot consumer.
+The retained source list and final compute wait also preserve CE source
+lifetimes. These are opt-in benchmark ablations until exactness, delayed
+consumer reuse and full-request performance have been measured.
+
 Explicit static-graph output slots
 native_prefilled.output_slot(key) opts a fixed graph/layer into a private
 symmetric output slot. The caller warms the slot before capture, consumes it

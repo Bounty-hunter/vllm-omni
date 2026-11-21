@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 """Explicit-slot consumers under asymmetric delays, eager and CUDA Graph."""
 
+import argparse
 import importlib
 import os
 from types import SimpleNamespace
@@ -11,14 +12,22 @@ import torch.distributed as dist
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--schedule", choices=("original", "overlap-return", "overlap-staging"), default="original")
+    args = parser.parse_args()
     rank = int(os.environ["LOCAL_RANK"])
-    torch.cuda.set_device(rank)
+    torch.accelerator.set_device_index(rank)
     dist.init_process_group("nccl")
     pg = dist.group.WORLD
     control = dist.new_group(backend="gloo")
     head = importlib.import_module("vllm_omni.diffusion.attention.parallel.head_overlap")
     import native_prefilled as native
     from overlap_probe import FlashAttentionImpl, UlyssesParallelAttention
+
+    if args.schedule != "original":
+        from schedule_probe import run as scheduled
+
+        native.NativePipeline.__call__ = lambda plan: scheduled(plan, args.schedule)
 
     group = SimpleNamespace(
         ulysses_group=pg, ulysses_world_size=2, ulysses_rank=rank, ring_world_size=1, allgather_world_size=1
@@ -77,7 +86,8 @@ def main():
             for value, reference in zip(normal, expected):
                 torch.testing.assert_close(value, reference, atol=0, rtol=0)
             print(
-                f"SLOT_STRESS rank={rank} tokens={total} normal-owned and delayed-slot consumers bitwise exact",
+                f"SLOT_STRESS rank={rank} schedule={args.schedule} tokens={total} "
+                "normal-owned and delayed-slot consumers bitwise exact",
                 flush=True,
             )
             del graph, captured, actual, normal
