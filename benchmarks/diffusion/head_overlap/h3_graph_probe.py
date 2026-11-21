@@ -85,7 +85,11 @@ class BlockGraph:
 
             from vllm_omni.diffusion.distributed.parallel_state import get_world_group
 
-            self.learner = LazyHeadPolicy(get_world_group().cpu_group, enabled=AUTOTUNE)
+            self.learner = LazyHeadPolicy(
+                get_world_group().cpu_group,
+                enabled=AUTOTUNE,
+                candidate_partition=HEAD_PARTITION if AUTOTUNE else None,
+            )
             self.learner.begin()
         global LEARNER
         LEARNER = self.learner
