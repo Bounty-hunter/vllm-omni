@@ -1,4 +1,5 @@
 {
+  "scope": "Historical initial-publication mapping; these hashes describe that snapshot, not every later branch revision. Later head-partition source identities are in evidence/head-partition-summary.json.",
   "base_sha": "fb41f81b96ab3c4f6bc7e888ed8e47b07583795b",
   "files": {
     "overlap_probe.py": {

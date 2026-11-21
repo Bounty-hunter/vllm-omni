@@ -1,0 +1,129 @@
+Issue #10448: exact unequal CE head groups, 2026-11-21
+
+Unequal groups are implemented in the explicit offline native probe only.
+No default path changed; no PR opened; no new profiler trace was collected.
+All model request outputs are bitwise equal at seeds 42, 43 and 44.
+
+Environment and method
+NVIDIA L20X, NV18 peer links; torch 2.14.0+cu130, vLLM 0.34.0, FA3.
+Wan2.2 TI2V-5B: FP8 DiT (240 linears), SP2, VAE2, 8 steps, CFG1.
+H3-Image: FP8 DiT (260 linears), SP4 / encoder TP4 / VAE4, 6 PDD steps.
+BF16 attention and transport, fixed-canvas graphs, batch 1, one request at a time.
+Eight-round screen: three warmups and two additional correctness seeds per variant.
+Thirty-round confirmations: five warmups and two additional seeds per variant.
+Variant order rotates and reverses across paired rounds in one process.
+The H3 and Wan confirmation jobs run sequentially, using separate scheduler reservations.
+Omni.generate wall time includes the complete request; hash/persistence follow the timer.
+Whole serial owns its output. Both split arms use the same shared graph slot.
+Versus equal isolates partition choice; versus serial includes prior schedule/ownership work.
+
+Exact integer partitions
+Wan has 12 local heads: 6+6, 4+8 (1:2), 2+10 (1:5), odd 3+9 (1:3 control).
+H3 has 14 local heads: equal 7+7, even 6+8 and 4+10; exact 1:2/1:3 do not divide 14.
+No silent rounding. Actual widths enter resident plan keys and prefix offsets.
+No extra memcpy submissions, bytes or peer fences versus equal two-group splitting.
+Total communication bytes are not halved; overlap reduces exposed communication time.
+
+Eight-round screen (ms, lower is better)
+wan5b-480p-f17: 12: 745.203, 6+6: 735.458, 4+8: 732.631, 2+10: 742.558, 3+9: 744.560; actual output [[1, 17, 480, 832, 3]]
+wan5b-480p-f33: 12: 1260.271, 6+6: 1284.120, 4+8: 1286.523, 2+10: 1279.352, 3+9: 1264.021; actual output [[1, 33, 480, 832, 3]]
+wan5b-480p-f65: 12: 2417.778, 6+6: 2559.992, 4+8: 2584.165, 2+10: 2459.565, 3+9: 2546.648; actual output [[1, 65, 480, 832, 3]]
+wan5b-720p-f33: 12: 2494.253, 6+6: 2541.277, 4+8: 2457.373, 2+10: 2710.002, 3+9: 2530.471; actual output [[1, 33, 704, 1280, 3]]
+h3-3k: 14: 1406.236, 7+7: 1353.886, 6+8: 1376.385, 4+10: 1379.174; actual output [[3072, 3072, 3]]
+h3-4k: 14: 2738.427, 7+7: 2671.597, 6+8: 2660.717, 4+10: 2643.914; actual output [[4096, 4096, 3]]
+
+Thirty-round confirmations
+case | heads | median ms | min-max ms | reduction vs whole | reduction vs equal | paired wins vs whole/equal
+wan5b-480p-f17 | [12] | 896.467 | 748.848-1385.019 | +0.00% | +5.63% | 0/30, 14/30
+wan5b-480p-f17 | [6, 6] | 949.932 | 744.828-1363.860 | -5.96% | +0.00% | 16/30, 0/30
+wan5b-480p-f17 | [4, 8] | 1010.445 | 742.451-1328.782 | -12.71% | -6.37% | 16/30, 13/30
+wan5b-720p-f33 | [12] | 3336.582 | 2472.181-4590.306 | +0.00% | -14.33% | 0/30, 10/30
+wan5b-720p-f33 | [6, 6] | 2918.502 | 2450.887-4811.827 | +12.53% | +0.00% | 20/30, 0/30
+wan5b-720p-f33 | [4, 8] | 2844.785 | 2448.970-4165.309 | +14.74% | +2.53% | 21/30, 18/30
+h3-4k | [14] | 2735.734 | 2720.510-2812.907 | +0.00% | -2.97% | 0/30, 0/30
+h3-4k | [7, 7] | 2656.806 | 2646.049-2703.699 | +2.89% | +0.00% | 30/30, 0/30
+h3-4k | [4, 10] | 2637.439 | 2624.029-2658.741 | +3.59% | +0.73% | 30/30, 30/30
+
+Accepted interpretation of these confirmations
+H3 4K 4+10 saves a paired median 19.85 ms versus 7+7, with 30/30 wins.
+Wan's extra 4+8 benefit over 6+6 is not established by these noisy confirmations.
+In the higher-resolution Wan case, whole ranges from 2472 to 4590 ms.
+Its ratio-of-medians reduction of 14.74% must NOT be presented as an accepted speedup.
+The paired median whole-minus-4+8 saving is only 44.93 ms, versus the 491.80 ms
+difference of marginal medians. The two quantities diverge under the large variation.
+Existing stage counters place the variation inside stage_0_gen; median time outside
+that stage is only 1.65-1.92 ms. These counters cannot identify DiT, VAE, CPU or GPU
+as the source. No new trace was taken and no cause is assigned to SM contention.
+Do not remove slow samples. All samples and paired order are retained below.
+
+Paired whole-minus-variant and equal-minus-variant median savings (ms), with
+descriptive 95% bootstrap intervals (10000 resamples of paired rounds, seed 10448).
+This does not establish stationarity; interpret Wan intervals with its timing ranges.
+wan5b-480p-f17/[4, 8]: whole 3.56 [-71.87913358211517, 66.26781821250916]; equal -6.91 [-92.64294616878033, 58.249397203326225]
+wan5b-720p-f33/[4, 8]: whole 44.93 [9.012609720230103, 612.9172462970018]; equal 44.14 [-24.460959248244762, 225.0962369143963]
+h3-4k/[4, 10]: whole 99.14 [94.97097507119179, 102.92657651007175]; equal 19.85 [17.192007042467594, 22.26892113685608]
+
+Communication fractions and interpretation
+The core ratio is isolated peer CE / (whole attention + peer CE).
+The request ratio is an ESTIMATE: isolated peer time * calls / this run's whole E2E.
+Neither is a measured in-request communication share; old control timings are reused.
+case | isolated peer/core | estimated peer/request
+wan/wan5b-480p-f17 | 55.64% | 2.19%
+wan/wan5b-480p-f33 | 44.29% | 1.87%
+wan/wan5b-480p-f65 | 28.05% | 1.48%
+wan/wan5b-720p-f33 | 23.74% | 1.66%
+h3/h3-3k | 38.05% | 11.47%
+h3/h3-4k | 23.96% | 10.18%
+wan-confirm/wan5b-480p-f17 | 55.64% | 1.82%
+wan-confirm/wan5b-720p-f33 | 23.74% | 1.24%
+h3-confirm/h3-4k | 23.96% | 10.19%
+
+An even head count alone does not determine FA3 latency. The H3 3K screen
+favored odd 7+7 over both even alternatives in all eight paired rounds.
+A 128-query-tile, one-resident-CTA-per-SM proxy predicts 8 waves for 7+7
+versus 9 for 6+8 or 4+10 at 9248 tokens. All predict 14 at 16416 tokens.
+This is a hypothesis, not an observed launch grid or proof of the full-model cause.
+Choosing a ratio must balance attention splitting tax and exposed communication edges.
+For asymmetric groups, the equal-split half-communication budget is only a reference.
+The leading forward and trailing reverse transfer sizes also change with the ratio.
+The single-layer gain does not establish the complete-request gain; use confirmations.
+
+Idealized two-group critical path (no fences, local copies or interference)
+Let F/R be whole forward/reverse transport, A0/A1 the sequential split attentions,
+and x the first group's head fraction. The implemented F0,A0/F1,A1/R0,R1 order gives
+T = x*F + max(A0, (1-x)*F) + max(A1, x*R) + (1-x)*R.
+Hidden communication = min(A0, (1-x)*F) + min(A1, x*R). Net benefit subtracts
+A0+A1-Awhole plus any real copy/fence/interference increase from that hidden time.
+Equal groups with enough compute hide half of F+R. Unequal groups change both
+the leading/trailing edges and the available compute; half is not a universal invariant.
+This model explains the candidate search; it is not a timing measurement.
+
+Earlier pure-FA3 controls, whole / equal / unequal (us; compare within each row):
+Wan S3510: 123.18 / 164.89 (6+6) / 126.46 (4+8).
+Wan S6630: 401.54 / 490.58 (6+6) / 408.75 (5+7, odd control).
+Even widths therefore cannot be the only selection rule. Source: BUDGET-ANALYSIS.txt.
+
+Correctness and reproducibility
+SP2 and SP4: 16 resident dense/front-joint graphs x 8 delayed replays, exact global reference.
+Those original QA runs include 5+7 and 7+5; their source SHA is retained below.
+The newer even 2+10 and 10+2 received a separate SP2 QA before the Wan matrix.
+The existing distributed attention suite passed 1 test, 0 skipped, with 72 checks/rank.
+Every job exited 0 and restored its temporary integration patch to a clean checkout.
+Transferred file hashes, measured source blobs and frozen configs are verified.
+Per-rank audits record graph captures/replays, direct routes and actual head groups.
+Original payloads, integration patches and full logs are stored as deterministic .gz
+files in evidence/head-partitions; decompress them to recover the measured bytes.
+Model command: python $PROBE_DIR/model_matrix.py --model $MODEL --config $CONFIG
+  --out $RUN/results --rounds 30 --warmups 5 (screen: 8 / 3).
+Apply native-probe.patch plus the model's graph adapter only in an isolated checkout.
+Raw complete model logs remain in outputs/issue-10448-partitions-20261121/evidence.tar.gz.
+Full samples and output hashes: evidence/head-partition-summary.json and head-partitions/.
+
+qa2: f21d1d21bb183c2cc4994d155d5fa1c6866d60e0; QA requests; /data/dyy/logs/hcms-10448-partition-qa2-20261121
+qa4: f21d1d21bb183c2cc4994d155d5fa1c6866d60e0; QA requests; /data/dyy/logs/hcms-10448-partition-qa4-20261121
+wan: 995027332a23b7a41e5cd418d32bae7863fd219a; 260 requests; /data/dyy/logs/hcms-10448-wan-partitions-20261121
+h3: 9cee198a4df75f44a16cc2f17f441f3326016860; 104 requests; /data/dyy/logs/hcms-10448-h3-partitions-20261121
+wan-confirm: ba223fe8d20787b377ef56e339e0328975f971e6; 222 requests; /data/dyy/logs/hcms-10448-wan-partition-confirm-20261121
+h3-confirm: ba223fe8d20787b377ef56e339e0328975f971e6; 111 requests; /data/dyy/logs/hcms-10448-h3-partition-confirm-20261121
+
+AI assistance: Codex prepared the implementation, measurements and analysis.

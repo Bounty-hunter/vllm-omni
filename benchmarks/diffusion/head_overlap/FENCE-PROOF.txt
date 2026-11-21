@@ -1,5 +1,29 @@
 Final experimental schedule: fence and lifetime argument
 
+Unequal head groups
+For world size W and positive per-rank group widths h_g, define
+o_g = W * sum(h_i for i < g). Rank r computes the global head interval
+[o_g + r*h_g, o_g + (r+1)*h_g) for group g. The W rank intervals partition
+[o_g, o_g + W*h_g), and adjacent groups have adjacent endpoints. Requiring
+W * sum(h_g) == total_heads therefore covers every head exactly once.
+Forward source offsets and reverse destination offsets use this same mapping.
+Joint Q/K/V use the rank's interval; joint outputs are replicated as before.
+
+Group widths and offsets are resolved before capture, and actual widths are
+part of the resident plan key. Each forward buffer uses its group's width.
+Changing the ratio never rebinds the geometry retained by another graph.
+For the same number of groups, unequal sizes change neither the number of
+memcpy submissions nor peer fences. Summed transferred head widths, hence
+total bytes, are unchanged. These are scheduling changes, not byte reduction.
+All reuse arguments below depend on disjoint buffers and happens-before
+edges, not equal group widths; every incoming-ready and output-ready fence
+is retained. Group ratios must match across ranks, just as chunk counts do.
+
+partition_probe.py checks dense and front-joint inputs against a global
+reference while 16 graphs remain resident, with delayed consumers at SP2/4.
+The model partition experiments additionally compare seeds 42/43/44 bitwise.
+Exact source identities and tested ratios are in PARTITION-RESULTS.txt.
+
 Assumptions
 - All ranks call the same head-group schedule on one owning compute stream.
 - Each head group owns a distinct forward buffer. Output assembly uses a

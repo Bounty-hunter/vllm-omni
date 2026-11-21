@@ -91,7 +91,9 @@ relative to the request and a smaller splitting penalty.
 the same FA3 backend, with no communication in the timed region. At 3510
 tokens, 4+8 reduces 164.89 to 126.46 us; at 6630, 5+7 reduces 490.58 to
 408.75 us. All outputs match exactly. These controls qualify attention
-partitions; unequal CE transport and its model benefit remain unimplemented.
+partitions. The subsequent unequal CE implementation and complete-request
+comparisons are recorded in [PARTITION-RESULTS.txt](PARTITION-RESULTS.txt),
+with samples in [head-partition-summary.json](evidence/head-partition-summary.json).
 
 ```bash
 torchrun --standalone --nproc-per-node=2 "$PROBE_DIR/core_budget.py" \
@@ -109,6 +111,30 @@ Request communication fractions derived from these controls are estimates,
 not newly measured request profiles. The previous Qwen matrix requested
 `true_cfg_scale=4` without a negative prompt, so it actually ran a single CFG
 branch; the old timing samples stand, and the configuration description is corrected.
+
+## Unequal CE head groups
+
+The explicit native probe accepts `head_partition` as exact positive integer
+weights. Wan SP2 has 12 heads per rank: `[1, 2]` gives 4+8 and `[1, 3]` gives
+3+9. The primary even alternatives are 6+6, 4+8 and 2+10; the odd 3+9 remains
+an explicitly labeled control. H3 SP4 has 14 heads per rank, so its even
+alternatives are 6+8 (`[3, 4]`) and 4+10 (`[2, 5]`), with 7+7 as the equal
+control. An inexact ratio raises instead of silently rounding.
+
+Widths and prefix offsets are built before capture. Forward and reverse use
+the same head permutation, and resident plan keys include the actual widths.
+There are no additional copies or fences relative to equal two-way splitting.
+The total communication bytes are unchanged. An even head count is a useful
+candidate constraint; kernel execution waves and exposed pipeline edges still
+depend on the shape. It is not an unconditional faster-kernel guarantee.
+
+`partition_probe.py` exercises 16 resident graphs against a global reference,
+including dense and front-joint layouts and delayed consumers. The frozen
+`wan-partition-matrix.json` and `h3-partition-matrix.json` screen full requests;
+the corresponding `*-partition-confirm.json` files freeze selected cases for
+30-round confirmation with both whole and equal controls. Use the same patch
+composition as the model matrix above. No profiler is enabled. Source SHAs,
+per-rank route audits and bitwise seed comparisons accompany the results.
 
 ## Staging and graph-private output experiment
 

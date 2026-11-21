@@ -1,5 +1,10 @@
 Issue #10448: communication budget and head partition controls, 2026-11-21
 
+Historical budget-control snapshot, before unequal CE implementation.
+The later implementation and full-model partition comparisons are recorded
+in PARTITION-RESULTS.txt and evidence/head-partition-summary.json.
+The "not implemented" conclusion below describes this earlier snapshot only.
+
 Equal head splits can add a whole execution wave. Wan 6630 tokens has a 74.48 us
 attention-only splitting tax, almost exactly its 74.53 us half-peer budget.
 The complete core changes 593.63 -> 672.91 -> 592.55 us for whole, split serial,
