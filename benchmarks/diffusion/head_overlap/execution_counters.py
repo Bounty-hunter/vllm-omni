@@ -4,6 +4,27 @@
 
 import functools
 
+_COUNTS = None
+_CORE_PHASE = None
+
+
+def observe_core(function):
+    """Instrument only test runs; normal execution keeps the original callable."""
+    if _COUNTS is None:
+        return function
+
+    @functools.wraps(function)
+    def observed(policy, *args, **kwargs):
+        global _CORE_PHASE
+        previous = _CORE_PHASE
+        _CORE_PHASE = policy.phase
+        try:
+            return function(policy, *args, **kwargs)
+        finally:
+            _CORE_PHASE = previous
+
+    return observed
+
 
 def install():
     import torch
@@ -17,7 +38,11 @@ def install():
         all_reduce=0,
         event_records=0,
         timed_event_records=0,
+        sampling_host_syncs=0,
+        captured_timer_records=0,
     )
+    global _COUNTS
+    _COUNTS = counts
 
     def wrap(owner, name, label):
         original = getattr(owner, name)
@@ -25,6 +50,7 @@ def install():
         @functools.wraps(original)
         def counted(*args, **kwargs):
             counts[label] += 1
+            counts["sampling_host_syncs"] += int(_CORE_PHASE in ("sample", "frozen"))
             return original(*args, **kwargs)
 
         setattr(owner, name, counted)
@@ -40,6 +66,7 @@ def install():
     def record(event, *args, **kwargs):
         counts["event_records"] += 1
         counts["timed_event_records"] += int(getattr(event, "_hcms_lazy_timer", False))
+        counts["captured_timer_records"] += int(_CORE_PHASE == "frozen" and getattr(event, "_hcms_lazy_timer", False))
         return original_record(event, *args, **kwargs)
 
     torch.cuda.Event.record = record

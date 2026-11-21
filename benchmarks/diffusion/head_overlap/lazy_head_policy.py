@@ -14,6 +14,8 @@ import time
 from dataclasses import dataclass, field, is_dataclass, replace
 from importlib.metadata import version
 
+from execution_counters import observe_core
+
 
 def candidates(heads, tokens, dim, world, sms, *, flops=6e14, bandwidth=None):
     """Rank CPU cost predictions; execute at most two splits, never a sweep.
@@ -101,13 +103,18 @@ class LazyHeadPolicy:
 
         from vllm_omni.diffusion.attention.backends.utils.fa import (
             dense_flash_attn_func_for,
+            flash_attn_varlen_func,
             vllm_varlen_version_kwargs,
         )
 
         self.group, self.enabled = group, enabled
         properties = torch.cuda.get_device_properties(torch.accelerator.current_device_index())
         function = dense_flash_attn_func_for(torch.bfloat16)
-        backend = (function.__module__, function.__qualname__, tuple(sorted(vllm_varlen_version_kwargs().items())))
+        backend = (
+            function.__module__,
+            function.__qualname__,
+            tuple(sorted(vllm_varlen_version_kwargs(flash_attn_varlen_func).items())),
+        )
         self.identity = (
             properties.name,
             properties.major,
@@ -126,8 +133,6 @@ class LazyHeadPolicy:
             event_records=0,
             preparation_calls=0,
             control_collectives=0,
-            layer_host_syncs=0,
-            extra_forwards=0,
             prepare_ms=0.0,
             finish_ms=0.0,
         )
@@ -163,6 +168,7 @@ class LazyHeadPolicy:
         self.entries.clear()
         self.phase = "discover"
 
+    @observe_core
     def run(self, q, k, v, md, pg, kernel, *, streams):
         import torch
         import torch.distributed as dist

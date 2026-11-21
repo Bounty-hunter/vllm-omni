@@ -66,8 +66,10 @@ class PackedForward(nn.Module):
         super().__init__()
         self.body = forward
         self.learner = learner
+        self.forward_calls = 0
 
     def forward(self, packed_args, packed_kwargs):
+        self.forward_calls += 1
         output = self.body(*packed_args, **packed_kwargs)
         if self.learner is not None and self.learner.phase == "discover":
             self.learner.prepare()
@@ -129,6 +131,7 @@ def graph_call(original, graphs, component, *args, **kwargs):
         graph.output_type = type(reference)
     captures_before, calls_before = graph.captures, state["direct_calls"]
     learner = graph.module.learner
+    body_calls_before = graph.module.forward_calls
     if learner is not None and learner.phase == "frozen":
         state["learner"] = learner
     with torch.cuda.nvtx.range(f"DiT/{component}/graph"):
@@ -137,6 +140,12 @@ def graph_call(original, graphs, component, *args, **kwargs):
             packed_args=args,
             packed_kwargs=kwargs,
         )
+    state["eager_forwards"][component] = (
+        state["eager_forwards"].get(component, 0)
+        + graph.module.forward_calls
+        - body_calls_before
+        + int(reference is not None)
+    )
     if isinstance(result, dict) and graph.output_type is not dict:
         result = graph.output_type(**result)
     if not graph.enabled or not graph.num_graphs:
@@ -339,6 +348,7 @@ def install(pipeline):
                     fallbacks=0,
                     shapes=set(),
                     autotune=bool(extra.get("autotune", False)),
+                    eager_forwards={},
                 )
                 token = _ACTIVE.set(state)
                 native._SELECTED_CHUNKS = str(extra["chunks"])
@@ -382,6 +392,7 @@ def install(pipeline):
                         output_slots=len(native._SLOT_ARENA),
                         output_slot_bytes=sum(slot.tensor.nbytes for slot in native._SLOT_ARENA.values()),
                         execution_counters={key: value - counters_before[key] for key, value in counters.items()},
+                        eager_forwards=state["eager_forwards"],
                         lazy_policies={
                             name: dict(stats=graph.module.learner.stats, reports=graph.module.learner.reports)
                             for name, graphs in components.items()
