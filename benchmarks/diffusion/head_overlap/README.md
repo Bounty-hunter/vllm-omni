@@ -60,7 +60,56 @@ Setting `num_splits=1` restores exactness in the pure-attention control;
 the complete model with that setting has not been qualified. The backend
 default remains unchanged and the small H3 recipe keeps whole attention.
 
-## Learning from existing warmups
+## Learning from real denoising prefixes
+
+The opt-in `real_prefix` recipes move learning into actual request execution.
+The first real call to each DiT component runs whole attention and discovers
+its execution signatures. Before its second real call, all discovered
+candidate buffers and events are prepared together. Only the first 24 cores
+of each signature in that second call compare whole attention with one
+predicted split. Every layer executes one candidate; its output feeds the
+next layer. Both eager component results return to the real pipeline.
+Wan-A14B's two expert components learn separately at their own first two
+calls; these are not necessarily global denoising steps one and two.
+
+The two actual calls replace the graph owner's previous warmup opportunities.
+The generic adapter retains its original synchronization-debug probe with
+sampling disabled, then uses its existing capture synchronization to read
+events, gather maximum-rank durations and freeze the policy. H3 replaces its
+two eager warmups with the two actual calls. Both retain one original graph
+validation replay. The second actual eager result is returned after validation;
+the validation output does not substitute for it. Later calls directly replay
+the frozen graph. There is no additional probe forward, candidate graph or
+per-layer synchronization. The remaining layers after the sampling window
+use whole attention until the capture boundary completes the decision.
+
+Both `serial1` and `adaptive` in `prefix-*-matrix.json` use this same delayed
+capture path and shared output ownership. `serial1` disables candidate learning.
+The `legacy1` smoke arm additionally checks equivalence to the previous whole
+path at seeds 42/43/44. Qwen's audited first-request Python core count falls
+from 300 to 240; the latter includes two actual eager calls, the original
+debug probe and capture recording. H3 still records 150 Python core calls,
+but now executes two actual eager steps plus four actual graph steps, and
+retains its separate validation replay. Subsequent requests replay every step.
+These counts must be compared between matching controls, rather than counting
+capture recording as another executed model forward.
+
+A short prefix prioritizes one promising split to increase paired evidence
+and avoid allocating a second split's CE buffers. The original confidence
+thresholds remain: at least six complete valid cycles, 80% positive paired
+differences and the absolute/relative/noise margins described below. Rare
+signatures, insufficient fully queued samples and uncertain gains stay whole.
+Candidate generation remains a CPU proxy; odd widths remain eligible.
+No extra calls are manufactured to fill the sample budget.
+
+The 26-case matrix covers Qwen editing with one/two references, FLUX text and
+reference-image shapes, H3-Image from 512 through 4096, Wan-A14B from 9 through
+65 frames, and Wan-TI2V-5B at four video shapes. Broad validation is in progress;
+the earlier results below qualify the earlier warmup-sampling method.
+In particular, packed FA3 precision must be checked for every newly exercised
+layout; a numerical mismatch is a failed case, not an acceptable speedup.
+
+## Previous warmup-sampling prototype
 
 The opt-in `autotune` variant implements a graph-owned lazy experiment in
 `lazy_head_policy.py`. It observes only shapes reached by actual requests.
