@@ -23,6 +23,11 @@ class PrefilledPipeline(DirectPipeline):
             end = base + buffer.tensor.nbytes
             self.local_forward.append([op for op in operations if base <= op[0] < end])
             self.remote_forward.append([op for op in operations if not base <= op[0] < end])
+        # An optional schedule bounds prefetch to the attention currently ready
+        # on compute. Realize dependency handles at preparation, before trials.
+        self.admitted = [torch.cuda.Event() for _ in range(self.chunks - 1)]
+        for event in self.admitted:
+            event.record()
 
     def emit_on(self, args, stream):
         self.runtime.CUDART_CHECK(self.runtime.lib.cudaMemcpy2DAsync(*args, stream.cuda_stream))

@@ -182,7 +182,7 @@ def main():
                 "core_overlap_borrowed": lambda: scheduled(split, "stage-local"),
             }
             for variant in case.get("staging_variants", ()):
-                if variant not in ("overlap-return", "overlap-staging"):
+                if variant not in ("stage-gated", "overlap-return", "overlap-staging"):
                     raise ValueError(f"Unknown staging ablation: {variant}")
                 functions[f"core_{variant}_borrowed"] = lambda variant=variant: scheduled(split, variant)
             if case.get("staging_variants"):

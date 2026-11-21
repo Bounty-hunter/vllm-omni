@@ -157,7 +157,7 @@ class LazyHeadPolicy:
         )
 
         self.group, self.enabled = group, enabled
-        if schedule not in ("stage-local", "overlap-return", "overlap-staging"):
+        if schedule not in ("stage-local", "stage-gated", "overlap-return", "overlap-staging"):
             raise ValueError("Lazy learning requires an explicit local-staging schedule")
         self.schedule = schedule
         self.candidate_partition = None if candidate_partition is None else tuple(candidate_partition)

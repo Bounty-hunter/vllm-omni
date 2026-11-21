@@ -13,7 +13,9 @@ import torch.distributed as dist
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--schedule", choices=("original", "overlap-return", "overlap-staging"), default="original")
+    parser.add_argument(
+        "--schedule", choices=("original", "stage-gated", "overlap-return", "overlap-staging"), default="original"
+    )
     args = parser.parse_args()
     rank = int(os.environ["LOCAL_RANK"])
     torch.accelerator.set_device_index(rank)

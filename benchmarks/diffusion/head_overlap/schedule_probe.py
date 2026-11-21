@@ -11,6 +11,7 @@ ORIGINAL_CALL = PrefilledPipeline.__call__
 VARIANTS = {
     "old": (False, False, False),
     "stage-local": (True, False, False),
+    "stage-gated": (True, False, False),
     "early-peer": (False, True, False),
     "stage-early": (True, True, False),
     "stage-early-defer-local": (True, True, True),
@@ -124,6 +125,8 @@ def run(plan, variant):
     sources = []
     for group in range(plan.chunks):
         compute.wait_event(plan.ready[group])
+        if variant == "stage-gated" and group + 1 < plan.chunks:
+            plan.admitted[group].record(compute)
         if early and plan.overlap and group + 1 < plan.chunks:
             with torch.cuda.stream(plan.stream):
                 plan.submit_forward(group + 1)
@@ -133,6 +136,12 @@ def run(plan, variant):
         with torch.cuda.stream(plan.stream):
             if plan.overlap:
                 if not early and group + 1 < plan.chunks:
+                    if variant == "stage-gated":
+                        # Host enqueue order is not a cross-stream dependency
+                        # during graph replay. Wait for compute's admission of
+                        # this attention, never for its completion. This keeps
+                        # F(g+1) from running ahead during A(g-1)/local staging.
+                        plan.stream.wait_event(plan.admitted[group])
                     if comm_input:
                         # Distinct input buffers allow this local staging to
                         # run alongside the current attention. Its consumer
