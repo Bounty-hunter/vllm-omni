@@ -92,6 +92,40 @@ class NativePipeline(PrefilledPipeline):
         self.attention_kernel, self.metadata = kernel, metadata
 
 
+def prepare_plan(inputs, joint, pg, head_sizes, comm, kernel, metadata, slot_key, *, allocate=True):
+    """Bind an existing plan, or allocate it only at a shape-preparation boundary.
+
+    This does not execute attention or communication. Callers own stream ordering
+    and must prepare every candidate before sampling or capture begins.
+    """
+    q = inputs[0]
+    tensors = inputs + (() if joint is None else joint)
+    signature = (tuple(head_sizes), layout(tensors))
+    key = (q.device, pg.group_name, len(head_sizes), signature)
+    cached = _PLANS.get(key)
+    if cached is None:
+        if not allocate or torch.cuda.is_current_stream_capturing():
+            raise RuntimeError("CE plan was not prepared before sampling/capture")
+        if len(_PLANS) >= _PLAN_LIMIT:
+            raise RuntimeError("Destroy captured graphs and clear CE plans before adding more layouts")
+        plan = NativePipeline(inputs, joint, pg, len(head_sizes), comm, kernel, metadata, head_sizes=head_sizes)
+        _PLANS[key] = (signature, plan)
+    else:
+        plan = cached[1]
+        plan.bind(inputs, joint, kernel, metadata)
+    arena_key = (key, slot_key)
+    slot = _SLOT_ARENA.get(arena_key)
+    if slot is None:
+        if not allocate or torch.cuda.is_current_stream_capturing():
+            raise RuntimeError("CE output slot was not prepared before sampling/capture")
+        if len(_SLOT_ARENA) >= 128:
+            raise RuntimeError("The fixed-canvas experiment exceeded its output-slot budget")
+        tensor = plan.base_output.tensor
+        slot = _SLOT_ARENA[arena_key] = SymmetricBuffer(tuple(tensor.shape), tensor.dtype, tensor.device, pg)
+    plan.output = slot
+    return plan
+
+
 def clear():
     if _PLANS or _SLOT_ARENA:
         torch.accelerator.synchronize()

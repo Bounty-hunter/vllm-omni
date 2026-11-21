@@ -21,6 +21,8 @@ SCHEDULE = "old"
 GRAPH_KEY = None
 HEAD_PARTITION = None
 TIMING = None
+AUTOTUNE = False
+LEARNER = None
 
 
 def record(kind, **values):
@@ -47,6 +49,19 @@ def eager_blocks(model, hidden, kwargs):
     return hidden
 
 
+def graph_entry(entries):
+    if not AUTOTUNE:
+        return entries.get(GRAPH_KEY)
+    return next(
+        (
+            entry
+            for key, entry in entries.items()
+            if len(key) == 2 and key[0] == GRAPH_KEY and entry.learner is not None
+        ),
+        None,
+    )
+
+
 class BlockGraph:
     def __init__(self, model, hidden, kwargs):
         self.scalar = {key: value for key, value in kwargs.items() if not isinstance(value, torch.Tensor)}
@@ -56,12 +71,26 @@ class BlockGraph:
         self.stream = torch.cuda.current_stream()
         self.graph = torch.cuda.CUDAGraph()
         self.replays = 0
+        self.learner = None
+        if AUTOTUNE:
+            from lazy_head_policy import LazyHeadPolicy
+
+            from vllm_omni.diffusion.distributed.parallel_state import get_world_group
+
+            self.learner = LazyHeadPolicy(get_world_group().cpu_group)
+            self.learner.begin()
+        global LEARNER
+        LEARNER = self.learner
         # Initialize all kernels, events, symmetric allocations, and peer plans
         # before capture. The same compute stream owns eager and graph paths.
-        for _ in range(2):
-            reference = eager_blocks(model, self.hidden, self.kwargs())
-        reference = reference.clone()
+        reference = eager_blocks(model, self.hidden, self.kwargs()).clone()
+        if self.learner is not None:
+            self.learner.prepare()
+        eager_blocks(model, self.hidden, self.kwargs())
         torch.accelerator.synchronize()
+        if self.learner is not None:
+            self.learner.finish()
+            self.policy_key = self.learner.cache_key
         before = CAPTURE_CALLS
         with torch.cuda.graph(self.graph, stream=self.stream):
             self.output = eager_blocks(model, self.hidden, self.kwargs())
@@ -82,6 +111,7 @@ class BlockGraph:
             stream=self.stream.cuda_stream,
             eager_graph_bitwise_equal=True,
             allocated_mb=torch.accelerator.memory_allocated() / 2**20,
+            lazy_policy=None if self.learner is None else dict(stats=self.learner.stats, reports=self.learner.reports),
         )
 
     @staticmethod
@@ -136,9 +166,10 @@ def run_blocks(model, hidden, *, hints, control_scale, **kwargs):
     entries = getattr(model, "_hcms_block_graphs", None)
     if entries is None:
         entries = model._hcms_block_graphs = {}
-    entry = entries.get(GRAPH_KEY)
+    entry = graph_entry(entries)
     if entry is None:
-        entry = entries[GRAPH_KEY] = BlockGraph(model, hidden, kwargs)
+        entry = BlockGraph(model, hidden, kwargs)
+        entries[(GRAPH_KEY, entry.policy_key) if AUTOTUNE else GRAPH_KEY] = entry
     return entry(hidden, kwargs)
 
 
@@ -149,6 +180,12 @@ def install(pipeline_class):
     from schedule_probe import run as run_schedule
 
     from vllm_omni.diffusion.models.minimax_h3.minimax_h3_transformer import MiniMaxH3DiTModel
+
+    counters = {}
+    if os.environ.get("HCMS_LAZY_COUNTERS") == "1":
+        from execution_counters import install as install_counters
+
+        counters = install_counters()
 
     def scheduled_call(plan):
         return run_schedule(plan, SCHEDULE.removesuffix("-slots").replace("-shared", ""))
@@ -169,7 +206,11 @@ def install(pipeline_class):
 
         kwargs["fallback"] = fallback
         kwargs["head_partition"] = HEAD_PARTITION
-        result = original_native_run(*args, **kwargs)
+        if LEARNER is not None:
+            q, k, v, md, pg, _chunks, kernel = args
+            result = LEARNER.run(q, k, v, md, pg, kernel, streams=kwargs["streams"])
+        else:
+            result = original_native_run(*args, **kwargs)
         NATIVE_CALLS += 1
         CAPTURE_CALLS += int(capturing)
         return result
@@ -212,10 +253,11 @@ def install(pipeline_class):
 
     @functools.wraps(original_forward)
     def forward(self, request):
-        global MODE, TRACE, ACTIVE, SCHEDULE, GRAPH_KEY, HEAD_PARTITION, TIMING
+        global MODE, TRACE, ACTIVE, SCHEDULE, GRAPH_KEY, HEAD_PARTITION, TIMING, AUTOTUNE, LEARNER
         nonlocal audited, previous_canvas
         if request.is_dummy_run():
             return original_forward(self, request)
+        counters_before = dict(counters)
         ACTIVE = True
         extra = request.sampling_params.extra_args or {}
         MODE = extra["graph_mode"]
@@ -223,6 +265,8 @@ def install(pipeline_class):
         TRACE = bool(extra.get("trace", False))
         chunks = int(extra["chunks"])
         HEAD_PARTITION = tuple(extra["head_partition"]) if extra.get("head_partition") else None
+        AUTOTUNE = bool(extra.get("autotune", False))
+        LEARNER = None
         canvas = (request.sampling_params.height, request.sampling_params.width)
         if previous_canvas != canvas:
             torch.accelerator.synchronize()
@@ -270,14 +314,14 @@ def install(pipeline_class):
                 torch.cuda.profiler.start()
             dist.barrier()
         before = NATIVE_CALLS
-        graph = getattr(self.transformer, "_hcms_block_graphs", {}).get(GRAPH_KEY)
+        graph = graph_entry(getattr(self.transformer, "_hcms_block_graphs", {}))
         replays_before = graph.replays if graph else 0
         with region(f"request/{extra['label']}"):
             result = original_forward(self, request)
         calls = NATIVE_CALLS - before
         if MODE != "graph" and calls != 300:
             raise AssertionError(f"Expected 300 direct CE calls, got {calls}")
-        graph = getattr(self.transformer, "_hcms_block_graphs", {}).get(GRAPH_KEY)
+        graph = graph_entry(getattr(self.transformer, "_hcms_block_graphs", {}))
         if MODE == "graph" and graph is None:
             raise AssertionError("Graph mode did not create a graph")
         if MODE == "graph" and graph.replays - replays_before != 6:
@@ -303,10 +347,14 @@ def install(pipeline_class):
                 qkv=[list(p.inputs[0].shape) for p in active],
                 cache_hits=cache.hits,
                 cache_misses=cache.misses,
+                execution_counters={key: value - counters_before[key] for key, value in counters.items()},
                 output_slots=len(native_prefilled._SLOT_ARENA),
                 output_slot_bytes=sum(
                     slot.tensor.numel() * slot.tensor.element_size() for slot in native_prefilled._SLOT_ARENA.values()
                 ),
+                lazy_policy=None
+                if graph is None or graph.learner is None
+                else dict(stats=graph.learner.stats, reports=graph.learner.reports),
             )
         if TIMING is not None:
             torch.accelerator.synchronize()

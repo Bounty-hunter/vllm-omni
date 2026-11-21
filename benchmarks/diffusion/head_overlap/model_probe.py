@@ -14,7 +14,7 @@ import torch
 import torch.distributed as dist
 from torch import nn
 
-from vllm_omni.diffusion.cuda_graph import GraphedForward, clone_static
+from vllm_omni.diffusion.cuda_graph import GraphedForward, clone_static, kwargs_signature
 from vllm_omni.diffusion.distributed.parallel_state import get_world_group
 
 _ACTIVE = ContextVar("head_matrix_request", default=None)
@@ -25,24 +25,54 @@ class StableGraph(GraphedForward):
 
     @contextmanager
     def _warmup_stream(self):
+        learner = getattr(self.module, "learner", None)
+        if learner is not None:
+            learner.begin()
+            _ACTIVE.get()["learner"] = learner
         yield
 
     def _capture_graph(self, body):
         graph = torch.cuda.CUDAGraph()
+        learner = getattr(self.module, "learner", None)
+        if learner is not None:
+            # Replace torch.cuda.graph's entry synchronization, rather than
+            # adding a synchronization to the existing capture boundary.
+            torch.accelerator.synchronize()
+            learner.finish()
+            graph.capture_begin(pool=self._pool)
+            try:
+                outputs = body()
+            finally:
+                graph.capture_end()
+            if self._pool is None:
+                self._pool = graph.pool()
+            return graph, outputs
         with torch.cuda.graph(graph, pool=self._pool, stream=torch.cuda.current_stream(self.device)):
             outputs = body()
         if self._pool is None:
             self._pool = graph.pool()
         return graph, outputs
 
+    def _capture(self, key, *args, **kwargs):
+        entry = super()._capture(key, *args, **kwargs)
+        learner = getattr(self.module, "learner", None)
+        if learner is not None and entry is not None:
+            self._entries.pop(key)
+            self._entries[(kwargs_signature(learner.cache_key), key[1])] = entry
+        return entry
+
 
 class PackedForward(nn.Module):
-    def __init__(self, forward):
+    def __init__(self, forward, learner=None):
         super().__init__()
         self.body = forward
+        self.learner = learner
 
     def forward(self, packed_args, packed_kwargs):
-        return self.body(*packed_args, **packed_kwargs)
+        output = self.body(*packed_args, **packed_kwargs)
+        if self.learner is not None and self.learner.phase == "discover":
+            self.learner.prepare()
+        return output
 
 
 def record(**values):
@@ -76,9 +106,15 @@ def graph_call(original, graphs, component, *args, **kwargs):
     graph = graphs.get(state["variant"])
     reference = None
     if graph is None:
+        state["learner"] = None
         reference = original(*clone_static(args), **clone_static(kwargs))
+        learner = None
+        if state["autotune"]:
+            from lazy_head_policy import LazyHeadPolicy
+
+            learner = LazyHeadPolicy(get_world_group().cpu_group)
         graph = graphs[state["variant"]] = StableGraph(
-            PackedForward(original),
+            PackedForward(original, learner),
             device=torch.cuda.current_stream().device,
             max_entries=8,
             warmup_iters=2,
@@ -87,8 +123,15 @@ def graph_call(original, graphs, component, *args, **kwargs):
         )
         graph.output_type = type(reference)
     captures_before, calls_before = graph.captures, state["direct_calls"]
+    learner = graph.module.learner
+    if learner is not None and learner.phase == "frozen":
+        state["learner"] = learner
     with torch.cuda.nvtx.range(f"DiT/{component}/graph"):
-        result = graph(packed_args=args, packed_kwargs=kwargs)
+        result = graph(
+            variant=learner.cache_key if learner is not None and learner.phase == "frozen" else None,
+            packed_args=args,
+            packed_kwargs=kwargs,
+        )
     if isinstance(result, dict) and graph.output_type is not dict:
         result = graph.output_type(**result)
     if not graph.enabled or not graph.num_graphs:
@@ -139,6 +182,11 @@ def install(pipeline):
     from prefilled_probe import PrefilledPipeline
     from schedule_probe import run as scheduled
 
+    counters = {}
+    if os.environ.get("HCMS_LAZY_COUNTERS") == "1":
+        from execution_counters import install as install_counters
+
+        counters = install_counters()
     original_native = native.run
 
     def scheduled_call(plan):
@@ -170,7 +218,10 @@ def install(pipeline):
         before = state["fallbacks"]
         slot = (state["variant"], "borrowed") if state["borrow"] else None
         with native.output_slot(slot):
-            result = original_native(q, k, v, md, pg, chunks, kernel, **kwargs)
+            if state.get("learner") is not None:
+                result = state["learner"].run(q, k, v, md, pg, kernel, streams=kwargs["streams"])
+            else:
+                result = original_native(q, k, v, md, pg, chunks, kernel, **kwargs)
         state["direct_calls"] += int(before == state["fallbacks"])
         return result
 
@@ -257,6 +308,7 @@ def install(pipeline):
         compute.wait_stream(caller)
         token = None
         previous_chunks = native._SELECTED_CHUNKS
+        counters_before = dict(counters)
         try:
             with torch.cuda.stream(compute):
                 if request.is_dummy_run():
@@ -281,6 +333,7 @@ def install(pipeline):
                     direct_calls=0,
                     fallbacks=0,
                     shapes=set(),
+                    autotune=bool(extra.get("autotune", False)),
                 )
                 token = _ACTIVE.set(state)
                 native._SELECTED_CHUNKS = str(extra["chunks"])
@@ -323,6 +376,13 @@ def install(pipeline):
                         plans=len(native._PLANS),
                         output_slots=len(native._SLOT_ARENA),
                         output_slot_bytes=sum(slot.tensor.nbytes for slot in native._SLOT_ARENA.values()),
+                        execution_counters={key: value - counters_before[key] for key, value in counters.items()},
+                        lazy_policies={
+                            name: dict(stats=graph.module.learner.stats, reports=graph.module.learner.reports)
+                            for name, graphs in components.items()
+                            for variant, graph in graphs.items()
+                            if variant == state["variant"] and graph.module.learner is not None
+                        },
                     )
                 return result
         finally:
