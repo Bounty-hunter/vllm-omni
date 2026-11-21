@@ -159,6 +159,7 @@ def install(pipeline):
             return fallback(*args, **options)
 
         kwargs["fallback"] = counted_fallback
+        kwargs["head_partition"] = state["head_partition"]
         shape = (
             tuple(q.shape),
             tuple(q.stride()),
@@ -276,6 +277,7 @@ def install(pipeline):
                     mode=extra["graph_mode"],
                     schedule=schedule.removesuffix("-shared-slots"),
                     borrow=schedule.endswith("-slots"),
+                    head_partition=extra.get("head_partition"),
                     direct_calls=0,
                     fallbacks=0,
                     shapes=set(),
@@ -314,6 +316,8 @@ def install(pipeline):
                         mode=state["mode"],
                         direct_python_calls=state["direct_calls"],
                         fallbacks=state["fallbacks"],
+                        requested_head_partition=state["head_partition"],
+                        resident_head_partitions=sorted({plan.head_sizes for _, plan in native._PLANS.values()}),
                         qkv_shapes=sorted(state["shapes"]),
                         graph_stats=stats,
                         plans=len(native._PLANS),

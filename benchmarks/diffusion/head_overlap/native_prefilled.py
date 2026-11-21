@@ -38,14 +38,29 @@ def layout(tensors):
     return tuple((x.shape, x.stride(), x.dtype, x.device) for x in tensors)
 
 
+def partition_heads(heads, chunks, weights=None):
+    """Resolve an exact ratio once per eager/capture call; never round heads."""
+    if chunks <= 0:
+        raise ValueError("Head partition must contain at least one chunk")
+    weights = (1,) * chunks if weights is None else tuple(weights)
+    if len(weights) != chunks or any(
+        not isinstance(weight, int) or isinstance(weight, bool) or weight <= 0 for weight in weights
+    ):
+        raise ValueError("Head partition weights must be positive integers, one per chunk")
+    denominator = sum(weights)
+    if heads <= 0 or heads % denominator:
+        raise ValueError(f"Head count {heads} cannot be partitioned exactly with weights {weights}")
+    return tuple(heads * weight // denominator for weight in weights)
+
+
 class NativePipeline(PrefilledPipeline):
     @staticmethod
     def geometry(dest, dpitch, source, spitch, width, rows):
         return [dest, dpitch, source, spitch, width, rows, 4]
 
-    def __init__(self, inputs, joint, pg, chunks, comm, kernel, metadata):
+    def __init__(self, inputs, joint, pg, chunks, comm, kernel, metadata, *, head_sizes=None):
         self.attention_kernel, self.metadata = kernel, metadata
-        super().__init__(inputs, joint, pg, chunks, self.attend)
+        super().__init__(inputs, joint, pg, chunks, self.attend, head_sizes=head_sizes)
         self.base_output = self.output
         self.stream = comm
         tensors = inputs + (() if joint is None else joint)
@@ -99,6 +114,7 @@ def run(
     fallback,
     streams,
     prefetch_before_attention=False,
+    head_partition=None,
 ):
     inputs = (q, k, v)
     world = dist.get_world_size(pg)
@@ -146,6 +162,7 @@ def run(
     selected_chunks = chunks if _SELECTED_CHUNKS is None else int(_SELECTED_CHUNKS)
     if selected_chunks not in (1, chunks):
         raise ValueError("Native probe permits only the configured chunks or 1")
+    head_sizes = partition_heads(q.shape[2] // world, selected_chunks, head_partition)
     compute = torch.cuda.current_stream(q.device)
     key = (q.device, pg.group_name)
     if key not in streams:
@@ -154,7 +171,7 @@ def run(
     if producer != compute.cuda_stream:
         raise RuntimeError("head overlap buffers require a single compute stream")
     tensors = inputs + (() if joint is None else joint)
-    signature = (selected_chunks, layout(tensors))
+    signature = (head_sizes, layout(tensors))
     kernel_md = (
         None if md is None else replace(md, joint_query=None, joint_key=None, joint_value=None, extra=dict(md.extra))
     )
@@ -169,14 +186,14 @@ def run(
         if len(_PLANS) >= _PLAN_LIMIT:
             raise RuntimeError("Destroy captured graphs and clear CE plans before adding more layouts")
         print(
-            f"NATIVE_PREFILLED chunks={selected_chunks} q={tuple(q.shape)} "
+            f"NATIVE_PREFILLED chunks={selected_chunks} heads={head_sizes} q={tuple(q.shape)} "
             f"packed={md is not None and 'cu_seqlens_q' in md.extra}",
             flush=True,
         )
         # Allocations are collective and occur only before capture. Retain
         # every live layout until its graph owner explicitly calls clear().
         torch.accelerator.synchronize()
-        plan = NativePipeline(inputs, joint, pg, selected_chunks, comm, kernel, kernel_md)
+        plan = NativePipeline(inputs, joint, pg, selected_chunks, comm, kernel, kernel_md, head_sizes=head_sizes)
         _PLANS[plan_key] = (signature, plan)
     else:
         plan = cached[1]

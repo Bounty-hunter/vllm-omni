@@ -35,14 +35,16 @@ class PrefilledPipeline(DirectPipeline):
             self.ready[g].record(self.stream)
 
     def reverse_operations(self, g, out, peer):
-        width = self.chunk_heads * self.dim * out.element_size()
+        head_bytes = self.dim * out.element_size()
+        width = self.head_sizes[g] * head_bytes
+        head_offset = (self.head_offsets[g] + self.rank * self.head_sizes[g]) * head_bytes
         spitch = out.stride(1) * out.element_size()
         dpitch = self.output.tensor.stride(1) * out.element_size()
-        dest = self.output.handle.buffer_ptrs[peer] + self.joint_len * dpitch + (g * self.world + self.rank) * width
+        dest = self.output.handle.buffer_ptrs[peer] + self.joint_len * dpitch + head_offset
         source = out.data_ptr() + (self.joint_len + peer * self.local_seq) * spitch
         operations = [self.geometry(dest, dpitch, source, spitch, width, self.local_seq)]
         if self.joint_len:
-            dest = self.output.handle.buffer_ptrs[peer] + (g * self.world + self.rank) * width
+            dest = self.output.handle.buffer_ptrs[peer] + head_offset
             operations.append(self.geometry(dest, dpitch, out.data_ptr(), spitch, width, self.joint_len))
         return operations
 

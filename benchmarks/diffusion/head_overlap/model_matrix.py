@@ -35,6 +35,7 @@ def main():
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--rounds", type=int, default=8)
     parser.add_argument("--warmups", type=int, default=3)
+    parser.add_argument("--save-outputs", action="store_true", help="Save the first measured output for each variant")
     parser.add_argument("--profile", action="store_true", help="Mark a separate diagnostic run for Nsight capture")
     args = parser.parse_args()
     config = json.loads(args.config.read_text())
@@ -67,6 +68,8 @@ def main():
             runs = [("warm", name, index, 42) for name in variants for index in range(args.warmups)]
             for index in range(args.rounds):
                 names = list(variants)
+                offset = index % len(names)
+                names = names[offset:] + names[:offset]
                 if index % 2:
                     names.reverse()
                 runs += [("paired", name, index, 42) for name in names]
@@ -116,7 +119,7 @@ def main():
                 records.append(row)
                 print("MATRIX_RESULT " + json.dumps(row, default=str), flush=True)
                 save()
-                if phase == "paired" and index == 0:
+                if args.save_outputs and phase == "paired" and index == 0:
                     np.savez_compressed(args.out / f"{case['id']}-{name}.npz", *values)
     finally:
         omni.close()

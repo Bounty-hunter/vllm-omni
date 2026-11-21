@@ -50,22 +50,33 @@ class DirectPipeline:
     A call returns only after all incoming reverse writes have completed.
     """
 
-    def __init__(self, inputs, joint, group, chunks, kernel, *, overlap=True):
+    def __init__(self, inputs, joint, group, chunks, kernel, *, overlap=True, head_sizes=None):
         q = inputs[0]
         batch, local_seq, heads, dim = q.shape
-        assert batch == 1 and heads % (chunks * dist.get_world_size(group)) == 0
+        assert batch == 1 and heads % dist.get_world_size(group) == 0
         self.inputs, self.joint, self.kernel = inputs, joint, kernel
         self.overlap = overlap
         self.world, self.rank = dist.get_world_size(group), dist.get_rank(group)
         self.chunks, self.local_seq, self.dim = chunks, local_seq, dim
         self.joint_len = 0 if joint is None else joint[0].shape[1]
-        self.chunk_heads = heads // (self.world * chunks)
+        if head_sizes is None:
+            if heads % (self.world * chunks):
+                raise ValueError("Uniform groups must divide the per-rank head count")
+            head_sizes = (heads // (self.world * chunks),) * chunks
+        self.head_sizes = tuple(head_sizes)
+        if (
+            len(self.head_sizes) != chunks
+            or any(not isinstance(size, int) or isinstance(size, bool) or size <= 0 for size in self.head_sizes)
+            or sum(self.head_sizes) * self.world != heads
+        ):
+            raise ValueError("Positive group head counts must cover every per-rank head exactly once")
+        # Global head blocks include every rank's slice of each group. Build
+        # offsets once; forward and reverse must use the same permutation.
+        self.head_offsets = tuple(self.world * sum(self.head_sizes[:g]) for g in range(chunks))
         self.stream = torch.cuda.Stream()
         self.runtime = _ce_runtime()
         sequence = local_seq * self.world + self.joint_len
-        self.forward = [
-            SymmetricBuffer((3, sequence, self.chunk_heads, dim), q.dtype, q.device, group) for _ in range(chunks)
-        ]
+        self.forward = [SymmetricBuffer((3, sequence, size, dim), q.dtype, q.device, group) for size in self.head_sizes]
         self.output = SymmetricBuffer((1, self.joint_len + local_seq, heads, dim), q.dtype, q.device, group)
         self.ready = [torch.cuda.Event() for _ in range(chunks)]
         self.produced = [torch.cuda.Event() for _ in range(chunks)]
@@ -87,7 +98,8 @@ class DirectPipeline:
 
     def _forward_geometry(self, g):
         operations = []
-        width = self.chunk_heads * self.dim * self.inputs[0].element_size()
+        head_bytes = self.dim * self.inputs[0].element_size()
+        width = self.head_sizes[g] * head_bytes
         shared = self.forward[g]
         section_bytes = shared.tensor[0].nbytes
         for index, x in enumerate(self.inputs):
@@ -98,13 +110,13 @@ class DirectPipeline:
                     + index * section_bytes
                     + (self.joint_len + self.rank * self.local_seq) * width
                 )
-                source = x.data_ptr() + (g * self.world + peer) * width
+                source = x.data_ptr() + (self.head_offsets[g] + peer * self.head_sizes[g]) * head_bytes
                 operations.append(self.geometry(dest, width, source, source_pitch, width, self.local_seq))
                 if peer != self.rank:
                     self.outgoing_bytes += width * self.local_seq
             if self.joint is not None:
                 j = self.joint[index]
-                source = j.data_ptr() + (g * self.world + self.rank) * width
+                source = j.data_ptr() + (self.head_offsets[g] + self.rank * self.head_sizes[g]) * head_bytes
                 dest = shared.handle.buffer_ptrs[self.rank] + index * section_bytes
                 operations.append(
                     self.geometry(
@@ -128,20 +140,18 @@ class DirectPipeline:
             self.ready[g].record(self.stream)
 
     def submit_reverse(self, g, out):
-        width = self.chunk_heads * self.dim * out.element_size()
+        head_bytes = self.dim * out.element_size()
+        width = self.head_sizes[g] * head_bytes
+        head_offset = (self.head_offsets[g] + self.rank * self.head_sizes[g]) * head_bytes
         source_pitch = out.stride(1) * out.element_size()
         dest_pitch = self.output.tensor.stride(1) * out.element_size()
         with self.region(f"direct/R{g}/CE-direct-output"):
             for peer in range(self.world):
-                dest = (
-                    self.output.handle.buffer_ptrs[peer]
-                    + self.joint_len * dest_pitch
-                    + (g * self.world + self.rank) * width
-                )
+                dest = self.output.handle.buffer_ptrs[peer] + self.joint_len * dest_pitch + head_offset
                 source = out.data_ptr() + (self.joint_len + peer * self.local_seq) * source_pitch
                 self.emit(self.geometry(dest, dest_pitch, source, source_pitch, width, self.local_seq))
                 if self.joint_len:
-                    dest = self.output.handle.buffer_ptrs[peer] + (g * self.world + self.rank) * width
+                    dest = self.output.handle.buffer_ptrs[peer] + head_offset
                     self.emit(
                         self.geometry(
                             dest,
