@@ -273,6 +273,19 @@ class LazyHeadPolicy:
             joint_strategy="front" if md is None else md.joint_strategy,
         )
         self.stats["core_calls"] += 1
+        if self.phase == "frozen" and torch.cuda.is_current_stream_capturing():
+            key = hashlib.sha256(repr(signature).encode()).hexdigest()[:16]
+            audit = self.stats.setdefault("capture_plans", {}).setdefault(
+                key,
+                dict(
+                    chunks=plan.chunks,
+                    heads=plan.head_sizes,
+                    overlap_branch=plan.chunks > 1 and plan.overlap,
+                    output_pointer=plan.output.tensor.data_ptr(),
+                    calls=0,
+                ),
+            )
+            audit["calls"] += 1
         if event_pair is not None:
             event_pair[0].record()
             submitted = time.perf_counter()

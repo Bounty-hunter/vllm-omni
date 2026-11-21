@@ -347,7 +347,7 @@ def install(pipeline_class, *, video_pipeline=False):
                 vae_graph = self._vae_cuda_graph
                 minimum_area = self.min_generation_area
             if (
-                fp8 != int(os.environ["HCMS_EXPECTED_FP8"])
+                (fp8 == 0 if video_pipeline else fp8 != int(os.environ["HCMS_EXPECTED_FP8"]))
                 or vae_world != int(os.environ["HCMS_EXPECTED_VAE_WORLD"])
                 or minimum_area is not None
             ):
