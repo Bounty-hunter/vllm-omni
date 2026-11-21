@@ -64,13 +64,15 @@ def main():
                     else:
                         media[key] = [Image.open(path).convert("RGB") for path in paths]
                 prompt["multi_modal_data"] = media
-            variants = config["variants"]
+            variants = case.get("variants", config["variants"])
             runs = [("warm", name, index, 42) for name in variants for index in range(args.warmups)]
             for index in range(args.rounds):
                 names = list(variants)
                 offset = index % len(names)
                 names = names[offset:] + names[:offset]
-                if index % 2:
+                # Reverse after a complete rotation cycle. Reversing every
+                # other round pins even-sized variant sets to half the slots.
+                if (index // len(names)) % 2:
                     names.reverse()
                 runs += [("paired", name, index, 42) for name in names]
             runs += [("correctness", name, seed - 43, seed) for seed in (43, 44) for name in variants]
@@ -105,6 +107,7 @@ def main():
                 row = dict(
                     case=case["id"],
                     variant=name,
+                    variant_config=variants[name],
                     phase=phase,
                     index=index,
                     seed=seed,
