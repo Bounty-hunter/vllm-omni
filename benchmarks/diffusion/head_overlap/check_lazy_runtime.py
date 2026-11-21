@@ -2,6 +2,8 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 """Fast scheduled GPU API checks, outside model inference or policy learning."""
 
+import importlib
+
 import torch
 from execution_counters import install
 from lazy_head_policy import LazyHeadPolicy
@@ -10,6 +12,15 @@ from lazy_head_policy import LazyHeadPolicy
 def main():
     counters = install()
     policy = LazyHeadPolicy(None)
+    importlib.import_module("vllm_omni.diffusion.attention.parallel.head_overlap")
+    from native_prefilled import layout
+
+    from vllm_omni.diffusion.cuda_graph import clone_static
+
+    prefix = torch.empty(1, 1100, 32, 128)[:, :17].clone()
+    captured_prefix = clone_static(prefix)
+    assert prefix.stride() != captured_prefix.stride()
+    assert layout((prefix,)) == layout((captured_prefix,))
     assert policy.sms > 0 and policy.identity[-1]
     plain = torch.cuda.Event()
     timer = torch.cuda.Event(enable_timing=True)

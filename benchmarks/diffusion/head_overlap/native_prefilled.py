@@ -35,7 +35,10 @@ def output_slot(key):
 
 
 def layout(tensors):
-    return tuple((x.shape, x.stride(), x.dtype, x.device) for x in tensors)
+    # Import at first layout preparation, after opt-in counters are installed.
+    from lazy_head_policy import canonical_strides
+
+    return tuple((x.shape, canonical_strides(x), x.dtype, x.device) for x in tensors)
 
 
 def partition_heads(heads, chunks, weights=None):

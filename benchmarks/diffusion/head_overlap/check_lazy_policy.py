@@ -6,7 +6,7 @@ from collections import Counter
 from dataclasses import dataclass
 from types import SimpleNamespace
 
-from lazy_head_policy import candidate_index, candidates, choose, metadata_spec, qualified_cycles
+from lazy_head_policy import candidate_index, candidates, choose, metadata_spec, qualified_cycles, tensor_spec
 
 
 class TensorLayout:
@@ -33,6 +33,16 @@ class Metadata:
 
 
 def main():
+    def attention_layout(batch_stride, row_stride):
+        return SimpleNamespace(
+            shape=(1, 17, 32, 128),
+            dtype="bf16",
+            device=SimpleNamespace(type="cuda"),
+            stride=lambda: (batch_stride, row_stride, 128, 1),
+        )
+
+    assert tensor_spec(attention_layout(1100 * 4096, 4096)) == tensor_spec(attention_layout(17 * 4096, 4096))
+    assert tensor_spec(attention_layout(17 * 4096, 4096)) != tensor_spec(attention_layout(17 * 12288, 12288))
     first = Metadata(Packed(9248, TensorLayout()), {"max_seqlen": 9248})
     same = Metadata(Packed(9248, TensorLayout()), {"max_seqlen": 9248})
     assert metadata_spec(first) == metadata_spec(same) and metadata_spec(first)[1]

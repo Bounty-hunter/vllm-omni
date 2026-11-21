@@ -18,8 +18,18 @@ from importlib.metadata import version
 from execution_counters import observe_core
 
 
+def canonical_strides(value):
+    strides = list(value.stride())
+    # Batch-one attention never addresses another batch. Prefix-cache clone()
+    # can preserve this unused pitch whereas graph input clones canonicalize it.
+    # Keep all sequence/head strides, including fused V's threefold row pitch.
+    if len(value.shape) == 4 and value.shape[0] == 1:
+        strides[0] = 0
+    return tuple(strides)
+
+
 def tensor_spec(value):
-    return tuple(value.shape), tuple(value.stride()), str(value.dtype), value.device.type
+    return tuple(value.shape), canonical_strides(value), str(value.dtype), value.device.type
 
 
 def metadata_spec(value):
@@ -211,7 +221,10 @@ class LazyHeadPolicy:
         )
         if entry is None:
             if self.phase != "discover":
-                raise RuntimeError("An undiscovered execution signature reached sampling/capture")
+                raise RuntimeError(
+                    f"Undiscovered core layout in {self.phase}: actual={signature[1:]}; "
+                    f"known={[key[1:] for key in self.entries]}"
+                )
             if len(self.entries) >= 16:
                 raise RuntimeError("Graph-owned lazy policy signature budget exceeded")
             tokens = q.shape[1] * dist.get_world_size(pg) + (0 if joint is None else joint[0].shape[1])
