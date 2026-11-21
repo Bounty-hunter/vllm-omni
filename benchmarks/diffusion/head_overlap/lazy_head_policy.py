@@ -306,6 +306,10 @@ class LazyHeadPolicy:
         for entry in self.entries.values():
             # No extra forward is manufactured when this signature is rare.
             slots = slots_for(entry)
+            if sample_limit is not None:
+                # A short real prefix prioritizes one promising split:
+                # more paired evidence and one fewer resident CE allocation.
+                entry.choices = entry.choices[:2]
             if slots < 7 * len(entry.choices):
                 entry.choices = entry.choices[:2]
             if slots < 7 * len(entry.choices):

@@ -52,10 +52,37 @@
       }
     },
     {
+      "id": "flux-1024-text-real-prefix",
+      "sampling": {
+        "height": 1024,
+        "width": 1024,
+        "num_inference_steps": 4,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      }
+    },
+    {
       "id": "flux-1024-ref1-real-prefix",
       "sampling": {
         "height": 1024,
         "width": 1024,
+        "num_inference_steps": 4,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      },
+      "media": {
+        "reference_image": [
+          "tests/assets/qwen_image_edit/qwen_image_edit_2511_test1.png"
+        ]
+      }
+    },
+    {
+      "id": "flux-2048-ref1-real-prefix",
+      "sampling": {
+        "height": 2048,
+        "width": 2048,
         "num_inference_steps": 4,
         "guidance_scale": 1.0,
         "true_cfg_scale": 1.0,

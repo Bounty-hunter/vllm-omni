@@ -89,6 +89,19 @@
         "num_outputs_per_prompt": 1,
         "fps": 16
       }
+    },
+    {
+      "id": "wan14b-480x832-f65-real-prefix",
+      "sampling": {
+        "height": 480,
+        "width": 832,
+        "num_frames": 65,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1,
+        "fps": 16
+      }
     }
   ],
   "measurement": {
