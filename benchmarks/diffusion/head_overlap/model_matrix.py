@@ -53,6 +53,9 @@ def main():
     parser.add_argument("--profile", action="store_true", help="Mark a separate diagnostic run for Nsight capture")
     args = parser.parse_args()
     config = json.loads(args.config.read_text())
+    for case in config["cases"]:
+        # Reject online-only request fields before expensive model loading.
+        OmniDiffusionSamplingParams(**case["sampling"])
     args.out.mkdir(parents=True, exist_ok=True)
     engine = dict(config["engine"], model=args.model)
     records = []

@@ -58,7 +58,13 @@
         "num_frames": 33,
         "fps": 24,
         "guidance_scale": 6.0,
-        "flow_shift": 5.0,
+        "extra_args": {
+          "flow_shift": 5.0
+        },
+        "return_frames": true,
+        "output_type": "np"
+      },
+      "prompt": {
         "negative_prompt": "Negative prompt for benchmarking diffusion models"
       }
     }
@@ -75,6 +81,6 @@
     "paired_audit": false,
     "selection": "Real denoising call one discovers; only first24 same-signature cores of call two sample. Return both eager outputs to the actual pipeline, then freeze at existing capture sync. Both controls share the delayed capture path. No exploration in auxiliary sync probe or replay."
   },
-  "ci_source": "tests\\dfx\\perf\\tests\\test_hunyuanvideo15_t2v_vllm_omni.json",
-  "deployment_changes": "Offline batch1; FP8 DiT, FA3, Ulysses CE overlap, VAE parallel; no Cache-DiT/profiler."
+  "ci_source": "tests/dfx/perf/tests/test_hunyuanvideo15_t2v_vllm_omni.json",
+  "deployment_changes": "Offline decoded frames (no HTTP/MP4 mux); batch1 FP8 DiT, FA3, Ulysses CE, VAE parallel; no Cache-DiT/profiler."
 }

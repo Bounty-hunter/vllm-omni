@@ -59,13 +59,15 @@
         "num_inference_steps": 8,
         "num_frames": 107,
         "fps": 24,
-        "flow_shift": 12.0,
         "extra_args": {
           "task": "t2va",
           "duration": 4.0,
           "aspect_ratio": "1:1",
-          "audio_flow_shift": 3.0
-        }
+          "audio_flow_shift": 3.0,
+          "flow_shift": 12.0
+        },
+        "return_frames": true,
+        "output_type": "np"
       }
     }
   ],
@@ -82,6 +84,6 @@
     "selection": "Real denoising call one discovers; only first24 same-signature cores of call two sample. Return both eager outputs to the actual pipeline, then freeze at existing capture sync. Both controls share the delayed capture path. No exploration in auxiliary sync probe or replay."
   },
   "ci_source": "Non-CI small smoke; H3 aligns four seconds/96 frames to 107 frames.",
-  "deployment_changes": "Offline batch1; FP8 DiT, FA3, Ulysses CE overlap, VAE parallel; no Cache-DiT/profiler.",
+  "deployment_changes": "Offline decoded frames (no HTTP/MP4 mux); batch1 FP8 DiT, FA3, Ulysses CE, VAE parallel; no Cache-DiT/profiler.",
   "require_audio": true
 }
