@@ -121,6 +121,10 @@ def main():
             )
             serial_split.overlap = False
             transport = NativePipeline(inputs, joint, pg, 1, comm, lambda q, k, v, md: q, packed_md, **placement)
+            split_transport = NativePipeline(
+                inputs, joint, pg, 2, comm, lambda q, k, v, md: q, packed_md, head_sizes=head_sizes, **placement
+            )
+            split_transport.overlap = False
 
             def attention_whole():
                 return kernel(*packed, None)
@@ -128,21 +132,21 @@ def main():
             def attention_split():
                 return tuple(kernel(*part, None) for part in parts)
 
-            def peer_forward():
-                transport.enter.record(stream)
+            def peer_forward(plan=transport, group=0):
+                plan.enter.record(stream)
                 with torch.cuda.stream(comm):
-                    comm.wait_event(transport.enter)
-                    transport.submit_forward(0)
-                stream.wait_event(transport.ready[0])
+                    comm.wait_event(plan.enter)
+                    plan.submit_forward(group)
+                stream.wait_event(plan.ready[group])
 
-            def peer_reverse():
-                transport.enter.record(stream)
+            def peer_reverse(plan=transport, group=0):
+                plan.enter.record(stream)
                 with torch.cuda.stream(comm):
-                    comm.wait_event(transport.enter)
-                    transport.submit_reverse(0, transport.parts[0][0])
-                    transport.output.handle.barrier()
-                    transport.done.record(comm)
-                stream.wait_event(transport.done)
+                    comm.wait_event(plan.enter)
+                    plan.submit_reverse(group, plan.parts[group][0])
+                    plan.output.handle.barrier()
+                    plan.done.record(comm)
+                stream.wait_event(plan.done)
 
             functions = {
                 "attention_whole": attention_whole,
@@ -151,7 +155,13 @@ def main():
                 "attention_last": lambda: kernel(*parts[1], None),
                 "peer_forward": peer_forward,
                 "peer_reverse": peer_reverse,
+                "peer_forward_first": lambda: peer_forward(split_transport, 0),
+                "peer_forward_last": lambda: peer_forward(split_transport, 1),
+                "peer_reverse_first": lambda: peer_reverse(split_transport, 0),
+                "peer_reverse_last": lambda: peer_reverse(split_transport, 1),
                 "transport_whole_owned": lambda: scheduled(transport, "old").clone(),
+                "transport_whole_borrowed": lambda: scheduled(transport, "old"),
+                "transport_split_serial_borrowed": lambda: scheduled(split_transport, "stage-local"),
                 "core_whole_owned": lambda: scheduled(whole, "old").clone(),
                 "core_whole_borrowed": lambda: scheduled(whole, "old"),
                 "core_split_serial_owned": lambda: scheduled(serial_split, "stage-local").clone(),
@@ -172,6 +182,13 @@ def main():
                 torch.accelerator.synchronize()
                 if name.startswith("core_"):
                     torch.testing.assert_close(output, expected, rtol=0, atol=0)
+                if name.startswith("transport_"):
+                    identity = inputs[0]
+                    if joint is not None:
+                        identity = torch.cat(
+                            (joint[0], identity) if joint_strategy == "front" else (identity, joint[0]), dim=1
+                        )
+                    torch.testing.assert_close(output, identity, rtol=0, atol=0)
                 graphs[name] = (graph, output)
             torch.testing.assert_close(
                 torch.cat(graphs["attention_split_serial"][1], dim=2),
@@ -229,6 +246,9 @@ def main():
                 split_attention_tax_us=tax,
                 ideal_hideable_peer_us=hideable,
                 ideal_hideable_minus_split_tax_us=hideable - tax,
+                hideable_using_measured_chunks_us=min(medians["attention_first"], medians["peer_forward_last"])
+                + min(medians["attention_last"], medians["peer_reverse_first"]),
+                split_transport_tax_us=medians["transport_split_serial_borrowed"] - medians["transport_whole_borrowed"],
                 measured_core_saving_us=saving,
                 measured_core_owned_saving_us=medians["core_whole_owned"] - medians["core_overlap_owned"],
                 measured_core_borrowed_saving_us=medians["core_whole_borrowed"] - medians["core_overlap_borrowed"],
@@ -244,6 +264,8 @@ def main():
                     "Unequal hideable estimate scales whole peer times by head widths; "
                     "fixed chunk costs and interference are excluded",
                     "All core variants retain every required peer fence; no profiler is started",
+                    "Each isolated reverse-chunk timing includes its own completion fence; "
+                    "the real pipeline uses one final reverse completion fence",
                 ],
             )
             result["records"].append(row)
@@ -257,9 +279,9 @@ def main():
             graphs.clear()
             del graph, output
             functions.clear()
-            for plan in (whole, split, serial_split, transport):
+            for plan in (whole, split, serial_split, transport, split_transport):
                 plan.kernel = plan.attention_kernel = None
-            whole = split = serial_split = transport = None
+            whole = split = serial_split = transport = split_transport = None
             from vllm_omni.diffusion.distributed.a2a_permute import (
                 clear_a2a_permute_workspaces,
             )
