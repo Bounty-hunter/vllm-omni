@@ -25,6 +25,10 @@ so its actual path was single-branch. The earlier 'true CFG 4' description
 was incorrect; timing samples are unchanged. No approximate step cache is enabled.
 H3 uses its native VAE tile parallelism over SP ranks; the other families request
 VAE patch parallelism 2. H3 SP4 also uses text-encoder TP4; SP2 uses TE TP2.
+Runtime clarification (2026-11-21): Qwen and FLUX registry logs explicitly
+ignore the requested VAE2 because these pipeline VAEs lack DistributedVaeMixin.
+Their measurements must not be described as effective VAE2. Wan's distributed
+VAE path is supported. See COVERAGE-RESULTS.txt for the expanded runtime audit.
 Quantized rows use online FP8 DiT linears with BF16 attention/CE.
 
 All complete cases (milliseconds; positive reduction means lower latency)

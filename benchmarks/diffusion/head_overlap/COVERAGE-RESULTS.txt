@@ -1,0 +1,129 @@
+Issue #10448: broad shape coverage and conservative selection, 2026-11-21
+
+Scope and method
+Explicit offline fixed-canvas CUDA graphs, batch/concurrency1; no production default or HTTP claim.
+Selected defaults to original whole settings. Only frozen cases override it. Small fallback does not claim uniform splitting is nonregressing.
+Serial1 owns attention output. Serial_borrowed and split candidates share graph-scoped output slots. Compare to both whole controls.
+NVIDIA L20X, NV18 peers; torch2.14.0+cu130, vLLM0.34.0. No new profiler trace.
+FLUX.2-klein-4B is BF16 because the current FP8 path is unsupported.
+Qwen-Image-Edit-2511, Wan2.2-T2V-A14B and H3-Image use FP8 DiT linears with BF16 attention/CE.
+SP degrees: FLUX2, Qwen2, Wan-A14B4, H3-Image4 (encoder TP4).
+FLUX/Qwen REQUEST VAE2 but registry logs explicitly ignore it: these pipelines lack DistributedVaeMixin in this revision.
+Wan-A14B configures distributed tiled VAE4; H3-Image audits VAE world4. Tile utilization is not measured for every shape.
+Steps: FLUX4, Qwen8, Wan8, H3 six PDD steps. True CFG is1 for these cases.
+H3 reduced canvases explicitly set min_generation_area=None; this does not qualify small-canvas image quality.
+Screen:3 warmups,8 rotating/reversed rounds. Confirm:5 warmups,30 rounds. Both add seeds43/44.
+Variant order reverses only after a full rotation cycle, including even-sized variant sets.
+Confirmation audit I/O is excluded from paired requests; warm/post-correctness audits verify unchanged capture counts.
+All accepted request outputs match the whole reference bitwise at all three seeds.
+Accepted complete requests: 2578; unique accepted workload cases: 21.
+These totals exclude the failed H3-small screen and all numerical diagnostic requests.
+
+Selected confirmation results
+case | heads/rank | actual output | whole ms | selected ms | vs whole | vs borrowed whole | wins vs whole/borrowed | estimated peer/request
+flux-512-text | [12] | [[512, 512, 3]] | 135.228 | 134.838 | same whole settings (A/A) | n/a | 16/30, n/a | 5.21%
+flux-1024-ref1 | [2, 10] | [[1024, 1024, 3]] | 926.913 | 911.597 | +1.65% | +1.14% | 29/30, 28/30 | 3.12%
+flux-2048-ref1 | [6, 6] | [[2048, 2048, 3]] | 2120.482 | 2098.865 | +1.02% | +0.87% | 29/30, 29/30 | 2.33%
+flux-3072-ref1 | [6, 6] | [[3072, 3072, 3]] | 4954.745 | 4916.068 | +0.78% | +0.57% | 30/30, 29/30 | 1.68%
+qwen-edit-512-ref1 | [12] | [[512, 512, 3]] | 888.834 | 889.150 | same whole settings (A/A) | n/a | 17/30, n/a | 6.94%
+qwen-edit-1024-ref1 | [2, 10] | [[1024, 1024, 3]] | 1368.900 | 1325.211 | +3.19% | +2.53% | 30/30, 30/30 | 6.32%
+qwen-edit-2048-ref1 | [4, 8] | [[2048, 2048, 3]] | 4229.217 | 4147.682 | +1.93% | +1.57% | 30/30, 30/30 | 4.45%
+wan14b-256x448-f9 | [10] | [[1, 9, 256, 448, 3]] | 400.642 | 398.482 | same whole settings (A/A) | n/a | 16/30, n/a | 8.12%
+wan14b-480x832-f17 | [4, 6] | [[1, 17, 480, 832, 3]] | 1144.997 | 1108.869 | +3.16% | +3.06% | 29/30, 29/30 | 9.49%
+wan14b-480x832-f33 | [2, 8] | [[1, 33, 480, 832, 3]] | 2148.502 | 2089.903 | +2.73% | +2.33% | 29/30, 28/30 | 8.80%
+h3-512 | [14] | [[512, 512, 3]] | 194.204 | 193.543 | same whole settings (A/A) | n/a | 16/30, n/a | not controlled
+h3-1024 | [14] | [[1024, 1024, 3]] | 324.902 | 324.860 | same whole settings (A/A) | n/a | 13/30, n/a | not controlled
+h3-1536 | [14] | [[1536, 1536, 3]] | 448.387 | 449.242 | same whole settings (A/A) | n/a | 12/30, n/a | not controlled
+h3-2048 | [14] | [[2048, 2048, 3]] | 678.524 | 678.416 | same whole settings (A/A) | n/a | 16/30, n/a | not controlled
+h3-2560 | [14] | [[2560, 2560, 3]] | 940.086 | 939.276 | same whole settings (A/A) | n/a | 14/30, n/a | not controlled
+h3-3k | [7, 7] | [[3072, 3072, 3]] | 1399.508 | 1341.796 | +4.12% | +3.53% | 30/30, 30/30 | 11.46%
+h3-4k | [4, 10] | [[4096, 4096, 3]] | 2726.458 | 2636.738 | +3.29% | +2.87% | 30/30, 30/30 | 10.31%
+
+Paired evidence (ms saved; descriptive95% paired bootstrap interval)
+flux-512-text: whole 0.442 [-1.8234653398394585, 1.7445646226406097]; borrowed None None; range 132.140-145.486
+flux-1024-ref1: whole 16.305 [13.172122649848461, 19.95994057506323]; borrowed 9.627384133636951 [6.897800602018833, 13.413351029157639]; range 903.532-923.961
+flux-2048-ref1: whole 24.112 [18.78026593476534, 27.168340981006622]; borrowed 18.76083016395569 [14.393342658877373, 23.33452831953764]; range 2086.927-2111.943
+flux-3072-ref1: whole 35.165 [31.01733047515154, 41.800154373049736]; borrowed 30.475473031401634 [23.669731803238392, 33.105538226664066]; range 4907.199-4942.636
+qwen-edit-512-ref1: whole 2.226 [-1.635589636862278, 4.178420640528202]; borrowed None None; range 882.428-915.787
+qwen-edit-1024-ref1: whole 43.797 [37.611013278365135, 46.59005906432867]; borrowed 33.13194680958986 [29.551739804446697, 37.00633812695742]; range 1314.470-1342.855
+qwen-edit-2048-ref1: whole 81.485 [75.78583713620901, 93.40162482112646]; borrowed 65.06183184683323 [60.32811850309372, 70.682093501091]; range 4118.507-4168.964
+wan14b-256x448-f9: whole 2.585 [-4.298307932913303, 11.658847332000732]; borrowed None None; range 379.150-510.492
+wan14b-480x832-f17: whole 36.637 [29.029165394604206, 42.94105898588896]; borrowed 35.1614011451602 [26.312751695513725, 43.421694077551365]; range 1097.379-1200.818
+wan14b-480x832-f33: whole 55.913 [51.53968371450901, 63.5821707546711]; borrowed 52.4379201233387 [48.500324599444866, 68.62347573041916]; range 2066.054-2316.771
+h3-512: whole 0.226 [-0.5875034257769585, 1.0863207280635834]; borrowed None None; range 190.655-204.217
+h3-1024: whole -0.164 [-1.4685234054923058, 0.4603015258908272]; borrowed None None; range 321.377-330.188
+h3-1536: whole -1.043 [-2.2993069142103195, 0.49454718828201294]; borrowed None None; range 444.245-506.239
+h3-2048: whole 0.082 [-0.5624322220683098, 1.623404212296009]; borrowed None None; range 672.535-686.922
+h3-2560: whole -0.159 [-1.6166046261787415, 2.5375541299581528]; borrowed None None; range 931.922-948.842
+h3-3k: whole 58.864 [55.806633085012436, 62.01011501252651]; borrowed 49.59782026708126 [45.11976055800915, 51.69298406690359]; range 1331.711-1370.376
+h3-4k: whole 88.042 [84.99009441584349, 93.73742155730724]; borrowed 78.43114715069532 [71.8975504860282, 81.99265133589506]; range 2621.227-2659.464
+
+Communication and splitting controls
+These are isolated CUDA-event controls,30 rounds x16 graph replays, maximum over participating ranks.
+C_peer includes peer forward/reverse and required fences; C_peer/(A_whole+C_peer) is an isolated core ratio.
+Request communication budget is only ESTIMATED as C_peer*calls/E2E. It is not all communication or an in-request profile.
+Declared QKV pitches are control layouts; actual model kernels may have additional cache/layout interactions.
+H3 controls use packed varlen FA3; the raw global dense entrypoint metadata does not describe H3's packed path.
+Whole-borrowed versus split-borrowed and whole-owned versus split-owned keep output ownership consistent.
+Small selected=whole controls still time an equal split for diagnosis; their split cost is not charged by the selected recipe.
+case | heads | A_whole us | C_peer us | core peer fraction | split tax us | estimated hideable us | same-borrowed core saving us
+flux/flux-512-text | [6, 6] | 54.00 | 70.48 | 56.62% | +4.84 | 35.24 | +8.97
+flux/flux-1024-ref1 | [2, 10] | 1977.00 | 289.02 | 12.75% | +8.44 | 182.28 | +95.29
+flux/flux-2048-ref1 | [6, 6] | 6668.14 | 494.33 | 6.90% | -2.92 | 247.17 | +186.62
+flux/flux-3072-ref1 | [6, 6] | 20325.79 | 834.11 | 3.94% | -186.58 | 417.06 | +241.57
+qwen/qwen-edit-512-ref1 | [6, 6] | 242.80 | 128.55 | 34.62% | +5.43 | 64.27 | +39.58
+qwen/qwen-edit-1024-ref1 | [2, 10] | 595.11 | 180.21 | 23.24% | +6.92 | 109.21 | +96.24
+qwen/qwen-edit-2048-ref1 | [4, 8] | 3917.36 | 391.74 | 9.09% | +27.62 | 220.60 | +59.64
+wan14b/wan14b-256x448-f9 | [5, 5] | 23.14 | 101.67 | 81.46% | +19.83 | 38.66 | -26.10
+wan14b/wan14b-480x832-f17 | [4, 6] | 445.16 | 339.42 | 43.26% | +1.30 | 184.74 | +158.70
+wan14b/wan14b-480x832-f33 | [2, 8] | 1499.84 | 591.09 | 28.27% | -3.59 | 368.16 | +306.72
+h3-policy/h3-3k | [7, 7] | 870.98 | 534.50 | 38.03% | +2.87 | 267.25 | +246.14
+h3-policy/h3-4k | [4, 10] | 2953.53 | 937.06 | 24.09% | +32.35 | 565.14 | +307.37
+
+Interpretation and limits
+The two-group pipeline leaves the first forward exchange and final reverse exchange exposed. Total peer bytes are unchanged.
+For first-head fraction x, a simple hideable-time estimate is min(A0,(1-x)*F)+min(A1,x*R).
+F is the whole input exchange and R the whole output exchange. Fixed fence/copy costs and interference are omitted from that estimate.
+A smaller first group can cover a larger remaining input exchange if A0 is sufficiently long. QKV input and output traffic are asymmetric.
+Attention splitting also changes kernel tiling, scheduling waves and possibly SplitKV. Even widths are useful candidates, not a universal rule.
+Communication grows linearly with tokens while attention grows roughly quadratically. Larger is not monotonically better in percentage E2E gain.
+Small shapes retain the original whole settings. The A/A timing differences measure noise and must not be called optimization gains.
+All eight small/mid-size A/A paired bootstrap intervals span zero; their median-ratio differences range from -0.19% to +0.54%.
+This report freezes explicit cases; it does not implement or qualify a general production shape selector.
+Quantization affects DiT linear weights; attention and direct CE buffers remain BF16 in these experiments.
+The request budget excludes other communication such as encoder TP and VAE parallel exchanges.
+
+Small-shape precision limit
+The initial SP4/1024 split screen failed exact RGB. Whole-owned/borrowed agree; pure packed FA3 split arithmetic differs under auto SplitKV at1056. Fixed num_splits1 restores pure-attention equality. No backend default changed; small H3 selected stays whole.
+The failed H3-small run is preserved with exit1 and clean restoration; it is excluded from accepted performance rows.
+The diagnostic's exit0 means successful diagnosis, not that every compared output was equal.
+No RGB tolerance was relaxed and no failed sample was removed from a performance average.
+The fixed num_splits experiment was only a pure-attention diagnostic; a full-model fixed1 repair is not claimed.
+The initial full-model diagnostic driver failed because its main guard was missing; the corrected r2 run completed.
+Diagnostic scripts, logs, hashes and numerical outputs are in coverage-diagnostics.tar.gz and coverage-diagnostics.json.
+Full diagnostic NPZ arrays remain in the remote diagnostic directories; their hashes are in the compact archive manifest.
+A full 20MB archive including NPZ arrays is retained locally at outputs/issue-10448-coverage-20261121/diagnostics.tar.gz.
+
+Evidence and source identities
+flux: exit0, source 1faedeef8ebf9613184cebc701a14f079b6f8018, /data/dyy/logs/hcms-10448-flux-coverage-20261121
+  VAE runtime/config audit: {"requested": 2, "patch_parallel_enabled": false, "configured_parallel_size": 1, "evidence": ["(DiffusionWorker_SP0 pid=268038) WARNING 11-21 10:55:47 [registry.py:636] vae_patch_parallel_size=2 is set but VAE patch parallelism is NOT enabled for Flux2KleinPipeline; ignoring.", "(DiffusionWorker_SP1 pid=268039) WARNING 11-21 10:55:47 [registry.py:636] vae_patch_parallel_size=2 is set but VAE patch parallelism is NOT enabled for Flux2KleinPipeline; ignoring."], "caveat": "Configured distributed VAE does not establish tile utilization on every frame/shape."}
+qwen: exit0, source 1faedeef8ebf9613184cebc701a14f079b6f8018, /data/dyy/logs/hcms-10448-qwen-coverage-20261121
+  VAE runtime/config audit: {"requested": 2, "patch_parallel_enabled": false, "configured_parallel_size": 1, "evidence": ["(DiffusionWorker_SP0 pid=292940) WARNING 11-21 11:08:16 [registry.py:636] vae_patch_parallel_size=2 is set but VAE patch parallelism is NOT enabled for QwenImageEditPlusPipeline; ignoring.", "(DiffusionWorker_SP1 pid=292941) WARNING 11-21 11:08:16 [registry.py:636] vae_patch_parallel_size=2 is set but VAE patch parallelism is NOT enabled for QwenImageEditPlusPipeline; ignoring."], "caveat": "Configured distributed VAE does not establish tile utilization on every frame/shape."}
+wan14b: exit0, source 1faedeef8ebf9613184cebc701a14f079b6f8018, /data/dyy/logs/hcms-10448-wan14b-coverage-20261121
+  VAE runtime/config audit: {"requested": 4, "patch_parallel_enabled": true, "configured_parallel_size": 4, "evidence": ["(DiffusionWorker_SP1 pid=319279) INFO 11-21 11:26:25 [registry.py:643] vae_patch_parallel_size=4 in tile mode requires vae_use_tiling; automatically enabling it.", "(DiffusionWorker_SP3 pid=319281) INFO 11-21 11:26:25 [registry.py:643] vae_patch_parallel_size=4 in tile mode requires vae_use_tiling; automatically enabling it.", "(DiffusionWorker_SP2 pid=319280) INFO 11-21 11:26:26 [registry.py:643] vae_patch_parallel_size=4 in tile mode requires vae_use_tiling; automatically enabling it.", "(DiffusionWorker_SP0 pid=319278) INFO 11-21 11:26:26 [registry.py:643] vae_patch_parallel_size=4 in tile mode requires vae_use_tiling; automatically enabling it."], "caveat": "Configured distributed VAE does not establish tile utilization on every frame/shape."}
+h3-small: exit1, source 1faedeef8ebf9613184cebc701a14f079b6f8018, /data/dyy/logs/hcms-10448-h3-small-coverage-20261121
+flux-confirm: exit0, source cb8ab60059f7381cd02353de7c9538bb58bda148, /data/dyy/logs/hcms-10448-flux-coverage-confirm-20261121
+  VAE runtime/config audit: {"requested": 2, "patch_parallel_enabled": false, "configured_parallel_size": 1, "evidence": ["(DiffusionWorker_SP0 pid=525684) WARNING 11-21 12:41:43 [registry.py:636] vae_patch_parallel_size=2 is set but VAE patch parallelism is NOT enabled for Flux2KleinPipeline; ignoring.", "(DiffusionWorker_SP1 pid=525685) WARNING 11-21 12:41:43 [registry.py:636] vae_patch_parallel_size=2 is set but VAE patch parallelism is NOT enabled for Flux2KleinPipeline; ignoring."], "caveat": "Configured distributed VAE does not establish tile utilization on every frame/shape."}
+qwen-confirm: exit0, source cb8ab60059f7381cd02353de7c9538bb58bda148, /data/dyy/logs/hcms-10448-qwen-coverage-confirm-20261121
+  VAE runtime/config audit: {"requested": 2, "patch_parallel_enabled": false, "configured_parallel_size": 1, "evidence": ["(DiffusionWorker_SP1 pid=497648) WARNING 11-21 12:23:37 [registry.py:636] vae_patch_parallel_size=2 is set but VAE patch parallelism is NOT enabled for QwenImageEditPlusPipeline; ignoring.", "(DiffusionWorker_SP0 pid=497647) WARNING 11-21 12:23:37 [registry.py:636] vae_patch_parallel_size=2 is set but VAE patch parallelism is NOT enabled for QwenImageEditPlusPipeline; ignoring."], "caveat": "Configured distributed VAE does not establish tile utilization on every frame/shape."}
+wan14b-confirm: exit0, source cb8ab60059f7381cd02353de7c9538bb58bda148, /data/dyy/logs/hcms-10448-wan14b-coverage-confirm-20261121
+  VAE runtime/config audit: {"requested": 4, "patch_parallel_enabled": true, "configured_parallel_size": 4, "evidence": ["(DiffusionWorker_SP2 pid=450086) INFO 11-21 12:08:21 [registry.py:643] vae_patch_parallel_size=4 in tile mode requires vae_use_tiling; automatically enabling it.", "(DiffusionWorker_SP1 pid=450085) INFO 11-21 12:08:21 [registry.py:643] vae_patch_parallel_size=4 in tile mode requires vae_use_tiling; automatically enabling it.", "(DiffusionWorker_SP3 pid=450087) INFO 11-21 12:08:21 [registry.py:643] vae_patch_parallel_size=4 in tile mode requires vae_use_tiling; automatically enabling it.", "(DiffusionWorker_SP0 pid=450084) INFO 11-21 12:08:21 [registry.py:643] vae_patch_parallel_size=4 in tile mode requires vae_use_tiling; automatically enabling it."], "caveat": "Configured distributed VAE does not establish tile utilization on every frame/shape."}
+h3-policy: exit0, source cb8ab60059f7381cd02353de7c9538bb58bda148, /data/dyy/logs/hcms-10448-h3-policy-confirm-20261121
+  VAE runtime/config audit: {"requested": 4, "patch_parallel_enabled": true, "configured_parallel_size": 4, "evidence": "All-rank model audit reports vae_world=4", "caveat": "Configured distributed VAE does not establish tile utilization on every frame/shape."}
+core-sp2: exit0, source cb8ab60059f7381cd02353de7c9538bb58bda148, /data/dyy/logs/hcms-10448-core-coverage-sp2-20261121
+core-sp4: exit0, source cb8ab60059f7381cd02353de7c9538bb58bda148, /data/dyy/logs/hcms-10448-core-coverage-sp4-20261121
+Raw archive SHA256: 634d513dbe2c126058d82ce79bf44c2de60ff06275b2667b8400bfbe613913a7
+Raw samples/configs/patches/exit codes are in evidence/coverage-raw.tar.gz; entry hashes in coverage-manifest.json.
+Complete screen and confirmation arrays, hashes, actual attention geometry, paired intervals and controls are in coverage-summary.json.
+Analysis and verification script copies are in coverage-analysis.tar.gz; rerun from the same workspace directory layout.
+No PR was submitted. AI assistance: Codex prepared code, measurements and analysis.

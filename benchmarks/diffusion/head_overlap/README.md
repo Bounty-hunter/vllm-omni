@@ -25,6 +25,41 @@ Wan2.2 TI2V-5B video with FP8 DiT, SP2 and VAE2, but establishes no stable gain
 for those four cases. NPU, hybrid parallelism, HTTP serving and concurrent
 requests are not qualified.
 
+## Wider shape coverage
+
+[COVERAGE-RESULTS.txt](COVERAGE-RESULTS.txt) records the broader FLUX.2-klein-4B,
+Qwen-Image-Edit-2511, Wan2.2-T2V-A14B and H3-Image comparison. It includes
+small-canvas controls, reference-image inputs, videos, independent 30-round
+confirmations, and whole-attention controls with both owned and borrowed
+outputs. Raw samples, source identities and paired intervals are in
+[coverage-summary.json](evidence/coverage-summary.json); compressed logs,
+configs and patches are in [coverage-raw.tar.gz](evidence/coverage-raw.tar.gz).
+
+The frozen `*-coverage-confirm.json` and `h3-policy-confirm.json` recipes
+default to the original single group. Only explicitly selected cases override
+that setting. Small-case A/A differences are timing noise. These recipes
+qualify specific offline graph cases; they do not implement a production
+shape selector or establish that every split is nonregressing.
+
+The current Qwen and FLUX pipelines ignore `vae_patch_parallel_size=2`, as
+their registry warnings confirm. Their results use SP2 with no VAE patch
+parallelism. Wan-A14B configures distributed tiled VAE4, and H3 audits its
+native VAE world size of four. The configured VAE degree alone does not
+establish how many tiles every small frame distributes.
+
+The `coverage-core-sp2.json` and `coverage-core-sp4.json` controls separately
+time peer communication and attention splitting. The report labels request
+communication shares as estimates from these isolated controls, rather than
+in-request measurements. Total peer bytes remain unchanged.
+
+H3 SP4 at true 1024² also exposes a packed FA3 auto-SplitKV precision limit.
+The failed split screen and diagnosis are retained in
+[coverage-diagnostics.json](evidence/coverage-diagnostics.json), with scripts
+and logs in [coverage-diagnostics.tar.gz](evidence/coverage-diagnostics.tar.gz).
+Setting `num_splits=1` restores exactness in the pure-attention control;
+the complete model with that setting has not been qualified. The backend
+default remains unchanged and the small H3 recipe keeps whole attention.
+
 ## Files
 
 - `overlap_probe.py`: fixed-buffer CE geometry and controlled workload.
