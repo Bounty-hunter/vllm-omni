@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 """Native-model experiment with prewarmed graphs and bounded output ownership."""
 
+import ctypes
 import os
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -17,6 +18,7 @@ _SLOT_ARENA = {}
 _OUTPUT_SLOT = ContextVar("hcms_output_slot", default=None)
 _SELECTED_CHUNKS = os.environ.get("HCMS_NATIVE_PLAN_CHUNKS")
 _PLAN_LIMIT = 16
+_COPY_SUBMITTER = os.environ.get("HCMS_COPY_SUBMITTER")
 
 
 @contextmanager
@@ -59,11 +61,35 @@ def partition_heads(heads, chunks, weights=None):
 class NativePipeline(PrefilledPipeline):
     @staticmethod
     def geometry(dest, dpitch, source, spitch, width, rows):
-        return [dest, dpitch, source, spitch, width, rows, 4]
+        values = [dest, dpitch, source, spitch, width, rows, 4]
+        return (ctypes.c_size_t * 7)(*values) if _COPY_SUBMITTER else values
 
     def __init__(self, inputs, joint, pg, chunks, comm, kernel, metadata, *, head_sizes=None, joint_strategy="front"):
         self.attention_kernel, self.metadata = kernel, metadata
         super().__init__(inputs, joint, pg, chunks, self.attend, head_sizes=head_sizes, joint_strategy=joint_strategy)
+        if _COPY_SUBMITTER:
+            # Descriptor pointers remain valid when bind() updates their source
+            # addresses in place. Prepare every forward batch before sampling.
+            self.copy_library = ctypes.CDLL(_COPY_SUBMITTER)
+            self.submit_copies = self.copy_library.hcms_submit_copies
+            self.submit_copies.argtypes = [
+                ctypes.POINTER(ctypes.POINTER(ctypes.c_size_t)),
+                ctypes.c_size_t,
+                ctypes.c_size_t,
+                ctypes.c_void_p,
+            ]
+            self.submit_copies.restype = ctypes.c_int
+            self.memcpy_2d = ctypes.cast(self.runtime.lib.cudaMemcpy2DAsync, ctypes.c_void_p)
+            groups = [
+                *self.local_forward,
+                *self.remote_forward,
+                [op for group in self.local_forward for op in group],
+                [op for group in self.local_forward[1:] for op in group],
+            ]
+            self.copy_batches = {
+                tuple(map(id, operations)): (ctypes.POINTER(ctypes.c_size_t) * len(operations))(*operations)
+                for operations in groups
+            }
         self.base_output = self.output
         self.stream = comm
         tensors = inputs + (() if joint is None else joint)
@@ -81,6 +107,14 @@ class NativePipeline(PrefilledPipeline):
                     self.bindings.append((operation, field + 3, operation[2] - pointers[field + 3]))
                     offset += 1
             assert offset == len(operations)
+
+    def emit_batch_on(self, operations, stream):
+        if not _COPY_SUBMITTER:
+            for operation in operations:
+                self.emit_on(operation, stream)
+            return
+        batch = self.copy_batches[tuple(map(id, operations))]
+        self.runtime.CUDART_CHECK(self.submit_copies(batch, len(batch), stream.cuda_stream, self.memcpy_2d))
 
     def attend(self, q, k, v, unused_metadata):
         out = self.attention_kernel(q, k, v, self.metadata)

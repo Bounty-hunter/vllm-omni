@@ -29,8 +29,11 @@ class PrefilledPipeline(DirectPipeline):
 
     def submit_forward(self, g):
         with self.region(f"prefilled/F{g}/peer-only"):
-            for operation in self.remote_forward[g]:
-                self.emit(operation)
+            if hasattr(self, "emit_batch_on"):
+                self.emit_batch_on(self.remote_forward[g], self.stream)
+            else:
+                for operation in self.remote_forward[g]:
+                    self.emit(operation)
             self.forward[g].handle.barrier()
             self.ready[g].record(self.stream)
 
