@@ -3,6 +3,7 @@
 """Explicit offline probe: fixed-case graphs and audited direct CE execution."""
 
 import functools
+import hashlib
 import importlib
 import json
 import os
@@ -246,9 +247,22 @@ def transformer_blocks(owner, hidden_states, encoder_hidden_states, *, hidden_fi
                 encoder_hidden_states, hidden_states = result
         return (hidden_states, encoder_hidden_states) if hidden_first else (encoder_hidden_states, hidden_states)
 
-    return graph_call(
-        body, owner._head_matrix_graphs, "transformer/blocks", hidden_states, encoder_hidden_states, **kwargs
-    )
+    state = _ACTIVE.get()
+    if hidden_first and state is not None:
+        from lazy_head_policy import metadata_spec
+
+        # CFG branches may trim to different text lengths. They need separate
+        # observations and graphs even when their video tensors match.
+        signature, _ = metadata_spec((hidden_states, encoder_hidden_states, kwargs))
+        key = hashlib.sha256(repr(signature).encode()).hexdigest()[:16]
+        state["graph_variant"] = (state["variant"], key)
+    try:
+        return graph_call(
+            body, owner._head_matrix_graphs, "transformer/blocks", hidden_states, encoder_hidden_states, **kwargs
+        )
+    finally:
+        if hidden_first and state is not None:
+            state.pop("graph_variant")
 
 
 def qwen21_blocks(owner, hidden_states, *, block_caches, cache_branch, cache_write_len, **kwargs):
