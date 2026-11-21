@@ -408,6 +408,7 @@ def install(pipeline_class, *, video_pipeline=False):
                 min_generation_area=minimum_area,
                 pipeline=type(self).__name__,
                 video_pipeline=video_pipeline,
+                audio_decoder_deterministic=audio_deterministic,
                 t_emb_capacity_rows=2 if video_pipeline else None,
                 torch=torch.__version__,
                 pid=os.getpid(),
