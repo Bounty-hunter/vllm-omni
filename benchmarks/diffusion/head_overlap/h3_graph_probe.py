@@ -23,6 +23,8 @@ HEAD_PARTITION = None
 TIMING = None
 AUTOTUNE = False
 LEARNER = None
+REAL_PREFIX = False
+EAGER_STEPS = 0
 
 
 def record(kind, **values):
@@ -50,8 +52,10 @@ def eager_blocks(model, hidden, kwargs):
 
 
 def graph_entry(entries):
-    if not AUTOTUNE:
+    if not AUTOTUNE and not REAL_PREFIX:
         return entries.get(GRAPH_KEY)
+    if GRAPH_KEY in entries:
+        return entries[GRAPH_KEY]
     return next(
         (
             entry
@@ -71,22 +75,30 @@ class BlockGraph:
         self.stream = torch.cuda.current_stream()
         self.graph = torch.cuda.CUDAGraph()
         self.replays = 0
+        self.validations = 0
+        self.prefix_steps = 0
+        self.real_prefix = REAL_PREFIX
         self.learner = None
-        if AUTOTUNE:
+        if AUTOTUNE or REAL_PREFIX:
             from lazy_head_policy import LazyHeadPolicy
 
             from vllm_omni.diffusion.distributed.parallel_state import get_world_group
 
-            self.learner = LazyHeadPolicy(get_world_group().cpu_group)
+            self.learner = LazyHeadPolicy(get_world_group().cpu_group, enabled=AUTOTUNE)
             self.learner.begin()
         global LEARNER
         LEARNER = self.learner
+        if self.real_prefix:
+            return
         # Initialize all kernels, events, symmetric allocations, and peer plans
         # before capture. The same compute stream owns eager and graph paths.
         reference = eager_blocks(model, self.hidden, self.kwargs()).clone()
         if self.learner is not None:
             self.learner.prepare()
         eager_blocks(model, self.hidden, self.kwargs())
+        self.capture(model, reference)
+
+    def capture(self, model, reference):
         torch.accelerator.synchronize()
         if self.learner is not None:
             self.learner.finish()
@@ -98,6 +110,7 @@ class BlockGraph:
         if captured != len(model.blocks):
             raise AssertionError(f"Native CE capture calls: {captured}; expected {len(model.blocks)}")
         self.graph.replay()
+        self.validations += 1
         torch.accelerator.synchronize()
         if not torch.equal(reference, self.output):
             raise AssertionError("Captured block stack differs from eager at identical inputs")
@@ -107,9 +120,11 @@ class BlockGraph:
             native_capture_calls=captured,
             graph_key=GRAPH_KEY,
             static={key: [list(value.shape), str(value.dtype)] for key, value in self.static.items()},
-            hidden=list(hidden.shape),
+            hidden=list(self.hidden.shape),
             stream=self.stream.cuda_stream,
             eager_graph_bitwise_equal=True,
+            real_prefix=self.real_prefix,
+            real_eager_steps=self.prefix_steps,
             allocated_mb=torch.accelerator.memory_allocated() / 2**20,
             lazy_policy=None if self.learner is None else dict(stats=self.learner.stats, reports=self.learner.reports),
         )
@@ -126,7 +141,9 @@ class BlockGraph:
     def kwargs(self):
         return dict(self.scalar, **self.static)
 
-    def __call__(self, hidden, kwargs):
+    def __call__(self, model, hidden, kwargs):
+        global LEARNER, EAGER_STEPS
+        LEARNER = self.learner
         if self.layout(hidden, kwargs) != self.signature:
             raise AssertionError("Fixed-canvas graph received different tensor/scalar metadata")
         if torch.cuda.current_stream() != self.stream:
@@ -134,6 +151,16 @@ class BlockGraph:
         self.hidden.copy_(hidden)
         for key, value in self.static.items():
             value.copy_(kwargs[key])
+        if self.real_prefix and self.prefix_steps < 2:
+            if self.prefix_steps == 1:
+                self.learner.prepare(sample_limit=24)
+            result = eager_blocks(model, self.hidden, self.kwargs())
+            self.prefix_steps += 1
+            EAGER_STEPS += 1
+            if self.prefix_steps == 2:
+                self.learner.phase = "settle"
+                self.capture(model, result.clone())
+            return result
         with region("DiT/50blocks/graph-replay"):
             self.graph.replay()
         self.replays += 1
@@ -169,8 +196,17 @@ def run_blocks(model, hidden, *, hints, control_scale, **kwargs):
     entry = graph_entry(entries)
     if entry is None:
         entry = BlockGraph(model, hidden, kwargs)
-        entries[(GRAPH_KEY, entry.policy_key) if AUTOTUNE else GRAPH_KEY] = entry
-    return entry(hidden, kwargs)
+        key = (
+            (GRAPH_KEY, entry.policy_key)
+            if entry.learner is not None and entry.learner.phase == "frozen"
+            else GRAPH_KEY
+        )
+        entries[key] = entry
+    result = entry(model, hidden, kwargs)
+    if REAL_PREFIX and entry.learner.phase == "frozen" and GRAPH_KEY in entries:
+        del entries[GRAPH_KEY]
+        entries[(GRAPH_KEY, entry.policy_key)] = entry
+    return result
 
 
 def install(pipeline_class):
@@ -253,7 +289,8 @@ def install(pipeline_class):
 
     @functools.wraps(original_forward)
     def forward(self, request):
-        global MODE, TRACE, ACTIVE, SCHEDULE, GRAPH_KEY, HEAD_PARTITION, TIMING, AUTOTUNE, LEARNER
+        global MODE, TRACE, ACTIVE, SCHEDULE, GRAPH_KEY, HEAD_PARTITION, TIMING
+        global AUTOTUNE, LEARNER, REAL_PREFIX, EAGER_STEPS
         nonlocal audited, previous_canvas
         if request.is_dummy_run():
             return original_forward(self, request)
@@ -266,6 +303,8 @@ def install(pipeline_class):
         chunks = int(extra["chunks"])
         HEAD_PARTITION = tuple(extra["head_partition"]) if extra.get("head_partition") else None
         AUTOTUNE = bool(extra.get("autotune", False))
+        REAL_PREFIX = bool(extra.get("real_prefix", False))
+        EAGER_STEPS = 0
         LEARNER = None
         canvas = (request.sampling_params.height, request.sampling_params.width)
         if previous_canvas != canvas:
@@ -275,6 +314,8 @@ def install(pipeline_class):
             native_prefilled.clear()
             previous_canvas = canvas
         GRAPH_KEY = (canvas, chunks, SCHEDULE, HEAD_PARTITION)
+        if REAL_PREFIX:
+            GRAPH_KEY = (*GRAPH_KEY, AUTOTUNE)
         TIMING = [] if extra.get("diagnostic") else None
         native_prefilled._SELECTED_CHUNKS = str(chunks)
         cache = self.transformer.adaln_cache
@@ -316,6 +357,7 @@ def install(pipeline_class):
         before = NATIVE_CALLS
         graph = graph_entry(getattr(self.transformer, "_hcms_block_graphs", {}))
         replays_before = graph.replays if graph else 0
+        validations_before = graph.validations if graph else 0
         with region(f"request/{extra['label']}"):
             result = original_forward(self, request)
         calls = NATIVE_CALLS - before
@@ -324,8 +366,8 @@ def install(pipeline_class):
         graph = graph_entry(getattr(self.transformer, "_hcms_block_graphs", {}))
         if MODE == "graph" and graph is None:
             raise AssertionError("Graph mode did not create a graph")
-        if MODE == "graph" and graph.replays - replays_before != 6:
-            raise AssertionError("Expected exactly six block-stack graph replays per request")
+        if MODE == "graph" and graph.replays - replays_before + EAGER_STEPS != 6:
+            raise AssertionError("Expected exactly six real denoising steps across eager and graph execution")
         if extra.get("trace_stop"):
             torch.accelerator.synchronize()
             dist.barrier()
@@ -342,6 +384,10 @@ def install(pipeline_class):
                 schedule=SCHEDULE,
                 native_python_calls=calls,
                 graph_exists=graph is not None,
+                real_prefix=REAL_PREFIX,
+                real_eager_steps=EAGER_STEPS,
+                denoising_graph_replays=graph.replays - replays_before if graph else 0,
+                validation_replays=graph.validations - validations_before if graph else 0,
                 plan_chunks=[p.chunks for p in active],
                 plan_head_sizes=[p.head_sizes for p in active],
                 qkv=[list(p.inputs[0].shape) for p in active],

@@ -60,6 +60,7 @@ class PackedForward(nn.Module):
         self.body = forward
         self.learner = learner
         self.forward_calls = 0
+        self.prefix_steps = 0
 
     def forward(self, packed_args, packed_kwargs):
         self.forward_calls += 1
@@ -94,6 +95,8 @@ def graph_call(original, graphs, component, *args, **kwargs):
     state = _ACTIVE.get()
     if state is None or state["mode"] == "eager":
         return original(*args, **kwargs)
+    if state["real_prefix"]:
+        return real_prefix_call(original, graphs, component, *args, **kwargs)
     graph = graphs.get(state["variant"])
     reference = None
     if graph is None:
@@ -162,6 +165,66 @@ def graph_call(original, graphs, component, *args, **kwargs):
             qkv_shapes=sorted(state["shapes"]),
             graph_stats=graph.stats(),
         )
+    return result
+
+
+def real_prefix_call(original, graphs, component, *args, **kwargs):
+    """Use two actual denoising calls, returning both outputs to the pipeline.
+
+    The first discovers layouts. Only a bounded prefix of the second samples.
+    They replace existing warmup opportunities. The original sync-debug probe,
+    capture boundary and graph validation remain; none supplies timing samples.
+    """
+    from lazy_head_policy import LazyHeadPolicy
+
+    state = _ACTIVE.get()
+    graph = graphs.get(state["variant"])
+    if graph is None:
+        learner = LazyHeadPolicy(get_world_group().cpu_group, enabled=state["autotune"])
+        learner.begin()
+        graph = graphs[state["variant"]] = StableGraph(
+            PackedForward(original, learner),
+            device=torch.cuda.current_stream().device,
+            max_entries=8,
+            warmup_iters=0,
+            name=f"head-matrix/{component}/real-prefix",
+            group=get_world_group().device_group,
+        )
+    learner = graph.module.learner
+    state["learner"] = learner
+    before = graph.module.forward_calls
+    if graph.module.prefix_steps < 2:
+        if graph.module.prefix_steps == 1:
+            # All layouts came from step one; allocation is complete before
+            # the first trial in step two, without a dummy model invocation.
+            learner.prepare(sample_limit=24)
+        result = graph.module(args, kwargs)
+        graph.module.prefix_steps += 1
+        state["real_eager_steps"][component] = state["real_eager_steps"].get(component, 0) + 1
+        graph.output_type = type(result)
+        if graph.module.prefix_steps == 2:
+            learner.phase = "settle"
+            validation = graph(variant=None, packed_args=args, packed_kwargs=kwargs)
+            if isinstance(validation, dict) and graph.output_type is not dict:
+                validation = graph.output_type(**validation)
+            assert_equal(validation, result)
+            if not graph.enabled or graph.captures != 1:
+                raise RuntimeError("Real-prefix graph capture failed")
+            record(
+                kind="capture",
+                component=component,
+                variant=state["variant"],
+                sample_location="real denoising step two prefix",
+                real_eager_steps=2,
+                graph_stats=graph.stats(),
+            )
+        # In particular, do not substitute the validation replay's output:
+        # these are the actual eager denoising results, not discarded probes.
+    else:
+        result = graph(variant=learner.cache_key, packed_args=args, packed_kwargs=kwargs)
+        if isinstance(result, dict) and graph.output_type is not dict:
+            result = graph.output_type(**result)
+    state["eager_forwards"][component] = state["eager_forwards"].get(component, 0) + graph.module.forward_calls - before
     return result
 
 
@@ -338,7 +401,9 @@ def install(pipeline):
                     fallbacks=0,
                     shapes=set(),
                     autotune=bool(extra.get("autotune", False)),
+                    real_prefix=bool(extra.get("real_prefix", False)),
                     eager_forwards={},
+                    real_eager_steps={},
                 )
                 token = _ACTIVE.set(state)
                 native._SELECTED_CHUNKS = str(extra["chunks"])
@@ -383,6 +448,7 @@ def install(pipeline):
                         output_slot_bytes=sum(slot.tensor.nbytes for slot in native._SLOT_ARENA.values()),
                         execution_counters={key: value - counters_before[key] for key, value in counters.items()},
                         eager_forwards=state["eager_forwards"],
+                        real_eager_steps=state["real_eager_steps"],
                         lazy_policies={
                             name: dict(stats=graph.module.learner.stats, reports=graph.module.learner.reports)
                             for name, graphs in components.items()

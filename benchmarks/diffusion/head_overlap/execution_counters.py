@@ -51,7 +51,9 @@ def install():
         @functools.wraps(original)
         def counted(*args, **kwargs):
             counts[label] += 1
-            counts["sampling_host_syncs"] += int(label != "event_queries" and _CORE_PHASE in ("sample", "frozen"))
+            counts["sampling_host_syncs"] += int(
+                label != "event_queries" and _CORE_PHASE in ("sample", "settle", "frozen")
+            )
             return original(*args, **kwargs)
 
         setattr(owner, name, counted)

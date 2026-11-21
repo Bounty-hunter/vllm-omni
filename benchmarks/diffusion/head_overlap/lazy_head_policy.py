@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
-"""Learn only from the eager calls a lazy graph already executes.
+"""Learn from existing eager calls, including bounded real-request prefixes.
 
 One call executes one complete core and returns its real output. Preparation
 never executes a probe kernel. Event results are consumed only by finish(),
@@ -130,6 +130,7 @@ class Observation:
     selected: int = 0
     events: list = field(default_factory=list)
     samples: list = field(default_factory=list)
+    sample_calls: int = 0
 
 
 class LazyHeadPolicy:
@@ -253,10 +254,12 @@ class LazyHeadPolicy:
         if self.phase == "discover":
             entry.calls += 1
             choice = 0
-        elif self.phase == "sample" and entry.index < len(entry.events):
-            choice = candidate_index(entry.index, len(entry.choices))
-            event_pair = entry.events[entry.index]
-            entry.index += 1
+        elif self.phase == "sample":
+            entry.sample_calls += 1
+            if entry.index < len(entry.events):
+                choice = candidate_index(entry.index, len(entry.choices))
+                event_pair = entry.events[entry.index]
+                entry.index += 1
         plan = prepare_plan(
             (q, k, v),
             joint,
@@ -284,16 +287,25 @@ class LazyHeadPolicy:
             self.stats["event_records"] += 2
         return result
 
-    def prepare(self, *, warmup_passes=1):
+    def prepare(self, *, warmup_passes=1, sample_limit=None):
         import torch
         import torch.distributed as dist
         from native_prefilled import prepare_plan
 
         start = time.perf_counter()
         self.stats["preparation_calls"] += 1
+        if sample_limit is not None:
+            if sample_limit < 1 or warmup_passes != 1:
+                raise ValueError("A real request prefix must be one bounded pass")
+            self.stats["sample_limit_per_signature"] = sample_limit
+
+        def slots_for(entry):
+            slots = entry.calls * warmup_passes
+            return slots if sample_limit is None else min(slots, sample_limit)
+
         for entry in self.entries.values():
             # No extra forward is manufactured when this signature is rare.
-            slots = entry.calls * warmup_passes
+            slots = slots_for(entry)
             if slots < 7 * len(entry.choices):
                 entry.choices = entry.choices[:2]
             if slots < 7 * len(entry.choices):
@@ -306,7 +318,7 @@ class LazyHeadPolicy:
             if any(peer != header for peer in headers):
                 raise RuntimeError("Ranks disagree before candidate allocation/sampling")
         for entry in self.entries.values():
-            slots = entry.calls * warmup_passes
+            slots = slots_for(entry)
             for widths in entry.choices:
                 prepare_plan(
                     entry.inputs,
@@ -373,6 +385,10 @@ class LazyHeadPolicy:
                     host_submission_max_rank_us=submit_times,
                     selected=entry.choices[entry.selected],
                     pairing="complete rotated cycles on every rank",
+                    discovery_calls=entry.calls,
+                    sampling_pass_calls=entry.sample_calls,
+                    timed_prefix_calls=entry.index,
+                    allocated_sample_pairs=len(entry.events),
                 )
             )
             entry.inputs, entry.joint, entry.metadata, entry.kernel, entry.group, entry.comm = (
