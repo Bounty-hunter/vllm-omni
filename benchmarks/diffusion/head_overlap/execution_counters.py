@@ -40,6 +40,7 @@ def install():
         timed_event_records=0,
         sampling_host_syncs=0,
         captured_timer_records=0,
+        event_queries=0,
     )
     global _COUNTS
     _COUNTS = counts
@@ -50,7 +51,7 @@ def install():
         @functools.wraps(original)
         def counted(*args, **kwargs):
             counts[label] += 1
-            counts["sampling_host_syncs"] += int(_CORE_PHASE in ("sample", "frozen"))
+            counts["sampling_host_syncs"] += int(label != "event_queries" and _CORE_PHASE in ("sample", "frozen"))
             return original(*args, **kwargs)
 
         setattr(owner, name, counted)
@@ -70,4 +71,5 @@ def install():
         return original_record(event, *args, **kwargs)
 
     torch.cuda.Event.record = record
+    wrap(torch.cuda.Event, "query", "event_queries")
     return counts

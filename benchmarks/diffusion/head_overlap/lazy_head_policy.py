@@ -145,6 +145,8 @@ class LazyHeadPolicy:
     def signature(self, q, k, v, md, pg):
         import torch.distributed as dist
 
+        self.metadata_supported = True
+
         def spec(value):
             if hasattr(value, "shape"):
                 return self.tensor_spec(value)
@@ -158,7 +160,8 @@ class LazyHeadPolicy:
                 return type(value).__qualname__, tuple(
                     (item.name, spec(getattr(value, item.name))) for item in fields(value)
                 )
-            raise TypeError(f"Opaque attention metadata cannot share policy statistics: {type(value)}")
+            self.metadata_supported = False
+            return "opaque", type(value).__module__, type(value).__qualname__
 
         fields = () if md is None else tuple((key, spec(value)) for key, value in vars(md).items() if key != "extra")
         extra = () if md is None else tuple((key, spec(value)) for key, value in sorted(md.extra.items()))
@@ -199,7 +202,15 @@ class LazyHeadPolicy:
             tokens = q.shape[1] * dist.get_world_size(pg) + (0 if joint is None else joint[0].shape[1])
             packed = md is not None and "cu_seqlens_q" in md.extra
             # Keep known unsafe low-occupancy packed SplitKV calls whole.
-            safe = md is None or (md.attn_mask is None and md.joint_attn_mask is None and not md.full_attn_spans)
+            safe = self.metadata_supported and (
+                md is None
+                or (
+                    md.attn_mask is None
+                    and md.joint_attn_mask is None
+                    and not md.full_attn_spans
+                    and (not packed or md.packed_padding is not None)
+                )
+            )
             choices = (
                 candidates(
                     heads,
@@ -246,10 +257,16 @@ class LazyHeadPolicy:
         self.stats["core_calls"] += 1
         if event_pair is not None:
             event_pair[0].record()
+            submitted = time.perf_counter()
         result = scheduled(plan, "stage-local")
         if event_pair is not None:
             event_pair[1].record()
-            entry.samples.append((choice, *event_pair))
+            submit_us = (time.perf_counter() - submitted) * 1e6
+            # A pending start proves the complete core was enqueued before
+            # the GPU reached it. Otherwise eager CPU gaps can mispredict the
+            # graph's performance. query() is nonblocking, never a host wait.
+            queued = not event_pair[0].query()
+            entry.samples.append((choice, *event_pair, queued, submit_us))
             self.stats["event_records"] += 2
         return result
 
@@ -308,8 +325,8 @@ class LazyHeadPolicy:
         local = []
         for entry in self.entries.values():
             grouped = [[] for _ in entry.choices]
-            for choice, begin, end in entry.samples:
-                grouped[choice].append(begin.elapsed_time(end) * 1000)
+            for choice, begin, end, queued, submit_us in entry.samples:
+                grouped[choice].append((begin.elapsed_time(end) * 1000, queued, submit_us))
             local.append((entry.signature, entry.choices, grouped))
         peers = [local]
         if any(len(entry.choices) > 1 for entry in self.entries.values()):
@@ -322,18 +339,30 @@ class LazyHeadPolicy:
             raise RuntimeError("Ranks discovered different execution signatures/candidates")
         for index, entry in enumerate(self.entries.values()):
             maximum = []
+            raw_maximum, submit_times = [], []
             for choice in range(len(entry.choices)):
                 counts = [len(peer[index][2][choice]) for peer in peers]
                 if len(set(counts)) != 1:
                     raise RuntimeError("Ranks sampled different candidate schedules")
-                values = [max(peer[index][2][choice][i] for peer in peers) for i in range(counts[0])]
-                maximum.append(values[2 if len(values) >= 10 else 1 :])  # real calls, never extra calls
+                rows = [[peer[index][2][choice][i] for peer in peers] for i in range(counts[0])]
+                raw_maximum.append([max(row[0] for row in rank_rows) for rank_rows in rows])
+                submit_times.append([max(row[2] for row in rank_rows) for rank_rows in rows])
+                discard = 2 if len(rows) >= 10 else 1
+                maximum.append(
+                    [
+                        max(row[0] for row in rank_rows)
+                        for rank_rows in rows[discard:]
+                        if all(row[1] for row in rank_rows)
+                    ]
+                )
             entry.selected = choose(maximum)
             self.reports.append(
                 dict(
                     signature=entry.signature,
                     choices=entry.choices,
                     samples_max_rank_us=maximum,
+                    raw_samples_max_rank_us=raw_maximum,
+                    host_submission_max_rank_us=submit_times,
                     selected=entry.choices[entry.selected],
                 )
             )
