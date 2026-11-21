@@ -144,8 +144,14 @@ class BlockGraph:
     def __call__(self, model, hidden, kwargs):
         global LEARNER, EAGER_STEPS
         LEARNER = self.learner
-        if self.layout(hidden, kwargs) != self.signature:
-            raise AssertionError("Fixed-canvas graph received different tensor/scalar metadata")
+        actual_layout = self.layout(hidden, kwargs)
+        if actual_layout != self.signature:
+            expected = dict(self.signature[1], hidden=self.signature[0])
+            actual = dict(actual_layout[1], hidden=actual_layout[0])
+            changed = {
+                key: dict(expected=value, actual=actual[key]) for key, value in expected.items() if value != actual[key]
+            }
+            raise AssertionError(f"Fixed-canvas graph metadata changed: {changed}")
         if torch.cuda.current_stream() != self.stream:
             raise AssertionError("Graph compute stream changed")
         self.hidden.copy_(hidden)
