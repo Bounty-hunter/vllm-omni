@@ -147,7 +147,7 @@ class Observation:
 class LazyHeadPolicy:
     """Small graph-owned state; native plan/slot ownership stays in its cache."""
 
-    def __init__(self, group, *, enabled=True, candidate_partition=None):
+    def __init__(self, group, *, enabled=True, candidate_partition=None, schedule="stage-local"):
         import torch
 
         from vllm_omni.diffusion.attention.backends.utils.fa import (
@@ -157,6 +157,9 @@ class LazyHeadPolicy:
         )
 
         self.group, self.enabled = group, enabled
+        if schedule not in ("stage-local", "overlap-return", "overlap-staging"):
+            raise ValueError("Lazy learning requires an explicit local-staging schedule")
+        self.schedule = schedule
         self.candidate_partition = None if candidate_partition is None else tuple(candidate_partition)
         if self.candidate_partition is not None and (
             not 2 <= len(self.candidate_partition) <= 4
@@ -184,6 +187,7 @@ class LazyHeadPolicy:
         self.phase = "discover"
         self.flops, self.bandwidth = 6e14, None
         self.stats = dict(
+            schedule=schedule,
             core_calls=0,
             event_records=0,
             preparation_calls=0,
@@ -323,7 +327,7 @@ class LazyHeadPolicy:
         if self.core_events is not None and self.phase == "frozen" and torch.cuda.is_current_stream_capturing():
             if audit["calls"] == min(16, entry.calls):
                 diagnostic = self.core_events[signature, choice]
-        result = scheduled(plan, "stage-local") if diagnostic is None else diagnostic.run(plan, "stage-local", compute)
+        result = scheduled(plan, self.schedule) if diagnostic is None else diagnostic.run(plan, self.schedule, compute)
         if event_pair is not None:
             event_pair[1].record()
             submit_us = (time.perf_counter() - submitted) * 1e6
@@ -362,7 +366,7 @@ class LazyHeadPolicy:
                 entry.choices = entry.choices[:2]
             if slots < 7 * len(entry.choices):
                 entry.choices = entry.choices[:1]
-        header = [(entry.signature, entry.choices, entry.calls) for entry in self.entries.values()]
+        header = (self.schedule, [(entry.signature, entry.choices, entry.calls) for entry in self.entries.values()])
         if any(len(entry.choices) > 1 for entry in self.entries.values()):
             headers = [None] * dist.get_world_size(self.group)
             dist.all_gather_object(headers, header, group=self.group)
@@ -464,7 +468,10 @@ class LazyHeadPolicy:
             entry.events.clear()
             entry.samples.clear()
         self.phase = "frozen"
-        key = tuple((entry.signature, entry.choices[entry.selected]) for entry in self.entries.values())
+        key = (
+            self.schedule,
+            tuple((entry.signature, entry.choices[entry.selected]) for entry in self.entries.values()),
+        )
         self._cache_key = hashlib.sha256(repr(key).encode()).hexdigest()
         self.stats["finish_ms"] += (time.perf_counter() - start) * 1000
 

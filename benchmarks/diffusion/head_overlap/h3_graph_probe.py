@@ -89,6 +89,7 @@ class BlockGraph:
                 get_world_group().cpu_group,
                 enabled=AUTOTUNE,
                 candidate_partition=HEAD_PARTITION if AUTOTUNE else None,
+                schedule=SCHEDULE.removesuffix("-slots").replace("-shared", ""),
             )
             self.learner.begin()
         global LEARNER

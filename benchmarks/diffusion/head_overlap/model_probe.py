@@ -107,7 +107,11 @@ def graph_call(original, graphs, component, *args, **kwargs):
         if state["autotune"]:
             from lazy_head_policy import LazyHeadPolicy
 
-            learner = LazyHeadPolicy(get_world_group().cpu_group, candidate_partition=state["candidate_partition"])
+            learner = LazyHeadPolicy(
+                get_world_group().cpu_group,
+                candidate_partition=state["candidate_partition"],
+                schedule=state["schedule"],
+            )
             learner.begin()
             state["learner"] = learner
         reference = original(*clone_static(args), **clone_static(kwargs))
@@ -126,6 +130,8 @@ def graph_call(original, graphs, component, *args, **kwargs):
         graph.output_type = type(reference)
     captures_before, calls_before = graph.captures, state["direct_calls"]
     learner = graph.module.learner
+    if learner is not None and learner.schedule != state["schedule"]:
+        raise ValueError("A communication schedule must remain fixed within its graph case")
     requested_candidate = state["candidate_partition"]
     if learner is not None and learner.candidate_partition != (
         None if requested_candidate is None else tuple(requested_candidate)
@@ -189,7 +195,10 @@ def real_prefix_call(original, graphs, component, *args, **kwargs):
     graph = graphs.get(graph_key)
     if graph is None:
         learner = LazyHeadPolicy(
-            get_world_group().cpu_group, enabled=state["autotune"], candidate_partition=state["candidate_partition"]
+            get_world_group().cpu_group,
+            enabled=state["autotune"],
+            candidate_partition=state["candidate_partition"],
+            schedule=state["schedule"],
         )
         learner.begin()
         graph = graphs[graph_key] = StableGraph(
@@ -203,6 +212,8 @@ def real_prefix_call(original, graphs, component, *args, **kwargs):
         if state.get("capture_without_probes"):
             graph._probe_pending = False
     learner = graph.module.learner
+    if learner.schedule != state["schedule"]:
+        raise ValueError("A communication schedule must remain fixed within its graph case")
     requested_candidate = state["candidate_partition"]
     if learner.candidate_partition != (None if requested_candidate is None else tuple(requested_candidate)):
         raise ValueError("An experimental candidate must remain fixed within its graph case")
