@@ -25,6 +25,7 @@ AUTOTUNE = False
 LEARNER = None
 REAL_PREFIX = False
 EAGER_STEPS = 0
+VIDEO_PIPELINE = False
 
 
 def record(kind, **values):
@@ -194,6 +195,12 @@ def run_blocks(model, hidden, *, hints, control_scale, **kwargs):
     if MODE != "graph":
         with region("DiT/50blocks/eager"):
             return eager_blocks(model, hidden, kwargs)
+    # Video and audio start with the same sigma (one embedding row), then
+    # diverge (two rows). Use fixed capacity without another GPU operation:
+    # combined_indices still selects row zero on the initial step. The eager
+    # reference keeps the original one-row computation for output validation.
+    if VIDEO_PIPELINE and kwargs["t_emb"].shape[0] == 1:
+        kwargs["t_emb"] = kwargs["t_emb"].expand(2, -1)
     if model.adaln_cache.max_bytes or model.adaln_cache.offload_weights:
         raise AssertionError("Graph must compute current AdaLN values from its copied embedding")
     entries = getattr(model, "_hcms_block_graphs", None)
@@ -216,6 +223,8 @@ def run_blocks(model, hidden, *, hints, control_scale, **kwargs):
 
 
 def install(pipeline_class, *, video_pipeline=False):
+    global VIDEO_PIPELINE
+    VIDEO_PIPELINE = video_pipeline
     head_module = importlib.import_module("vllm_omni.diffusion.attention.parallel.head_overlap")
     import native_prefilled
     from prefilled_probe import PrefilledPipeline
@@ -366,6 +375,7 @@ def install(pipeline_class, *, video_pipeline=False):
                 min_generation_area=minimum_area,
                 pipeline=type(self).__name__,
                 video_pipeline=video_pipeline,
+                t_emb_capacity_rows=2 if video_pipeline else None,
                 torch=torch.__version__,
                 pid=os.getpid(),
                 gpu=torch.cuda.get_device_name(),

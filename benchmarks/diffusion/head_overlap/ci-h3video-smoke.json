@@ -48,6 +48,11 @@
       "schedule": "stage-local-shared-slots",
       "real_prefix": true,
       "autotune": true
+    },
+    "reference": {
+      "graph_mode": "original",
+      "chunks": 1,
+      "schedule": "stage-local-shared-slots"
     }
   },
   "cases": [
@@ -85,5 +90,6 @@
   },
   "ci_source": "Non-CI small smoke; H3 aligns four seconds/96 frames to 107 frames.",
   "deployment_changes": "Offline decoded frames (no HTTP/MP4 mux); batch1 FP8 DiT, FA3, Ulysses CE, VAE parallel; no Cache-DiT/profiler.",
-  "require_audio": true
+  "require_audio": true,
+  "adapter_note": "Graph uses fixed capacity for two time-embedding rows; original eager reference keeps one row when video/audio sigmas match. Validate video and audio bytes for three seeds."
 }
