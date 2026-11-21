@@ -226,18 +226,28 @@ def install(pipeline_class, *, video_pipeline=False):
     global VIDEO_PIPELINE
     VIDEO_PIPELINE = video_pipeline
     diagnostic_label = None
-    if video_pipeline and os.environ.get("HCMS_AUDIO_DIAGNOSTIC"):
+    audio_diagnostic = os.environ.get("HCMS_AUDIO_DIAGNOSTIC")
+    audio_deterministic = os.environ.get("HCMS_AUDIO_DETERMINISTIC") == "1"
+    if video_pipeline and (audio_diagnostic or audio_deterministic):
         from vllm_omni.diffusion.models.minimax_h3.vae import MiniMaxH3AudioVAE
 
         original_audio_decode = MiniMaxH3AudioVAE.decode_latent
 
         @functools.wraps(original_audio_decode)
         def audio_decode(self, latent):
-            waveform = original_audio_decode(self, latent)
-            if diagnostic_label is not None and dist.get_rank() == 0:
+            # An explicit correctness experiment can constrain cuDNN's audio
+            # decoder in every arm, including the original eager reference.
+            context = (
+                torch.backends.cudnn.flags(benchmark=False, deterministic=True)
+                if audio_deterministic
+                else contextlib.nullcontext()
+            )
+            with context:
+                waveform = original_audio_decode(self, latent)
+            if audio_diagnostic and diagnostic_label is not None and dist.get_rank() == 0:
                 import numpy as np
 
-                destination = Path(os.environ["HCMS_AUDIO_DIAGNOSTIC"])
+                destination = Path(audio_diagnostic)
                 destination.mkdir(parents=True, exist_ok=True)
                 np.savez_compressed(
                     destination / f"{diagnostic_label}.npz",
