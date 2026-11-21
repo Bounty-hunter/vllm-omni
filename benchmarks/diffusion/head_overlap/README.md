@@ -102,12 +102,70 @@ signatures, insufficient fully queued samples and uncertain gains stay whole.
 Candidate generation remains a CPU proxy; odd widths remain eligible.
 No extra calls are manufactured to fill the sample budget.
 
-The 26-case matrix covers Qwen editing with one/two references, FLUX text and
-reference-image shapes, H3-Image from 512 through 4096, Wan-A14B from 9 through
-65 frames, and Wan-TI2V-5B at four video shapes. Broad validation is in progress;
-the earlier results below qualify the earlier warmup-sampling method.
-In particular, packed FA3 precision must be checked for every newly exercised
-layout; a numerical mismatch is a failed case, not an acceptable speedup.
+The completed 26-case matrix covers Qwen editing with one/two references,
+FLUX text and reference-image shapes, H3-Image from 512 through 4096,
+Wan-A14B from 9 through 65 frames, and Wan-TI2V-5B at four video shapes.
+[PREFIX-RESULTS.txt](PREFIX-RESULTS.txt) records every result, including
+independent 30-pair confirmations, single-block fallbacks, negative screens
+and first requests in separate model processes. The earlier results below
+qualify the earlier warmup-sampling method.
+
+The independent confirmations repeat selection from the real prefix in a new
+process. These cases selected the same split as the initial matrix and had
+positive paired 95% bootstrap intervals in the confirmation:
+
+| Model and output | Heads per rank | Request latency reduction | Faster pairs |
+| --- | --- | --- | --- |
+| H3-Image 3072² | 5+9 | 3.79% | 30/30 |
+| H3-Image 4096² | 3+11 | 3.40% | 29/30 |
+| Qwen-Image-Edit-2511 2048², one reference | 4+8 | 1.56% | 21/30 |
+| FLUX.2-klein-4B 1024², one reference | 1+11 in single-stream blocks | 1.68% | 20/30 |
+| Wan2.2-T2V-A14B 480×832, 33 frames | 3+7 in each expert | 2.83% | 29/30 |
+| Wan2.2-T2V-A14B 480×832, 65 frames | 5+5 in each expert | 1.52% | 28/30 |
+
+The 65-frame initial eight-pair screen was 2.36% slower; both observations
+are retained. Qwen 1536² with one reference and FLUX 2048² with one reference
+had positive median ratios but confirmation intervals crossing zero, so
+they do not establish stable gains. Whole-attention fallbacks are A/A
+comparisons even when their measured difference is positive. Wan-TI2V-5B
+does not establish an overlap gain with this bounded selector.
+
+The controls use FP8 DiT for Qwen, H3 and Wan, and BF16 for FLUX. Qwen and
+both Wan models use eight denoising steps, FLUX four, and H3-Image six.
+Attention remains BF16. Qwen/FLUX VAE2 is ignored by their registry; H3
+audits native VAE4, and Wan uses the configured distributed VAE described
+above. Communication shares reuse earlier isolated controls at matching
+geometry and are estimates, not in-request profiles. Peer bytes remain
+unchanged; the schedule reduces visible communication on the critical path.
+These estimates cover attention-core peer traffic; they exclude communication
+inside the text encoder and VAE.
+Output geometry alone does not describe attention load: at 480×832 and
+65 frames, the audited global sequence is 26,520 tokens for A14B and 6,630
+for TI2V-5B. The report includes actual attention geometry for every case.
+
+First requests include candidate preparation, timer records, trials and graph
+setup. The report separates these observations from steady performance;
+no additional forward does not imply no additional first-request latency.
+For example, the first separate-process Qwen 1536² reference-image pair
+measured 6494 to 6925 ms, with reported peak memory 56498 to 57872 MB.
+The report retains both arm orders and distinguishes these observations from
+pure incremental preparation cost on a shared host.
+Low-confidence shapes retain whole attention. These are fixed-case offline
+adapters with graph-owned statistics, without cross-expert aggregation or
+a production request-shape controller.
+Insufficient fully queued eager samples can miss shapes where earlier fixed
+partitions improved performance. Such a fallback limits selector coverage;
+it does not establish that graph execution cannot benefit from splitting.
+
+Sources and compact results are in
+[prefix-summary.json](evidence/prefix-summary.json), request records and rank
+audits in [prefix-raw.tar.gz](evidence/prefix-raw.tar.gz), and full observations
+and verification scripts in [prefix-analysis.tar.gz](evidence/prefix-analysis.tar.gz).
+The benchmark's `warm` record labels its first complete `generate` request.
+Selection uses actual denoising layers inside that request, with their outputs
+feeding the pipeline; auxiliary graph probes supply no learning observations.
+Packed FA3 precision must be checked for every newly exercised layout;
+a numerical mismatch is a failed case, not an acceptable speedup.
 
 ## Previous warmup-sampling prototype
 
