@@ -73,6 +73,9 @@ def main():
             inputs = tuple(torch.randn(1, local, heads, 128, device="cuda", dtype=torch.bfloat16) for _ in range(3))
             if case.get("fused_v", False):
                 projected = torch.randn(1, local, 3, heads, 128, device="cuda", dtype=torch.bfloat16)
+                # Compare source layouts at identical Q/K/V values. This copy
+                # is setup only, outside every captured/timed control.
+                projected[:, :, 2].copy_(inputs[2])
                 inputs = inputs[:2] + (projected[:, :, 2],)
             joint = None
             metadata = None

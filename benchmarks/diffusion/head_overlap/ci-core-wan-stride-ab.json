@@ -1,0 +1,25 @@
+[
+  {
+    "id": "wan33-contiguous-v",
+    "tokens": 14040,
+    "heads": 40,
+    "joint": 0,
+    "padding": 0,
+    "head_partition": [
+      3,
+      7
+    ]
+  },
+  {
+    "id": "wan33-actual-fused-v",
+    "tokens": 14040,
+    "heads": 40,
+    "joint": 0,
+    "padding": 0,
+    "head_partition": [
+      3,
+      7
+    ],
+    "fused_v": true
+  }
+]
