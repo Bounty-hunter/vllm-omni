@@ -54,7 +54,7 @@ def qualified_cycles(choices):
     return [[max(row[0] for row in rows[index]) for index in valid] for rows in choices]
 
 
-def candidates(heads, tokens, dim, world, sms, *, flops=6e14, bandwidth=None):
+def candidates(heads, tokens, dim, world, sms, *, flops=6e14, bandwidth=None, kv_tokens=None):
     """Rank CPU cost predictions; execute at most two splits, never a sweep.
 
     A 128-query-tile wave model is a candidate generator, not an observed grid.
@@ -67,7 +67,7 @@ def candidates(heads, tokens, dim, world, sms, *, flops=6e14, bandwidth=None):
     bandwidth = bandwidth or 650e9 / world
     tiles = math.ceil(tokens / 128)
     waves = math.ceil(tiles * heads / sms)
-    attention = 4 * tokens * tokens * heads * dim / flops
+    attention = 4 * tokens * (tokens if kv_tokens is None else kv_tokens) * heads * dim / flops
     peer_bytes = 4 * tokens * heads * dim * 2 * (world - 1) / world
     peer = peer_bytes / bandwidth + 20e-6
     forward, reverse = peer * 0.75, peer * 0.25
@@ -215,6 +215,7 @@ class LazyHeadPolicy:
             if len(self.entries) >= 16:
                 raise RuntimeError("Graph-owned lazy policy signature budget exceeded")
             tokens = q.shape[1] * dist.get_world_size(pg) + (0 if joint is None else joint[0].shape[1])
+            kv_tokens = k.shape[1] * dist.get_world_size(pg) + (0 if joint is None else joint[1].shape[1])
             packed = md is not None and "cu_seqlens_q" in md.extra
             # Keep known unsafe low-occupancy packed SplitKV calls whole.
             safe = self.metadata_supported and (
@@ -235,6 +236,7 @@ class LazyHeadPolicy:
                     self.sms,
                     flops=self.flops,
                     bandwidth=self.bandwidth,
+                    kv_tokens=kv_tokens,
                 )
                 if self.enabled and safe and (not packed or tokens >= 4096)
                 else ((heads,),)

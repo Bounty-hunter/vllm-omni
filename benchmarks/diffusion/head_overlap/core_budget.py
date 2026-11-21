@@ -83,6 +83,8 @@ def main():
                 )
                 for value in joint:
                     dist.broadcast(value, src=0)
+                if "joint_query_length" in case:
+                    joint = (joint[0][:, : case["joint_query_length"]], *joint[1:])
                 metadata = AttentionMetadata(
                     joint_query=joint[0],
                     joint_key=joint[1],

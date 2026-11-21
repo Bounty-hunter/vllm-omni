@@ -97,7 +97,8 @@ def graph_call(original, graphs, component, *args, **kwargs):
         return original(*args, **kwargs)
     if state["real_prefix"]:
         return real_prefix_call(original, graphs, component, *args, **kwargs)
-    graph = graphs.get(state["variant"])
+    graph_key = state.get("graph_variant", state["variant"])
+    graph = graphs.get(graph_key)
     reference = None
     if graph is None:
         state["learner"] = None
@@ -113,7 +114,7 @@ def graph_call(original, graphs, component, *args, **kwargs):
             # Reference discovers; the existing sync probe and two warmups
             # provide three passes of real sampling without another forward.
             learner.prepare(warmup_passes=3)
-        graph = graphs[state["variant"]] = StableGraph(
+        graph = graphs[graph_key] = StableGraph(
             PackedForward(original, learner),
             device=torch.cuda.current_stream().device,
             max_entries=8,
@@ -178,11 +179,12 @@ def real_prefix_call(original, graphs, component, *args, **kwargs):
     from lazy_head_policy import LazyHeadPolicy
 
     state = _ACTIVE.get()
-    graph = graphs.get(state["variant"])
+    graph_key = state.get("graph_variant", state["variant"])
+    graph = graphs.get(graph_key)
     if graph is None:
         learner = LazyHeadPolicy(get_world_group().cpu_group, enabled=state["autotune"])
         learner.begin()
-        graph = graphs[state["variant"]] = StableGraph(
+        graph = graphs[graph_key] = StableGraph(
             PackedForward(original, learner),
             device=torch.cuda.current_stream().device,
             max_entries=8,
@@ -190,6 +192,8 @@ def real_prefix_call(original, graphs, component, *args, **kwargs):
             name=f"head-matrix/{component}/real-prefix",
             group=get_world_group().device_group,
         )
+        if state.get("capture_without_probes"):
+            graph._probe_pending = False
     learner = graph.module.learner
     state["learner"] = learner
     before = graph.module.forward_calls
@@ -204,10 +208,14 @@ def real_prefix_call(original, graphs, component, *args, **kwargs):
         graph.output_type = type(result)
         if graph.module.prefix_steps == 2:
             learner.phase = "settle"
-            validation = graph(variant=None, packed_args=args, packed_kwargs=kwargs)
-            if isinstance(validation, dict) and graph.output_type is not dict:
-                validation = graph.output_type(**validation)
-            assert_equal(validation, result)
+            if state.get("capture_without_probes"):
+                packed = dict(packed_args=args, packed_kwargs=kwargs)
+                graph._capture((kwargs_signature(None), kwargs_signature(packed)), packed)
+            else:
+                validation = graph(variant=None, packed_args=args, packed_kwargs=kwargs)
+                if isinstance(validation, dict) and graph.output_type is not dict:
+                    validation = graph.output_type(**validation)
+                assert_equal(validation, result)
             if not graph.enabled or graph.captures != 1:
                 raise RuntimeError("Real-prefix graph capture failed")
             record(
@@ -243,6 +251,46 @@ def transformer_blocks(owner, hidden_states, encoder_hidden_states, *, hidden_fi
     )
 
 
+def qwen21_blocks(owner, hidden_states, *, block_caches, cache_branch, cache_write_len, **kwargs):
+    """Prefill stays original; learn from the first two real decode calls."""
+
+    def body(hidden_states, block_caches, **kwargs):
+        for index, block in enumerate(owner.transformer_blocks):
+            hidden_states = block(
+                hidden_states=hidden_states,
+                kv_cache=None if block_caches is None else block_caches[index],
+                cache_branch=cache_branch,
+                cache_write_len=cache_write_len,
+                **kwargs,
+            )
+        return hidden_states
+
+    state = _ACTIVE.get()
+    if state is None:
+        return body(hidden_states, block_caches, **kwargs)
+    if cache_write_len is not None or block_caches is None:
+        state["whole_prefix"] = True
+        state["original_prefill_blocks"] += len(owner.transformer_blocks)
+        try:
+            return body(hidden_states, block_caches, **kwargs)
+        finally:
+            state["whole_prefix"] = False
+    state["graph_variant"] = (state["variant"], cache_branch)
+    state["capture_without_probes"] = True
+    try:
+        return graph_call(
+            body,
+            owner._head_matrix_graphs,
+            f"transformer/blocks/{cache_branch}",
+            hidden_states,
+            block_caches=block_caches,
+            **kwargs,
+        )
+    finally:
+        state.pop("graph_variant")
+        state.pop("capture_without_probes")
+
+
 def install(pipeline):
     # Import the patched attention owner before the native probe, whose
     # microbenchmark utilities also reference that owner during import.
@@ -250,6 +298,16 @@ def install(pipeline):
     import native_prefilled as native
     from prefilled_probe import PrefilledPipeline
     from schedule_probe import run as scheduled
+
+    original_can_overlap = head.can_overlap
+
+    def can_overlap(*args, **kwargs):
+        state = _ACTIVE.get()
+        if state is not None and (state.get("whole_prefix") or state.get("reference_whole")):
+            return False
+        return original_can_overlap(*args, **kwargs)
+
+    head.can_overlap = can_overlap
 
     counters = {}
     if os.environ.get("HCMS_LAZY_COUNTERS") == "1":
@@ -406,6 +464,8 @@ def install(pipeline):
                     real_prefix=bool(extra.get("real_prefix", False)),
                     eager_forwards={},
                     real_eager_steps={},
+                    original_prefill_blocks=0,
+                    reference_whole=bool(extra.get("reference_whole", False)),
                 )
                 token = _ACTIVE.set(state)
                 native._SELECTED_CHUNKS = str(extra["chunks"])
@@ -425,13 +485,14 @@ def install(pipeline):
                     dist.barrier()
                 if state["fallbacks"]:
                     raise RuntimeError(f"The direct CE comparison fell back {state['fallbacks']} times")
-                stats = {
-                    name: graph.stats()
+                selected_graphs = {
+                    name + (f"/{variant[1]}" if isinstance(variant, tuple) else ""): graph
                     for name, graphs in components.items()
                     for variant, graph in graphs.items()
-                    if variant == state["variant"]
+                    if (variant[0] if isinstance(variant, tuple) else variant) == state["variant"]
                 }
-                if not stats and not state["direct_calls"]:
+                stats = {name: graph.stats() for name, graph in selected_graphs.items()}
+                if not stats and not state["direct_calls"] and not state["reference_whole"]:
                     raise RuntimeError("The requested head-overlap route was not executed")
                 if extra.get("audit"):
                     record(
@@ -451,11 +512,12 @@ def install(pipeline):
                         execution_counters={key: value - counters_before[key] for key, value in counters.items()},
                         eager_forwards=state["eager_forwards"],
                         real_eager_steps=state["real_eager_steps"],
+                        original_prefill_blocks=state["original_prefill_blocks"],
+                        reference_whole=state["reference_whole"],
                         lazy_policies={
                             name: dict(stats=graph.module.learner.stats, reports=graph.module.learner.reports)
-                            for name, graphs in components.items()
-                            for variant, graph in graphs.items()
-                            if variant == state["variant"] and graph.module.learner is not None
+                            for name, graph in selected_graphs.items()
+                            if graph.module.learner is not None
                         },
                     )
                 return result

@@ -66,14 +66,18 @@ class NativePipeline(PrefilledPipeline):
         tensors = inputs + (() if joint is None else joint)
         self.input_layout = layout(tensors)
         pointers = [x.data_ptr() for x in tensors]
-        operations_per_field = self.world + int(joint is not None)
         self.bindings = []
         for operations in self.forward_ops:
-            for index, operation in enumerate(operations):
-                field = index // operations_per_field
-                if joint is not None and index % operations_per_field == self.world:
-                    field += 3
-                self.bindings.append((operation, field, operation[2] - pointers[field]))
+            offset = 0
+            for field in range(3):
+                for operation in operations[offset : offset + self.world]:
+                    self.bindings.append((operation, field, operation[2] - pointers[field]))
+                offset += self.world
+                if joint is not None and joint[field].shape[1]:
+                    operation = operations[offset]
+                    self.bindings.append((operation, field + 3, operation[2] - pointers[field + 3]))
+                    offset += 1
+            assert offset == len(operations)
 
     def attend(self, q, k, v, unused_metadata):
         out = self.attention_kernel(q, k, v, self.metadata)
@@ -178,17 +182,19 @@ def run(
         )
     )
     joint = None
+    joint_strategy = "front"
     if md is not None:
         supported = supported and md.attn_mask is None and md.joint_attn_mask is None
-        if md.joint_query is not None and md.joint_query.shape[1]:
+        if any(x is not None for x in (md.joint_query, md.joint_key, md.joint_value)):
             joint = (md.joint_query, md.joint_key, md.joint_value)
+            joint_strategy = md.joint_strategy
             supported = (
                 supported
-                and md.joint_strategy == "front"
+                and joint_strategy in ("front", "rear")
                 and all(x is not None for x in joint)
-                and joint[0].shape == joint[1].shape == joint[2].shape
+                and joint[1].shape == joint[2].shape
                 and joint[0].shape[0] == 1
-                and joint[0].shape[2:] == q.shape[2:]
+                and all(x.shape[0] == 1 and x.shape[2:] == q.shape[2:] for x in joint)
                 and all(x.dtype == q.dtype and x.device == q.device for x in joint)
                 and all(x.stride(3) == 1 and x.stride(2) == x.shape[3] for x in joint)
             )
@@ -217,7 +223,7 @@ def run(
     if producer != compute.cuda_stream:
         raise RuntimeError("head overlap buffers require a single compute stream")
     tensors = inputs + (() if joint is None else joint)
-    signature = (head_sizes, layout(tensors))
+    signature = (head_sizes, layout(tensors), joint_strategy)
     kernel_md = (
         None if md is None else replace(md, joint_query=None, joint_key=None, joint_value=None, extra=dict(md.extra))
     )
@@ -239,7 +245,17 @@ def run(
         # Allocations are collective and occur only before capture. Retain
         # every live layout until its graph owner explicitly calls clear().
         torch.accelerator.synchronize()
-        plan = NativePipeline(inputs, joint, pg, selected_chunks, comm, kernel, kernel_md, head_sizes=head_sizes)
+        plan = NativePipeline(
+            inputs,
+            joint,
+            pg,
+            selected_chunks,
+            comm,
+            kernel,
+            kernel_md,
+            head_sizes=head_sizes,
+            joint_strategy=joint_strategy,
+        )
         _PLANS[plan_key] = (signature, plan)
     else:
         plan = cached[1]

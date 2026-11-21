@@ -59,10 +59,15 @@ class DirectPipeline:
         self.world, self.rank = dist.get_world_size(group), dist.get_rank(group)
         self.chunks, self.local_seq, self.dim = chunks, local_seq, dim
         self.joint_len = 0 if joint is None else joint[0].shape[1]
+        self.joint_kv_len = 0 if joint is None else joint[1].shape[1]
         if joint_strategy not in ("front", "rear"):
             raise ValueError("The direct plan requires front or rear joint placement")
-        if joint is not None and not (joint[0].shape == joint[1].shape == joint[2].shape):
-            raise ValueError("The direct plan does not yet support unequal joint Q/K/V shapes")
+        self.joint_strategy = joint_strategy
+        if joint is not None and not (
+            joint[1].shape == joint[2].shape
+            and joint[0].shape[:1] + joint[0].shape[2:] == joint[1].shape[:1] + joint[1].shape[2:]
+        ):
+            raise ValueError("Joint Q/K/V must share batch, heads and dimension; K/V must share length")
         self.sequence_offset = self.joint_len if joint_strategy == "front" else 0
         self.joint_offset = 0 if joint_strategy == "front" else local_seq * self.world
         self.output_joint_offset = 0 if joint_strategy == "front" else local_seq
@@ -82,7 +87,7 @@ class DirectPipeline:
         self.head_offsets = tuple(self.world * sum(self.head_sizes[:g]) for g in range(chunks))
         self.stream = torch.cuda.Stream()
         self.runtime = _ce_runtime()
-        sequence = local_seq * self.world + self.joint_len
+        sequence = local_seq * self.world + max(self.joint_len, self.joint_kv_len)
         self.forward = [SymmetricBuffer((3, sequence, size, dim), q.dtype, q.device, group) for size in self.head_sizes]
         self.output = SymmetricBuffer((1, self.joint_len + local_seq, heads, dim), q.dtype, q.device, group)
         self.ready = [torch.cuda.Event() for _ in range(chunks)]
@@ -92,7 +97,13 @@ class DirectPipeline:
         self.outgoing_bytes = 0
         # Cache all fixed QKV transfer geometry and input views outside the call.
         self.forward_ops = [self._forward_geometry(g) for g in range(chunks)]
-        self.parts = [tuple(x.tensor[i].unsqueeze(0) for i in range(3)) for x in self.forward]
+        self.parts = [
+            tuple(
+                x.tensor[i, : local_seq * self.world + (self.joint_len if i == 0 else self.joint_kv_len)].unsqueeze(0)
+                for i in range(3)
+            )
+            for x in self.forward
+        ]
 
     def region(self, name):
         return torch.profiler.record_function(name) if self.profile else nullcontext()
@@ -110,18 +121,20 @@ class DirectPipeline:
         shared = self.forward[g]
         section_bytes = shared.tensor[0].nbytes
         for index, x in enumerate(self.inputs):
+            joint_length = self.joint_len if index == 0 else self.joint_kv_len
+            sequence_offset = joint_length if self.joint_strategy == "front" else 0
             source_pitch = x.stride(1) * x.element_size()
             for peer in range(self.world):
                 dest = (
                     shared.handle.buffer_ptrs[peer]
                     + index * section_bytes
-                    + (self.sequence_offset + self.rank * self.local_seq) * width
+                    + (sequence_offset + self.rank * self.local_seq) * width
                 )
                 source = x.data_ptr() + (self.head_offsets[g] + peer * self.head_sizes[g]) * head_bytes
                 operations.append(self.geometry(dest, width, source, source_pitch, width, self.local_seq))
                 if peer != self.rank:
                     self.outgoing_bytes += width * self.local_seq
-            if self.joint is not None:
+            if self.joint is not None and joint_length:
                 j = self.joint[index]
                 source = j.data_ptr() + (self.head_offsets[g] + self.rank * self.head_sizes[g]) * head_bytes
                 dest = shared.handle.buffer_ptrs[self.rank] + index * section_bytes + self.joint_offset * width
@@ -132,7 +145,7 @@ class DirectPipeline:
                         source,
                         j.stride(1) * j.element_size(),
                         width,
-                        self.joint_len,
+                        joint_length,
                     )
                 )
         return operations
