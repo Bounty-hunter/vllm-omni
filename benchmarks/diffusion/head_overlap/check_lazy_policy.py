@@ -3,11 +3,45 @@
 """CPU checks for conservative selection and balanced natural-call sampling."""
 
 from collections import Counter
+from dataclasses import dataclass
+from types import SimpleNamespace
 
-from lazy_head_policy import candidate_index, candidates, choose
+from lazy_head_policy import candidate_index, candidates, choose, metadata_spec, qualified_samples
+
+
+class TensorLayout:
+    def __init__(self, stride=1):
+        self.shape, self.dtype, self.device, self.pitch = (3,), "int32", SimpleNamespace(type="cuda"), stride
+
+    def stride(self):
+        return (self.pitch,)
+
+    def item(self):
+        raise AssertionError("Device data must never be read by signature construction")
+
+
+@dataclass
+class Packed:
+    q_length: int
+    boundaries: object
+
+
+@dataclass
+class Metadata:
+    packing: Packed
+    extra: dict
 
 
 def main():
+    first = Metadata(Packed(9248, TensorLayout()), {"max_seqlen": 9248})
+    same = Metadata(Packed(9248, TensorLayout()), {"max_seqlen": 9248})
+    assert metadata_spec(first) == metadata_spec(same) and metadata_spec(first)[1]
+    assert metadata_spec(first) != metadata_spec(Metadata(Packed(4128, TensorLayout()), first.extra))
+    assert metadata_spec(first) != metadata_spec(Metadata(Packed(9248, TensorLayout(2)), first.extra))
+    assert not metadata_spec(object())[1]
+    assert not metadata_spec({"nested": [object()]})[1]
+    assert qualified_samples([[(99, True, 1), (101, True, 1)], [(100, True, 1), (103, True, 1)]]) == [103]
+    assert qualified_samples([[(99, True, 1), (101, True, 1)], [(100, True, 1), (103, False, 1)]]) == []
     for heads in (10, 12, 14):
         for tokens in (288, 1056, 1344, 2048, 7800, 8128, 9248, 14040, 16416, 20623, 26806, 47286):
             choices = candidates(heads, tokens, 128, 4 if heads != 12 else 2, 132)

@@ -12,9 +12,40 @@ import math
 import statistics
 import time
 from dataclasses import dataclass, field, is_dataclass, replace
+from dataclasses import fields as dataclass_fields
 from importlib.metadata import version
 
 from execution_counters import observe_core
+
+
+def tensor_spec(value):
+    return tuple(value.shape), tuple(value.stride()), str(value.dtype), value.device.type
+
+
+def metadata_spec(value):
+    """Describe host semantics and tensor layouts without reading device data."""
+    if hasattr(value, "shape"):
+        return tensor_spec(value), True
+    if isinstance(value, (int, float, bool, str, type(None))):
+        return value, True
+    if isinstance(value, dict):
+        rows = [(key, metadata_spec(item)) for key, item in sorted(value.items())]
+        return tuple((key, item[0]) for key, item in rows), all(item[1] for _, item in rows)
+    if isinstance(value, (tuple, list)):
+        rows = [metadata_spec(item) for item in value]
+        return tuple(item[0] for item in rows), all(item[1] for item in rows)
+    if is_dataclass(value):
+        rows = [(item.name, metadata_spec(getattr(value, item.name))) for item in dataclass_fields(value)]
+        return (type(value).__qualname__, tuple((name, item[0]) for name, item in rows)), all(
+            item[1] for _, item in rows
+        )
+    return ("opaque", type(value).__module__, type(value).__qualname__), False
+
+
+def qualified_samples(rank_rows):
+    """Keep only fully queued cores on every rank, after natural cold calls."""
+    discard = 2 if len(rank_rows) >= 10 else 1
+    return [max(row[0] for row in rows) for rows in rank_rows[discard:] if all(row[1] for row in rows)]
 
 
 def candidates(heads, tokens, dim, world, sms, *, flops=6e14, bandwidth=None):
@@ -138,34 +169,11 @@ class LazyHeadPolicy:
         )
         self.reports = []
 
-    @staticmethod
-    def tensor_spec(value):
-        return tuple(value.shape), tuple(value.stride()), str(value.dtype), value.device.type
-
     def signature(self, q, k, v, md, pg):
         import torch.distributed as dist
 
-        self.metadata_supported = True
-
-        def spec(value):
-            if hasattr(value, "shape"):
-                return self.tensor_spec(value)
-            if isinstance(value, (int, float, bool, str, type(None))):
-                return value
-            if isinstance(value, (tuple, list)):
-                return tuple(spec(item) for item in value)
-            if isinstance(value, dict):
-                return tuple((key, spec(item)) for key, item in sorted(value.items()))
-            if is_dataclass(value):
-                return type(value).__qualname__, tuple(
-                    (item.name, spec(getattr(value, item.name))) for item in fields(value)
-                )
-            self.metadata_supported = False
-            return "opaque", type(value).__module__, type(value).__qualname__
-
-        fields = () if md is None else tuple((key, spec(value)) for key, value in vars(md).items() if key != "extra")
-        extra = () if md is None else tuple((key, spec(value)) for key, value in sorted(md.extra.items()))
-        return self.identity, dist.get_world_size(pg), tuple(self.tensor_spec(x) for x in (q, k, v)), fields, extra
+        metadata, self.metadata_supported = metadata_spec(md)
+        return self.identity, dist.get_world_size(pg), tuple(tensor_spec(x) for x in (q, k, v)), metadata
 
     def begin(self):
         self.entries.clear()
@@ -347,14 +355,7 @@ class LazyHeadPolicy:
                 rows = [[peer[index][2][choice][i] for peer in peers] for i in range(counts[0])]
                 raw_maximum.append([max(row[0] for row in rank_rows) for rank_rows in rows])
                 submit_times.append([max(row[2] for row in rank_rows) for rank_rows in rows])
-                discard = 2 if len(rows) >= 10 else 1
-                maximum.append(
-                    [
-                        max(row[0] for row in rank_rows)
-                        for rank_rows in rows[discard:]
-                        if all(row[1] for row in rank_rows)
-                    ]
-                )
+                maximum.append(qualified_samples(rows))
             entry.selected = choose(maximum)
             self.reports.append(
                 dict(
