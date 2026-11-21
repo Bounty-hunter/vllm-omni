@@ -25,29 +25,22 @@ class StableGraph(GraphedForward):
 
     @contextmanager
     def _warmup_stream(self):
-        learner = getattr(self.module, "learner", None)
-        if learner is not None:
-            _ACTIVE.get()["learner"] = learner
         yield
 
     def _capture_graph(self, body):
         graph = torch.cuda.CUDAGraph()
         learner = getattr(self.module, "learner", None)
+        # Both controls use the same preparation. This replaces the original
+        # graph-context entry sync and avoids hiding learning cost behind
+        # different garbage collection / allocator-cache cleanup paths.
+        torch.accelerator.synchronize()
         if learner is not None:
-            # Replace torch.cuda.graph's entry synchronization, rather than
-            # adding a synchronization to the existing capture boundary.
-            torch.accelerator.synchronize()
             learner.finish()
-            graph.capture_begin(pool=self._pool)
-            try:
-                outputs = body()
-            finally:
-                graph.capture_end()
-            if self._pool is None:
-                self._pool = graph.pool()
-            return graph, outputs
-        with torch.cuda.graph(graph, pool=self._pool, stream=torch.cuda.current_stream(self.device)):
+        graph.capture_begin(pool=self._pool)
+        try:
             outputs = body()
+        finally:
+            graph.capture_end()
         if self._pool is None:
             self._pool = graph.pool()
         return graph, outputs
@@ -70,10 +63,7 @@ class PackedForward(nn.Module):
 
     def forward(self, packed_args, packed_kwargs):
         self.forward_calls += 1
-        output = self.body(*packed_args, **packed_kwargs)
-        if self.learner is not None and self.learner.phase == "discover":
-            self.learner.prepare()
-        return output
+        return self.body(*packed_args, **packed_kwargs)
 
 
 def record(**values):
