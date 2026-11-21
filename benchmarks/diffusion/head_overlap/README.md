@@ -76,8 +76,11 @@ The two actual calls replace the graph owner's previous warmup opportunities.
 The generic adapter retains its original synchronization-debug probe with
 sampling disabled, then uses its existing capture synchronization to read
 events, gather maximum-rank durations and freeze the policy. H3 replaces its
-two eager warmups with the two actual calls. Both retain one original graph
-validation replay. The second actual eager result is returned after validation;
+two eager warmups with the two actual calls. These adapters retain one graph
+validation replay. The later Qwen2.1 decode-block adapter captures directly,
+without an auxiliary synchronization probe or validation replay; its following
+real decode steps replay that graph. Execution budgets distinguish these paths.
+The second actual eager result is returned after capture and any validation;
 the validation output does not substitute for it. Later calls directly replay
 the frozen graph. There is no additional probe forward, candidate graph or
 per-layer synchronization. The remaining layers after the sampling window
@@ -166,6 +169,78 @@ Selection uses actual denoising layers inside that request, with their outputs
 feeding the pipeline; auxiliary graph probes supply no learning observations.
 Packed FA3 precision must be checked for every newly exercised layout;
 a numerical mismatch is a failed case, not an acceptable speedup.
+
+## CI shapes and schedule controls
+
+[CI-RESULTS.txt](CI-RESULTS.txt) retains all later Qwen-Image-2.1,
+Wan-A14B T2V/I2V, HunyuanVideo-1.5 T2V/I2V, and H3 image/video results.
+It includes common 1024 image/video shapes, CI workloads, failed attempts,
+whole fallbacks, first requests and every additional comparison arm.
+LTX2 could not initialize with the installed diffusers decoder; it has no
+performance sample. Shared dependencies were not upgraded.
+[ci-summary.json](evidence/ci-summary.json) and
+[ci-evidence.zip](evidence/ci-evidence.zip) retain source revisions, raw
+samples, all-rank audits, integration patches and verification scripts.
+
+The bounded prefix can compare whole attention with one explicitly supplied
+two-, three- or four-group partition. The generic recipes use
+`candidate_partition`; H3 reuses `head_partition`. A small final group can
+cover the preceding large group's return, but adds another attention call,
+copy submissions and a forward-ready fence. The reports separate the pure
+attention splitting cost from complete-core and complete-request savings.
+The default CPU candidate generator still predicts two groups. These supplied
+multi-group candidates are controlled experiments, without a general automatic
+selector among two, three and four groups.
+
+The learner freezes its communication schedule with the selected partition.
+The schedule participates in the rank agreement and policy cache key; changing
+it within a generic graph case raises instead of replaying an incompatible
+graph. `overlap-return` and `overlap-staging` remain optional ablations.
+`stage-gated` additionally orders the next prefetch after compute is ready for
+the current attention, without waiting for that attention to finish. Its
+dependency handles are realized during preparation. All peer fences and CE
+source lifetimes remain intact; see [FENCE-PROOF.txt](FENCE-PROOF.txt).
+An extra dependency can remove useful lookahead. These alternatives are
+measured against the same captured partition and are not default schedules.
+The separate CUDA API capability check reads graph-exec instantiation flags
+of one: `UseNodePriority` (eight) is absent at compute priorities zero and
+minus one. It establishes no model speedup from changing stream priorities.
+
+The optional `HCMS_COPY_SUBMITTER` library batches host submission of the
+original `cudaMemcpy2DAsync` calls. It does not add a GPU kernel, change copy
+bytes, or use an incompatible batch-copy CUDA API. Experiment payloads build
+`copy_submitter.cpp` with `c++ -O2 -std=c++17 -shared -fPIC`, then record build
+time and source/binary hashes. The environment variable points to that
+task-local library; there is no automatic shared installation. Its purpose
+is to reduce CPU submission gaps during the actual prefix, so that qualified
+observations better represent graph execution. Its build cost and candidate
+preparation are reported separately from steady request latency.
+
+H3 video compares video pixels and FP32 audio bytes at three seeds. The
+original audio decoder produced different waveforms even for identical latent
+inputs in an A/A run. Accepted video comparisons explicitly set
+`HCMS_AUDIO_DETERMINISTIC=1` for every arm and the eager reference. This wraps
+only audio decode in cuDNN deterministic mode with benchmarking disabled.
+It is a deployment difference, not a relaxed output tolerance. H3's eager
+reference uses whole direct CE; the Qwen/Hy `reference_whole` arms use original
+Ulysses. The reports distinguish these references.
+
+Runtime audits verify actual FP8 module counts, and H3 verifies native VAE
+world size four. Qwen2.1 uses `DistributedAutoencoderKLQwenImage21` with VAE4
+configured; the earlier Qwen/FLUX VAE2 warning does not apply to this model.
+Per-request active VAE tile allocation was not recorded. Communication shares
+use frozen matching-layout peer controls and actual graph core occurrences;
+they are estimates, exclude Qwen2.1's original prefill, and do not measure
+the text encoder or VAE's other communication. New schedule controls do not
+change this denominator after the comparison.
+
+The verification checks actual captured widths, identical rank decisions,
+normal prefix call counts, and no added steady API synchronization,
+sampling timers or Python attention execution. It reports reused smoke graphs
+separately from newly captured first shapes. There is no extra probe forward;
+candidate resources, event records and trying a slower plan can still increase
+first-request latency. This remains a fixed-case offline graph experiment,
+without default serving or concurrent-request qualification.
 
 ## Previous warmup-sampling prototype
 

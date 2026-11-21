@@ -107,6 +107,23 @@ The retained source list and final compute wait also preserve CE source
 lifetimes. These are opt-in benchmark ablations until exactness, delayed
 consumer reuse and full-request performance have been measured.
 
+Optional admission-gated prefetch
+stage-gated adds a compute admission event C_g after compute's wait for
+F_g-ready and before A_g. Communication waits for C_g before submitting
+F_(g+1). This bounds prefetch by compute progress even when the graph executes
+independent stream nodes ahead of their original host submission times.
+It does not order F_(g+1) after A_g completion, so their overlap remains legal.
+
+There is no cycle: F_g-ready precedes the communication wait for C_g, and
+C_g does not depend on F_(g+1). For g>0, C_g also follows A_(g-1) and its local
+return on compute. All original produced events, peer-ready fences and final
+completion fences remain. The previous lifetime and slot-reuse arguments
+therefore still hold. Dependency handles are realized during preparation;
+there is no timing event, host wait or allocation in the sampling call.
+CUDA Graph retains these dependencies; no new Python work runs on replay.
+An added edge may reduce useful lookahead, so performance must be measured
+against the same partition without the gate. It is not the default schedule.
+
 Explicit static-graph output slots
 native_prefilled.output_slot(key) opts a fixed graph/layer into a private
 symmetric output slot. The caller warms the slot before capture, consumes it

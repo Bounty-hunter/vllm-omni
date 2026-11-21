@@ -1,0 +1,253 @@
+Attention通算重叠：CI/常见shape与调度优化的完整结果
+
+硬件：NVIDIA L20X，NV18；batch/concurrency=1；离线完整generate请求，不含HTTP/视频mux。
+attention BF16/FA3，DiT FP8；Wan/H3 VAE4。Qwen2.1使用DistributedAutoencoderKLQwenImage21并配置VAE4；未采集逐请求瓦片分配。
+此前旧Qwen/FLUX的VAE2配置被registry忽略；不能把该限制套到Qwen2.1，也不能把配置度数当每张小图的活跃瓦片数。
+真实DiT调用一发现布局，调用二的前24个同签名core比较whole与一个候选。每层只执行一次并进入后续计算。
+两个真实调用替代原有预热机会；capture记录、同步检查及验证replay按adapter分别计数。稳态直接replay，无探测事件/查询/采样等待。
+H3与generic保留一次验证replay；Qwen2.1 block adapter不添加辅助sync probe或验证replay，后续真实步骤replay已capture的图。
+多段为指定候选实验，默认CPU候选生成器仍只生成两段；不是通用的2/3/4段自动选择器。
+H3视频所有对照臂启用确定性音频解码：cudnn benchmark=False,deterministic=True。原始A/A波形不逐位一致的失败仍保留。
+H3 original参考是eager block loop+whole direct CE；Qwen/Hy reference_whole参考才是原始Ulysses。
+正值=同一run/case内中位数时延降低；whole回退的正负波动是A/A，不能算overlap收益。
+通信估计仅含attention-core peer exchange，使用完全匹配QKV/joint布局的孤立控制×实际图core次数/E2E。
+Qwen2.1估计不含原始prefill；不含text encoder/VAE通信，不是请求内测量；孤立各段中位数不可当作精确可加的关键路径。
+总通信字节未减少；优化减少暴露时间。纯attention拆分税仅在控制分组与实际capture分组一致时列出。
+首请求含事件、资源准备、可能慢候选及编译成本。warm是完整请求的脚本标签，不是辅助forward；首请求顺序有缓存偏差，不是纯探索税。
+
+本轮验证：51条比较，1300个正常完整请求，48条完整core控制，18批失败/中断。
+比较条数包含同场景复测和不同方案，不是独立shape数；失败sequence与其失败子任务分别留痕，不重复当作数值错误。
+
+本轮结论
+H3-Image 4K的2+10+2在独立30对中提升3.89%，旧双块同run为3.24%；512/1024保留whole。
+Wan33的1+2+6+1，独立30对stage-local提升3.83%；另一12对为4.69%。全部复测均保留，不能只挑较高值。
+Wan33把非末块本地回传移到comm后，30对相同分组的额外配对节省区间跨零；预取约束也未证实E2E额外收益。
+邻近1+1+7+1未超过同run的1+2+6+1，未替换现有候选。简化轮次模型不证明实际launch grid。
+H3视频1024/107f的尾块方案提升3.38%（8对），约为匹配通信估计的49%；512视频旧双块更好。
+Qwen2.1 1536/ref1启用host submitter后独立30对提升2.66%；旧独立复核曾回退whole，两个结果均保留。
+“节省>=通信占比50%”在部分短轮次结果中达到点估计，尚未稳定达成，更不适用于所有case。
+独立API实验读取默认torch图exec flags=1，未开启UseNodePriority(8)；compute priority=-1仍如此。未据此宣称优先级调度收益。
+
+全部完整请求比较（每项均保留；1对smoke不算稳定性能结论）
+run | case | variant/schedule | 对数 | whole ms | 方案 ms | 时延下降% | 估计通信占比% | 节省/通信估计% | 实际分组 | 95%配对节省区间ms | 结论
+hcms-10448-ci-h3image-tail-20261121-r21 | h3-512-real-prefix | previous/stage-local-shared-slots | 8 | 201.122 | 201.008 | +0.057 | 未匹配 | A/A或未匹配 | blocks:14 | [-2.186,4.330] | Whole fallback: A/A, not overlap gain
+hcms-10448-ci-h3image-tail-20261121-r21 | h3-512-real-prefix | adaptive/stage-local-shared-slots | 8 | 201.122 | 198.465 | +1.321 | 未匹配 | A/A或未匹配 | blocks:14 | [0.033,4.654] | Whole fallback: A/A, not overlap gain
+hcms-10448-ci-h3image-tail-20261121-r21 | h3-1024-real-prefix | previous/stage-local-shared-slots | 8 | 327.430 | 329.842 | -0.736 | 未匹配 | A/A或未匹配 | blocks:14 | [-4.100,5.936] | Whole fallback: A/A, not overlap gain
+hcms-10448-ci-h3image-tail-20261121-r21 | h3-1024-real-prefix | adaptive/stage-local-shared-slots | 8 | 327.430 | 328.756 | -0.405 | 未匹配 | A/A或未匹配 | blocks:14 | [-4.152,2.961] | Whole fallback: A/A, not overlap gain
+hcms-10448-ci-h3image-tail-20261121-r21 | h3-4k-real-prefix | previous/stage-local-shared-slots | 8 | 2725.132 | 2634.105 | +3.340 | 10.20 | 32.8 | blocks:3+11 | [88.334,100.742] | Positive paired CI; independent long confirmation still needed
+hcms-10448-ci-h3image-tail-20261121-r21 | h3-4k-real-prefix | adaptive/stage-local-shared-slots | 8 | 2725.132 | 2618.209 | +3.924 | 10.20 | 38.5 | blocks:2+10+2 | [98.063,125.561] | Positive paired CI; independent long confirmation still needed
+hcms-10448-ci-h3image-tail-confirm-20261121-r24 | h3-4k-real-prefix | previous/stage-local-shared-slots | 30 | 2709.262 | 2621.533 | +3.238 | 10.26 | 31.6 | blocks:3+11 | [84.725,89.796] | This independent 30-pair run supports a gain
+hcms-10448-ci-h3image-tail-confirm-20261121-r24 | h3-4k-real-prefix | triple/stage-local-shared-slots | 30 | 2709.262 | 2603.808 | +3.892 | 10.26 | 37.9 | blocks:2+10+2 | [100.063,109.267] | This independent 30-pair run supports a gain
+hcms-10448-ci-h3image-tail-confirm-20261121-r24 | h3-4k-real-prefix | adaptive/stage-gated-shared-slots | 30 | 2709.262 | 2605.866 | +3.816 | 10.26 | 37.2 | blocks:2+10+2 | [96.736,107.942] | This independent 30-pair run supports a gain
+hcms-10448-ci-h3video-deterministic-smoke-20261121-r10 | h3video-t2v-512x512-f107-s8-smoke | repeat_whole/stage-local-shared-slots | 1 | 2700.200 | 2697.777 | +0.090 | 7.45 | A/A或未匹配 | blocks:14 | [2.423,2.423] | Whole fallback: A/A, not overlap gain
+hcms-10448-ci-h3video-deterministic-smoke-20261121-r10 | h3video-t2v-512x512-f107-s8-smoke | adaptive/stage-local-shared-slots | 1 | 2700.200 | 2648.519 | +1.914 | 7.45 | 25.7 | blocks:5+9 | [51.681,51.681] | Positive paired CI; independent long confirmation still needed
+hcms-10448-ci-h3video-deterministic-smoke-20261121-r10 | h3video-t2v-512x512-f107-s8-smoke | repeat_whole2/stage-local-shared-slots | 1 | 2700.200 | 2667.596 | +1.207 | 7.45 | A/A或未匹配 | blocks:14 | [32.604,32.604] | Whole fallback: A/A, not overlap gain
+hcms-10448-ci-h3video-matrix-20261121-r10 | h3video-t2v-1024x1024-f107-s8-extra | adaptive/stage-local-shared-slots | 8 | 10790.051 | 10486.109 | +2.817 | 6.94 | 40.6 | blocks:2+12 | [203.582,341.520] | Positive paired CI; independent long confirmation still needed
+hcms-10448-ci-h3video-matrix-20261121-r10 | h3video-t2v-ci-1344x768_frames209_steps8 | adaptive/stage-local-shared-slots | 8 | 28331.369 | 27891.352 | +1.553 | 4.94 | 31.4 | blocks:1+13 | [-236.622,517.175] | Paired CI crosses zero: gain unconfirmed
+hcms-10448-ci-h3video-tail-20261121-r21 | h3video-t2v-512x512-f107-s8-smoke | previous/stage-local-shared-slots | 8 | 2676.510 | 2611.651 | +2.423 | 7.52 | 32.2 | blocks:5+9 | [52.001,99.318] | Positive paired CI; independent long confirmation still needed
+hcms-10448-ci-h3video-tail-20261121-r21 | h3video-t2v-512x512-f107-s8-smoke | adaptive/stage-local-shared-slots | 8 | 2676.510 | 2649.545 | +1.007 | 7.52 | 13.4 | blocks:2+10+2 | [19.907,70.777] | Positive paired CI; independent long confirmation still needed
+hcms-10448-ci-h3video-tail-20261121-r21 | h3video-t2v-1024x1024-f107-s8-extra | previous/stage-local-shared-slots | 8 | 10754.876 | 10437.037 | +2.955 | 6.96 | 42.5 | blocks:2+12 | [266.127,471.826] | Positive paired CI; independent long confirmation still needed
+hcms-10448-ci-h3video-tail-20261121-r21 | h3video-t2v-1024x1024-f107-s8-extra | adaptive/stage-local-shared-slots | 8 | 10754.876 | 10391.118 | +3.382 | 6.96 | 48.6 | blocks:2+10+2 | [300.519,470.689] | Positive paired CI; independent long confirmation still needed
+hcms-10448-ci-hy15-i2v-20261121-r6 | hy15-i2v-ci-832x480_frames33_steps4 | adaptive/stage-local-shared-slots | 10 | 3606.626 | 3602.089 | +0.126 | 2.44 | 5.2 | transformer/a8f59cc60470e3e6:8;transformer/7d4f25d62b99a08d:1+7 | [-25.128,31.918] | Paired CI crosses zero: gain unconfirmed
+hcms-10448-ci-hy15-i2v-20261121-r6 | hy15-i2v-1280x720-f33-s4-extra | adaptive/stage-local-shared-slots | 10 | 9366.816 | 9285.529 | +0.868 | 1.98 | 43.8 | transformer/1a032454230f78e5:1+7;transformer/334601f98fe3c2a7:1+7 | [38.989,119.002] | Positive paired CI; independent long confirmation still needed
+hcms-10448-ci-hy15-i2v-smoke-20261121-r6 | hy15-i2v-ci-832x480_frames33_steps4 | adaptive/stage-local-shared-slots | 1 | 3563.251 | 3592.286 | -0.815 | 2.47 | -33.1 | transformer/a8f59cc60470e3e6:1+7;transformer/7d4f25d62b99a08d:1+7 | [-29.035,-29.035] | Paired CI crosses zero: gain unconfirmed
+hcms-10448-ci-hy15-t2v-20261121-r3 | hy15-t2v-ci-832x480_frames33_steps4 | adaptive/stage-local-shared-slots | 30 | 3280.925 | 3274.788 | +0.187 | 未匹配 | A/A或未匹配 | transformer/2ee4cc5796210295:8;transformer/911cdef0ddd16d4c:8 | [-11.979,12.520] | Whole fallback: A/A, not overlap gain
+hcms-10448-ci-hy15-t2v-720p-20261121-r6 | hy15-t2v-1280x720-f33-s4-extra | adaptive/stage-local-shared-slots | 10 | 8920.362 | 8875.824 | +0.499 | 2.03 | 24.6 | transformer/5a183b3063699fee:1+7;transformer/f0310f9a947ece19:1+7 | [19.837,74.030] | Positive paired CI; independent long confirmation still needed
+hcms-10448-ci-hy15-t2v-smoke-20261121-r3 | hy15-t2v-ci-832x480_frames33_steps4 | adaptive/stage-local-shared-slots | 1 | 3280.367 | 3262.723 | +0.538 | 未匹配 | A/A或未匹配 | transformer/2ee4cc5796210295:8;transformer/911cdef0ddd16d4c:1+7 | [17.644,17.644] | Positive paired CI; independent long confirmation still needed
+hcms-10448-ci-qwen21-20261121-r4 | qwen21-ci-512x512_steps20 | adaptive/stage-local-shared-slots | 10 | 373.331 | 374.458 | -0.302 | 15.21 | A/A或未匹配 | transformer/cond:8 | [-3.040,2.867] | Whole fallback: A/A, not overlap gain
+hcms-10448-ci-qwen21-20261121-r4 | qwen21-1024x1024-steps20-text | adaptive/stage-local-shared-slots | 10 | 896.351 | 897.537 | -0.132 | 11.90 | A/A或未匹配 | transformer/cond:8 | [-4.207,4.376] | Whole fallback: A/A, not overlap gain
+hcms-10448-ci-qwen21-20261121-r4 | qwen21-ci-1536x1536_steps35 | adaptive/stage-local-shared-slots | 10 | 3024.957 | 3025.401 | -0.015 | 11.66 | A/A或未匹配 | transformer/cond:8 | [-2.549,2.754] | Whole fallback: A/A, not overlap gain
+hcms-10448-ci-qwen21-20261121-r4 | qwen21-1536x1536-steps35-ref1 | adaptive/stage-local-shared-slots | 10 | 3712.181 | 3615.536 | +2.603 | 9.59 | 27.2 | transformer/cond:3+5 | [85.968,107.339] | Positive paired CI; independent long confirmation still needed
+hcms-10448-ci-qwen21-ref-confirm-20261121-r6 | qwen21-1536x1536-steps35-ref1 | adaptive/stage-local-shared-slots | 30 | 3710.129 | 3709.213 | +0.025 | 9.59 | A/A或未匹配 | transformer/cond:8 | [-4.936,3.048] | Whole fallback: A/A, not overlap gain
+hcms-10448-ci-qwen21-smoke-20261121-r4 | qwen21-ci-512x512_steps20 | adaptive/stage-local-shared-slots | 1 | 385.546 | 378.748 | +1.763 | 14.73 | A/A或未匹配 | transformer/cond:8 | [6.798,6.798] | Whole fallback: A/A, not overlap gain
+hcms-10448-ci-submitter-qwen-20261121-r9 | qwen21-1536x1536-steps35-ref1 | adaptive/stage-local-shared-slots | 30 | 3751.149 | 3651.399 | +2.659 | 9.49 | 28.0 | transformer/cond:3+5 | [89.745,102.795] | This independent 30-pair run supports a gain
+hcms-10448-ci-wan22-i2v-20261121-r2 | wan22-i2v-ci-832x480_frames81_steps4 | adaptive/stage-local-shared-slots | 10 | 7060.747 | 6962.345 | +1.394 | 未匹配 | A/A或未匹配 | transformer:2+8;transformer_2:2+8 | [74.546,131.966] | Positive paired CI; independent long confirmation still needed
+hcms-10448-ci-wan22-i2v-20261121-r2 | wan22-i2v-ci-1280x720_frames121_steps4 | adaptive/stage-local-shared-slots | 10 | 43689.848 | 43651.201 | +0.088 | 未匹配 | A/A或未匹配 | transformer:10;transformer_2:10 | [-241.713,107.590] | Whole fallback: A/A, not overlap gain
+hcms-10448-ci-wan22-i2v-confirm-20261121-r6 | wan22-i2v-ci-832x480_frames81_steps4 | adaptive/stage-local-shared-slots | 30 | 7084.663 | 6957.831 | +1.790 | 6.00 | 29.8 | transformer:2+8;transformer_2:2+8 | [101.893,145.603] | This independent 30-pair run supports a gain
+hcms-10448-ci-wan33-more-groups-20261121-r19 | wan14b-480x832-f33-real-prefix | previous/stage-local-shared-slots | 12 | 2188.809 | 2126.112 | +2.864 | 8.54 | 33.5 | transformer:3+7;transformer_2:3+7 | [23.108,89.750] | Positive paired CI; independent long confirmation still needed
+hcms-10448-ci-wan33-more-groups-20261121-r19 | wan14b-480x832-f33-real-prefix | triple/stage-local-shared-slots | 12 | 2188.809 | 2133.615 | +2.522 | 8.54 | 29.5 | transformer:2+2+6;transformer_2:2+2+6 | [27.320,109.210] | Positive paired CI; independent long confirmation still needed
+hcms-10448-ci-wan33-more-groups-20261121-r19 | wan14b-480x832-f33-real-prefix | adaptive/stage-local-shared-slots | 12 | 2188.809 | 2106.913 | +3.742 | 8.54 | 43.8 | transformer:1+1+2+6;transformer_2:1+1+2+6 | [52.006,118.795] | Positive paired CI; independent long confirmation still needed
+hcms-10448-ci-wan33-tail-20261121-r21 | wan14b-480x832-f33-real-prefix | previous/stage-local-shared-slots | 12 | 2163.625 | 2118.757 | +2.074 | 8.64 | 24.0 | transformer:3+7;transformer_2:3+7 | [6.960,66.100] | Positive paired CI; independent long confirmation still needed
+hcms-10448-ci-wan33-tail-20261121-r21 | wan14b-480x832-f33-real-prefix | triple/stage-local-shared-slots | 12 | 2163.625 | 2138.339 | +1.169 | 8.64 | 13.5 | transformer:2+7+1;transformer_2:2+7+1 | [7.710,68.866] | Positive paired CI; independent long confirmation still needed
+hcms-10448-ci-wan33-tail-20261121-r21 | wan14b-480x832-f33-real-prefix | adaptive/stage-local-shared-slots | 12 | 2163.625 | 2100.819 | +2.903 | 8.64 | 33.6 | transformer:1+2+6+1;transformer_2:1+2+6+1 | [42.475,103.436] | Positive paired CI; independent long confirmation still needed
+hcms-10448-ci-wan33-tail-gated-20261121-r23 | wan14b-480x832-f33-real-prefix | previous/stage-local-shared-slots | 12 | 2148.159 | 2074.927 | +3.409 | 8.70 | 39.2 | transformer:1+2+6+1;transformer_2:1+2+6+1 | [41.626,83.002] | Positive paired CI; independent long confirmation still needed
+hcms-10448-ci-wan33-tail-gated-20261121-r23 | wan14b-480x832-f33-real-prefix | triple/stage-gated-shared-slots | 12 | 2148.159 | 2098.808 | +2.297 | 8.70 | 26.4 | transformer:2+7+1;transformer_2:2+7+1 | [37.953,65.735] | Positive paired CI; independent long confirmation still needed
+hcms-10448-ci-wan33-tail-gated-20261121-r23 | wan14b-480x832-f33-real-prefix | adaptive/stage-gated-shared-slots | 12 | 2148.159 | 2085.502 | +2.917 | 8.70 | 33.5 | transformer:1+2+6+1;transformer_2:1+2+6+1 | [46.528,75.508] | Positive paired CI; independent long confirmation still needed
+hcms-10448-ci-wan33-tail-return-20261121-r22 | wan14b-480x832-f33-real-prefix | previous/stage-local-shared-slots | 30 | 2155.711 | 2073.252 | +3.825 | 8.67 | 44.1 | transformer:1+2+6+1;transformer_2:1+2+6+1 | [58.470,94.847] | This independent 30-pair run supports a gain
+hcms-10448-ci-wan33-tail-return-20261121-r22 | wan14b-480x832-f33-real-prefix | triple/overlap-return-shared-slots | 30 | 2155.711 | 2108.342 | +2.197 | 8.67 | 25.3 | transformer:2+7+1;transformer_2:2+7+1 | [24.013,95.585] | This independent 30-pair run supports a gain
+hcms-10448-ci-wan33-tail-return-20261121-r22 | wan14b-480x832-f33-real-prefix | adaptive/overlap-return-shared-slots | 30 | 2155.711 | 2070.823 | +3.938 | 8.67 | 45.4 | transformer:1+2+6+1;transformer_2:1+2+6+1 | [65.574,107.562] | This independent 30-pair run supports a gain
+hcms-10448-ci-wan33-wave-boundary-20261121-r25 | wan14b-480x832-f33-real-prefix | previous/stage-local-shared-slots | 12 | 2196.566 | 2127.205 | +3.158 | 8.51 | 37.1 | transformer:1+1+2+6;transformer_2:1+1+2+6 | [29.694,99.754] | Positive paired CI; independent long confirmation still needed
+hcms-10448-ci-wan33-wave-boundary-20261121-r25 | wan14b-480x832-f33-real-prefix | triple/stage-local-shared-slots | 12 | 2196.566 | 2093.601 | +4.688 | 8.51 | 55.1 | transformer:1+2+6+1;transformer_2:1+2+6+1 | [21.763,128.965] | Positive paired CI; independent long confirmation still needed
+hcms-10448-ci-wan33-wave-boundary-20261121-r25 | wan14b-480x832-f33-real-prefix | adaptive/stage-local-shared-slots | 12 | 2196.566 | 2100.267 | +4.384 | 8.51 | 51.5 | transformer:1+1+7+1;transformer_2:1+1+7+1 | [51.675,112.078] | Positive paired CI; independent long confirmation still needed
+hcms-10448-ci-wan81-tail-20261121-r21 | wan22-i2v-ci-832x480_frames81_steps4 | previous/stage-local-shared-slots | 8 | 7349.483 | 7206.846 | +1.941 | 5.79 | 33.5 | transformer:2+8;transformer_2:2+8 | [-92.428,354.719] | Paired CI crosses zero: gain unconfirmed
+hcms-10448-ci-wan81-tail-20261121-r21 | wan22-i2v-ci-832x480_frames81_steps4 | adaptive/stage-local-shared-slots | 8 | 7349.483 | 7176.760 | +2.350 | 5.79 | 40.6 | transformer:1+8+1;transformer_2:1+8+1 | [-59.359,384.599] | Paired CI crosses zero: gain unconfirmed
+
+相同capture分组的纯调度对比（不混入切分比例变化）
+run | case | baseline schedule -> schedule | ms -> ms | 配对节省中位数ms | 配对95%区间ms
+hcms-10448-ci-h3image-tail-confirm-20261121-r24 | h3-4k-real-prefix | stage-local-shared-slots -> stage-gated-shared-slots | 2603.808 -> 2605.866 | -3.056 | [-7.333917543292046, 0.37826597690582275]
+hcms-10448-ci-wan33-tail-gated-20261121-r23 | wan14b-480x832-f33-real-prefix | stage-local-shared-slots -> stage-gated-shared-slots | 2074.927 -> 2085.502 | -8.038 | [-24.163153022527695, 22.804202511906624]
+hcms-10448-ci-wan33-tail-return-20261121-r22 | wan14b-480x832-f33-real-prefix | stage-local-shared-slots -> overlap-return-shared-slots | 2073.252 -> 2070.823 | 4.178 | [-9.113388136029243, 12.350651435554028]
+
+首形状完整请求（单次观测，包含建图/编译，受运行顺序影响）
+run | case | variant | whole首请求ms | 方案首请求ms
+hcms-10448-ci-h3image-tail-20261121-r21 | h3-512-real-prefix | previous | 1608.925 | 537.546
+hcms-10448-ci-h3image-tail-20261121-r21 | h3-512-real-prefix | adaptive | 1608.925 | 523.943
+hcms-10448-ci-h3image-tail-20261121-r21 | h3-1024-real-prefix | previous | 1271.100 | 639.871
+hcms-10448-ci-h3image-tail-20261121-r21 | h3-1024-real-prefix | adaptive | 1271.100 | 621.558
+hcms-10448-ci-h3image-tail-20261121-r21 | h3-4k-real-prefix | previous | 3937.539 | 3655.202
+hcms-10448-ci-h3image-tail-20261121-r21 | h3-4k-real-prefix | adaptive | 3937.539 | 3744.033
+hcms-10448-ci-h3image-tail-confirm-20261121-r24 | h3-4k-real-prefix | previous | 4450.273 | 3709.850
+hcms-10448-ci-h3image-tail-confirm-20261121-r24 | h3-4k-real-prefix | triple | 4450.273 | 3746.144
+hcms-10448-ci-h3image-tail-confirm-20261121-r24 | h3-4k-real-prefix | adaptive | 4450.273 | 3227.652
+hcms-10448-ci-h3video-deterministic-smoke-20261121-r10 | h3video-t2v-512x512-f107-s8-smoke | repeat_whole | 15363.001 | 2702.437
+hcms-10448-ci-h3video-deterministic-smoke-20261121-r10 | h3video-t2v-512x512-f107-s8-smoke | adaptive | 15363.001 | 3641.281
+hcms-10448-ci-h3video-deterministic-smoke-20261121-r10 | h3video-t2v-512x512-f107-s8-smoke | repeat_whole2 | 15363.001 | 2692.525
+hcms-10448-ci-h3video-matrix-20261121-r10 | h3video-t2v-1024x1024-f107-s8-extra | adaptive | 27673.793 | 12476.070
+hcms-10448-ci-h3video-matrix-20261121-r10 | h3video-t2v-ci-1344x768_frames209_steps8 | adaptive | 32819.374 | 32077.458
+hcms-10448-ci-h3video-tail-20261121-r21 | h3video-t2v-512x512-f107-s8-smoke | previous | 19590.859 | 3503.512
+hcms-10448-ci-h3video-tail-20261121-r21 | h3video-t2v-512x512-f107-s8-smoke | adaptive | 19590.859 | 3688.329
+hcms-10448-ci-h3video-tail-20261121-r21 | h3video-t2v-1024x1024-f107-s8-extra | previous | 13413.698 | 12488.356
+hcms-10448-ci-h3video-tail-20261121-r21 | h3video-t2v-1024x1024-f107-s8-extra | adaptive | 13413.698 | 12462.966
+hcms-10448-ci-hy15-i2v-20261121-r6 | hy15-i2v-ci-832x480_frames33_steps4 | adaptive | 6579.123 | 5850.008
+hcms-10448-ci-hy15-i2v-20261121-r6 | hy15-i2v-1280x720-f33-s4-extra | adaptive | 13421.060 | 13082.445
+hcms-10448-ci-hy15-i2v-smoke-20261121-r6 | hy15-i2v-ci-832x480_frames33_steps4 | adaptive | 5681.165 | 5713.076
+hcms-10448-ci-hy15-t2v-20261121-r3 | hy15-t2v-ci-832x480_frames33_steps4 | adaptive | 5191.264 | 5114.165
+hcms-10448-ci-hy15-t2v-720p-20261121-r6 | hy15-t2v-1280x720-f33-s4-extra | adaptive | 12997.670 | 12582.948
+hcms-10448-ci-hy15-t2v-smoke-20261121-r3 | hy15-t2v-ci-832x480_frames33_steps4 | adaptive | 5407.189 | 5133.474
+hcms-10448-ci-qwen21-20261121-r4 | qwen21-ci-512x512_steps20 | adaptive | 2611.521 | 586.952
+hcms-10448-ci-qwen21-20261121-r4 | qwen21-1024x1024-steps20-text | adaptive | 2598.792 | 1558.276
+hcms-10448-ci-qwen21-20261121-r4 | qwen21-ci-1536x1536_steps35 | adaptive | 4384.206 | 3538.813
+hcms-10448-ci-qwen21-20261121-r4 | qwen21-1536x1536-steps35-ref1 | adaptive | 5063.673 | 4264.103
+hcms-10448-ci-qwen21-ref-confirm-20261121-r6 | qwen21-1536x1536-steps35-ref1 | adaptive | 7349.469 | 4342.164
+hcms-10448-ci-qwen21-smoke-20261121-r4 | qwen21-ci-512x512_steps20 | adaptive | 2549.003 | 591.448
+hcms-10448-ci-submitter-qwen-20261121-r9 | qwen21-1536x1536-steps35-ref1 | adaptive | 6887.018 | 4235.133
+hcms-10448-ci-wan22-i2v-20261121-r2 | wan22-i2v-ci-832x480_frames81_steps4 | adaptive | 14805.847 | 10332.392
+hcms-10448-ci-wan22-i2v-20261121-r2 | wan22-i2v-ci-1280x720_frames121_steps4 | adaptive | 64962.256 | 63643.078
+hcms-10448-ci-wan22-i2v-confirm-20261121-r6 | wan22-i2v-ci-832x480_frames81_steps4 | adaptive | 14797.437 | 10342.375
+hcms-10448-ci-wan33-more-groups-20261121-r19 | wan14b-480x832-f33-real-prefix | previous | 8648.200 | 4065.592
+hcms-10448-ci-wan33-more-groups-20261121-r19 | wan14b-480x832-f33-real-prefix | triple | 8648.200 | 6119.188
+hcms-10448-ci-wan33-more-groups-20261121-r19 | wan14b-480x832-f33-real-prefix | adaptive | 8648.200 | 4174.038
+hcms-10448-ci-wan33-tail-20261121-r21 | wan14b-480x832-f33-real-prefix | previous | 8080.169 | 4055.322
+hcms-10448-ci-wan33-tail-20261121-r21 | wan14b-480x832-f33-real-prefix | triple | 8080.169 | 4031.265
+hcms-10448-ci-wan33-tail-20261121-r21 | wan14b-480x832-f33-real-prefix | adaptive | 8080.169 | 3992.857
+hcms-10448-ci-wan33-tail-gated-20261121-r23 | wan14b-480x832-f33-real-prefix | previous | 7997.585 | 3964.258
+hcms-10448-ci-wan33-tail-gated-20261121-r23 | wan14b-480x832-f33-real-prefix | triple | 7997.585 | 3991.469
+hcms-10448-ci-wan33-tail-gated-20261121-r23 | wan14b-480x832-f33-real-prefix | adaptive | 7997.585 | 3351.227
+hcms-10448-ci-wan33-tail-return-20261121-r22 | wan14b-480x832-f33-real-prefix | previous | 10178.065 | 4531.377
+hcms-10448-ci-wan33-tail-return-20261121-r22 | wan14b-480x832-f33-real-prefix | triple | 10178.065 | 3945.443
+hcms-10448-ci-wan33-tail-return-20261121-r22 | wan14b-480x832-f33-real-prefix | adaptive | 10178.065 | 3318.676
+hcms-10448-ci-wan33-wave-boundary-20261121-r25 | wan14b-480x832-f33-real-prefix | previous | 8312.608 | 4441.115
+hcms-10448-ci-wan33-wave-boundary-20261121-r25 | wan14b-480x832-f33-real-prefix | triple | 8312.608 | 4095.247
+hcms-10448-ci-wan33-wave-boundary-20261121-r25 | wan14b-480x832-f33-real-prefix | adaptive | 8312.608 | 4097.670
+hcms-10448-ci-wan81-tail-20261121-r21 | wan22-i2v-ci-832x480_frames81_steps4 | previous | 16053.106 | 11924.862
+hcms-10448-ci-wan81-tail-20261121-r21 | wan22-i2v-ci-832x480_frames81_steps4 | adaptive | 16053.106 | 11245.897
+
+完整core控制：纯attention拆分税与调度收益分开
+run | case | heads | A whole/split us | whole/overlap core us（共享输出槽） | F+R us | 纯attention拆分税us | attention调用数 | forward/final peer fence数
+hcms-10448-ci-admission-core-20261121-r23 | wan33-admission-3-7 | 3+7 | 1453.16/1453.11 | 2011.19/1687.97 | 583.59 | -0.06 | 2 | 2/1
+hcms-10448-ci-admission-core-20261121-r23 | wan33-admission-2-7-1 | 2+7+1 | 1464.91/1476.50 | 2018.69/1601.09 | 582.83 | +11.59 | 3 | 3/1
+hcms-10448-ci-admission-core-20261121-r23 | wan33-admission-1-2-6-1 | 1+2+6+1 | 1462.83/1466.27 | 2016.13/1570.30 | 583.58 | +3.45 | 4 | 4/1
+hcms-10448-ci-core-matched-sp2-20261121-r16 | observed-sp2-ac05884b6e69 | 1+7 | 1340.46/1344.82 | 1604.17/1500.38 | 203.35 | +4.36 | 旧记录未分列 | 未分列/未分列
+hcms-10448-ci-core-matched-sp2-20261121-r16 | observed-sp2-dcd876e17162 | 1+7 | 1325.85/1328.46 | 1589.10/1489.28 | 203.34 | +2.61 | 旧记录未分列 | 未分列/未分列
+hcms-10448-ci-core-matched-sp2-20261121-r16 | observed-sp2-4765dc25d4ab | 1+7 | 6797.87/6944.31 | 6916.08/7102.59 | 427.90 | +146.44 | 旧记录未分列 | 未分列/未分列
+hcms-10448-ci-core-matched-sp2-20261121-r16 | observed-sp2-740363a8f7aa | 1+7 | 6975.38/7034.47 | 7028.20/7174.40 | 431.40 | +59.10 | 旧记录未分列 | 未分列/未分列
+hcms-10448-ci-core-matched-sp2-20261121-r16 | observed-sp2-c26e8de93300 | 1+7 | 1118.09/1127.70 | 1391.73/1271.97 | 198.30 | +9.61 | 旧记录未分列 | 未分列/未分列
+hcms-10448-ci-core-matched-sp2-20261121-r16 | observed-sp2-892e10284246 | 1+7 | 1121.79/1122.12 | 1388.59/1273.96 | 196.98 | +0.33 | 旧记录未分列 | 未分列/未分列
+hcms-10448-ci-core-matched-sp2-20261121-r16 | observed-sp2-bbbac54d7d6c | 1+7 | 6484.97/6514.98 | 6599.74/6771.48 | 420.25 | +30.02 | 旧记录未分列 | 未分列/未分列
+hcms-10448-ci-core-matched-sp2-20261121-r16 | observed-sp2-abaf2e6f8aa2 | 1+7 | 6515.38/6604.73 | 6727.61/6775.63 | 419.19 | +89.35 | 旧记录未分列 | 未分列/未分列
+hcms-10448-ci-core-matched-sp4-20261121-r16 | observed-sp4-5f26d3844549 | 5+9 | 793.62/798.30 | 1295.26/1048.54 | 503.25 | +4.67 | 旧记录未分列 | 未分列/未分列
+hcms-10448-ci-core-matched-sp4-20261121-r16 | observed-sp4-d3c11fc28cfc | 2+12 | 11894.76/12344.23 | 12942.48/12279.74 | 1870.95 | +449.47 | 旧记录未分列 | 未分列/未分列
+hcms-10448-ci-core-matched-sp4-20261121-r16 | observed-sp4-4e815a9caf74 | 1+13 | 43245.53/42278.10 | 45553.33/46773.36 | 3497.94 | -967.43 | 旧记录未分列 | 未分列/未分列
+hcms-10448-ci-core-matched-sp4-20261121-r16 | observed-sp4-a5ead8c93443 | 4+4 | 20.30/37.29 | 107.14/137.32 | 93.39 | +16.98 | 旧记录未分列 | 未分列/未分列
+hcms-10448-ci-core-matched-sp4-20261121-r16 | observed-sp4-5a1d967726d9 | 4+4 | 104.53/110.46 | 292.39/255.63 | 175.49 | +5.93 | 旧记录未分列 | 未分列/未分列
+hcms-10448-ci-core-matched-sp4-20261121-r16 | observed-sp4-d9537cc06293 | 3+5 | 526.21/521.48 | 864.25/713.13 | 324.20 | -4.73 | 旧记录未分列 | 未分列/未分列
+hcms-10448-ci-core-matched-sp4-20261121-r16 | observed-sp4-2471178c6c8b | 3+5 | 749.51/739.30 | 1099.02/936.12 | 327.14 | -10.22 | 旧记录未分列 | 未分列/未分列
+hcms-10448-ci-core-matched-sp4-20261121-r16 | observed-sp4-f758f3c69fe9 | 2+8 | 8127.97/8326.99 | 8755.47/8417.66 | 1342.40 | +199.02 | 旧记录未分列 | 未分列/未分列
+hcms-10448-ci-core-matched-sp4-20261121-r16 | observed-sp4-13a1682c6a6e | 1+9 | 92431.42/95218.44 | 96218.64/96389.05 | 4402.76 | +2787.02 | 旧记录未分列 | 未分列/未分列
+hcms-10448-ci-core-more-groups-20261121-r18 | wan33-groups-3-7 | 3+7 | 1471.64/1509.72 | 2003.45/1721.47 | 589.43 | +38.08 | 2 | 2/1
+hcms-10448-ci-core-more-groups-20261121-r18 | wan33-groups-2-2-6 | 2+2+6 | 1486.50/1520.98 | 2006.56/1702.87 | 585.92 | +34.48 | 3 | 3/1
+hcms-10448-ci-core-more-groups-20261121-r18 | wan33-groups-1-1-2-6 | 1+1+2+6 | 1497.63/1533.74 | 2007.08/1686.07 | 583.87 | +36.11 | 4 | 4/1
+hcms-10448-ci-core-qwen21-20261121-r3 | front-equal-regression | 2+6 | 1574.00/1619.03 | 2061.33/1802.33 | 564.38 | +45.03 | 旧记录未分列 | 未分列/未分列
+hcms-10448-ci-core-qwen21-20261121-r3 | empty-joint-query | 2+6 | 1597.06/1623.49 | 2057.84/1807.48 | 558.94 | +26.42 | 旧记录未分列 | 未分列/未分列
+hcms-10448-ci-core-rear-20261121-r1 | front-regression | 2+6 | 1662.23/1648.44 | 1879.02/1820.59 | 224.53 | -13.79 | 旧记录未分列 | 未分列/未分列
+hcms-10448-ci-core-rear-20261121-r1 | rear-joint-layout | 2+6 | 1670.68/1664.59 | 1886.70/1824.81 | 222.96 | -6.09 | 旧记录未分列 | 未分列/未分列
+hcms-10448-ci-core-staging-20261121-r8 | wan33-fused-v-3plus7 | 3+7 | 1442.54/1439.19 | 1996.26/1680.04 | 583.58 | -3.36 | 旧记录未分列 | 未分列/未分列
+hcms-10448-ci-core-staging-20261121-r8 | wan81-fused-v-2plus8 | 2+8 | 7935.60/8102.96 | 8997.74/8542.22 | 1326.55 | +167.37 | 旧记录未分列 | 未分列/未分列
+hcms-10448-ci-core-staging-20261121-r8 | qwen21-ref1536-3plus5 | 3+5 | 749.36/741.05 | 1100.68/938.42 | 324.79 | -8.31 | 旧记录未分列 | 未分列/未分列
+hcms-10448-ci-core-tail-block-20261121-r20 | wan33-tail-2-6-2 | 2+6+2 | 1430.30/1429.16 | 2002.71/1598.45 | 587.30 | -1.14 | 3 | 3/1
+hcms-10448-ci-core-tail-block-20261121-r20 | wan33-tail-2-7-1 | 2+7+1 | 1430.08/1421.14 | 2000.65/1588.16 | 584.36 | -8.94 | 3 | 3/1
+hcms-10448-ci-core-tail-block-20261121-r20 | wan33-tail-1-2-6-1 | 1+2+6+1 | 1431.30/1427.49 | 1997.78/1565.56 | 582.58 | -3.81 | 4 | 4/1
+hcms-10448-ci-core-tail-block-20261121-r20 | wan81-tail-1-8-1 | 1+8+1 | 8048.78/8071.90 | 8848.18/8266.82 | 1329.33 | +23.12 | 3 | 3/1
+hcms-10448-ci-core-tail-block-20261121-r20 | h3image4k-tail-2-10-2 | 2+10+2 | 2687.44/2739.97 | 3609.85/2999.74 | 926.38 | +52.54 | 3 | 3/1
+hcms-10448-ci-core-tail-block-20261121-r20 | h3video1024-tail-2-10-2 | 2+10+2 | 11874.26/12046.10 | 13127.88/12259.14 | 1872.05 | +171.84 | 3 | 3/1
+hcms-10448-ci-core-tail-block-20261121-r20 | h3video-ci-tail-1-12-1 | 1+12+1 | 43471.94/42289.35 | 45751.22/46170.52 | 3490.03 | -1182.59 | 3 | 3/1
+hcms-10448-ci-core-wan-stride-ab-20261121-r3 | wan33-contiguous-v | 3+7 | 1470.55/1519.50 | 2015.71/1720.29 | 585.86 | +48.95 | 旧记录未分列 | 未分列/未分列
+hcms-10448-ci-core-wan-stride-ab-20261121-r3 | wan33-actual-fused-v | 3+7 | 1476.04/1513.57 | 2016.73/1726.06 | 589.57 | +37.53 | 旧记录未分列 | 未分列/未分列
+hcms-10448-ci-core-wan-stride-ba-20261121-r3 | wan33-actual-fused-v | 3+7 | 1476.08/1515.23 | 2009.09/1720.75 | 587.39 | +39.15 | 旧记录未分列 | 未分列/未分列
+hcms-10448-ci-core-wan-stride-ba-20261121-r3 | wan33-contiguous-v | 3+7 | 1482.59/1517.19 | 2012.87/1724.88 | 587.37 | +34.59 | 旧记录未分列 | 未分列/未分列
+hcms-10448-ci-core-wan3plus7-20261121-r1 | wan-a14b-480x832-f33-heads3plus7 | 3+7 | 1495.46/1517.82 | 2025.67/1739.26 | 586.65 | +22.35 | 旧记录未分列 | 未分列/未分列
+hcms-10448-ci-core-wan3plus7-20261121-r2 | wan-a14b-480x832-f33-heads3plus7 | 3+7 | 1473.71/1507.11 | 2015.86/1721.70 | 588.25 | +33.40 | 旧记录未分列 | 未分列/未分列
+hcms-10448-ci-submitter-core-20261121-r9 | wan33-fused-v-3plus7 | 3+7 | 1445.29/1449.43 | 2030.54/1704.91 | 585.33 | +4.14 | 旧记录未分列 | 未分列/未分列
+hcms-10448-ci-submitter-core-20261121-r9 | wan81-fused-v-2plus8 | 2+8 | 8000.16/8177.91 | 9168.86/8601.21 | 1326.83 | +177.75 | 旧记录未分列 | 未分列/未分列
+hcms-10448-ci-submitter-core-20261121-r9 | qwen21-ref1536-3plus5 | 3+5 | 751.43/742.95 | 1113.32/945.92 | 326.42 | -8.48 | 旧记录未分列 | 未分列/未分列
+hcms-10448-ci-wave-boundary-core-20261121-r25 | wan33-wave-1-2-6-1 | 1+2+6+1 | 1439.54/1454.29 | 2013.67/1577.85 | 580.57 | +14.75 | 4 | 4/1
+hcms-10448-ci-wave-boundary-core-20261121-r25 | wan33-wave-1-1-7-1 | 1+1+7+1 | 1436.04/1446.63 | 2016.65/1617.76 | 573.44 | +10.59 | 4 | 4/1
+
+附加调度控制（同一core case内对比；与上表不同指标名全部保留在all-core-controls.csv）
+run | case | metric | us
+hcms-10448-ci-admission-core-20261121-r23 | wan33-admission-3-7 | core_stage-gated_borrowed | 1712.21
+hcms-10448-ci-admission-core-20261121-r23 | wan33-admission-3-7 | core_overlap-return_borrowed | 1719.76
+hcms-10448-ci-admission-core-20261121-r23 | wan33-admission-2-7-1 | core_stage-gated_borrowed | 1622.40
+hcms-10448-ci-admission-core-20261121-r23 | wan33-admission-2-7-1 | core_overlap-return_borrowed | 1632.20
+hcms-10448-ci-admission-core-20261121-r23 | wan33-admission-1-2-6-1 | core_stage-gated_borrowed | 1597.76
+hcms-10448-ci-admission-core-20261121-r23 | wan33-admission-1-2-6-1 | core_overlap-return_borrowed | 1617.58
+hcms-10448-ci-core-staging-20261121-r8 | wan33-fused-v-3plus7 | core_overlap-return_borrowed | 1690.54
+hcms-10448-ci-core-staging-20261121-r8 | wan33-fused-v-3plus7 | core_overlap-staging_borrowed | 1866.26
+hcms-10448-ci-core-staging-20261121-r8 | wan81-fused-v-2plus8 | core_overlap-return_borrowed | 8505.82
+hcms-10448-ci-core-staging-20261121-r8 | wan81-fused-v-2plus8 | core_overlap-staging_borrowed | 8902.14
+hcms-10448-ci-core-staging-20261121-r8 | qwen21-ref1536-3plus5 | core_overlap-return_borrowed | 934.10
+hcms-10448-ci-core-staging-20261121-r8 | qwen21-ref1536-3plus5 | core_overlap-staging_borrowed | 989.43
+hcms-10448-ci-submitter-core-20261121-r9 | wan33-fused-v-3plus7 | core_overlap-return_borrowed | 1707.06
+hcms-10448-ci-submitter-core-20261121-r9 | wan33-fused-v-3plus7 | core_overlap-staging_borrowed | 1884.31
+hcms-10448-ci-submitter-core-20261121-r9 | wan81-fused-v-2plus8 | core_overlap-return_borrowed | 8578.12
+hcms-10448-ci-submitter-core-20261121-r9 | wan81-fused-v-2plus8 | core_overlap-staging_borrowed | 8976.97
+hcms-10448-ci-submitter-core-20261121-r9 | qwen21-ref1536-3plus5 | core_overlap-return_borrowed | 942.57
+hcms-10448-ci-submitter-core-20261121-r9 | qwen21-ref1536-3plus5 | core_overlap-staging_borrowed | 992.01
+
+失败/中断（均保留原始日志；不计入性能收益）
+hcms-10448-ci-coreevents-sequence-20261121-r11 | 1 | See sequence.log
+hcms-10448-ci-eventapi-20261121-r12 | 1 | See run.log
+hcms-10448-ci-eventapi-20261121-r13 | 1 | See run.log
+hcms-10448-ci-eventapi-sequence-20261121-r12 | 1 | See sequence.log
+hcms-10448-ci-eventapi-sequence-20261121-r13 | 1 | See sequence.log
+hcms-10448-ci-h3video-audio-aa-20261121-r5 | 1 | AssertionError: Output differs from serial reference: h3video-t2v-512x512-f107-s8-smoke/repeat_whole/seed42
+hcms-10448-ci-h3video-smoke-20261121-r1 | interrupted | See run.log
+hcms-10448-ci-h3video-smoke-20261121-r2 | 1 | RuntimeError: Fixed-canvas graph received different tensor/scalar metadata
+hcms-10448-ci-h3video-smoke-20261121-r3 | 1 | RuntimeError: Fixed-canvas graph metadata changed: {'t_emb': {'expected': ((1, 2688), torch.float32, device(type='cuda', index=0)), 'actual': ((2, 2688), torch.float32, device(type='cuda', index=0))}}
+hcms-10448-ci-h3video-smoke-20261121-r4 | 1 | AssertionError: Output differs from serial reference: h3video-t2v-512x512-f107-s8-smoke/adaptive/seed42
+hcms-10448-ci-hy15-t2v-20261121-r1 | 1 | See run.log
+hcms-10448-ci-hy15-t2v-20261121-r2 | 1 | RuntimeError: An undiscovered execution signature reached sampling/capture
+hcms-10448-ci-ltx2-20261121-r2 | 1 | RuntimeError: Orchestrator initialization failed: cannot import name 'LTX2VideoDiffusionDecoderModel' from 'diffusers.models.autoencoders' (/usr/local/lib/python3.12/dist-packages/diffusers/models/autoencoders/__init__.py)
+hcms-10448-ci-qwen21-20261121-r2 | 1 | RuntimeError: An undiscovered execution signature reached sampling/capture
+hcms-10448-ci-qwen21-core-events-20261121-r11 | 1 | RuntimeError: CUDA error: invalid argument
+hcms-10448-ci-qwen21-smoke-20261121-r3 | 1 | RuntimeError: Real-prefix graph capture failed
+hcms-10448-ci-staging-sequence-20261121-r7 | 1 | See sequence.log
+hcms-10448-ci-wan22-i2v-20261121-r1 | 1 | TypeError: OmniDiffusionSamplingParams.__init__() got an unexpected keyword argument 'negative_prompt'
+
+精度/诊断任务（含已知失败；不计性能收益）
+hcms-10448-ci-h3video-audio-diagnostic-20261121-r6 | requests=20, exact_failures=17 | Strict correctness failures retained without acceptance; compare original eager, whole A/A, adaptive and predecode audio latents. Diagnostic timings are not benchmark results.
+hcms-10448-ci-qwen21-core-events-20261121-r15 | requests=12, exact_failures=0 | GPU events on the 16th same-signature captured core only, flushed at the next request after normal CPU output completion. No extra model forwards, per-layer waits or profiler trace. Diagnostic request timings are excluded from performance gains.
+hcms-10448-ci-wan33-core-events-20261121-r15 | requests=12, exact_failures=0 | GPU events on the 16th same-signature captured core only, flushed at the next request after normal CPU output completion. No extra model forwards, per-layer waits or profiler trace. Diagnostic request timings are excluded from performance gains.
+hcms-10448-ci-admission-stress-20261121-r23 | correctness/capability-only | SLOT_STRESS rank=0 schedule=stage-gated tokens=1056 normal-owned and delayed-slot consumers bitwise exact; SLOT_STRESS rank=1 schedule=stage-gated tokens=1056 normal-owned and delayed-slot consumers bitwise exact; SLOT_STRESS rank=0 schedule=stage-gated tokens=4128 normal-owned and delayed-slot consumers bitwise exact; SLOT_STRESS rank=1 schedule=stage-gated tokens=4128 normal-owned and delayed-slot consumers bitwise exact
+hcms-10448-ci-eventapi-20261121-r14 | correctness/capability-only | {"external": true, "elapsed_ms": [0.3357439935207367, 0.3107520043849945, 0.31254398822784424]}; {"external": false, "unsupported": "CUDA error: invalid argument\nSearch for `cudaErrorInvalidValue' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information.\n"}; {"external": false, "elapsed_ms": []}
+hcms-10448-ci-graph-priority-capability-20261121-r26 | correctness/capability-only | GRAPH_PRIORITY_CAPABILITY {"requested_compute_priority": 0, "actual_compute_priority": 0, "actual_communication_priority": 0, "instantiate_flags": 1, "uses_node_priority": false, "exact": true, "torch": "2.14.0+cu130", "gpu": "NVIDIA L20X"}; GRAPH_PRIORITY_CAPABILITY {"requested_compute_priority": -1, "actual_compute_priority": -1, "actual_communication_priority": 0, "instantiate_flags": 1, "uses_node_priority": false, "exact": true, "torch": "2.14.0+cu130", "gpu": "NVIDIA L20X"}
+hcms-10448-ci-memops-20261121-r17 | correctness/capability-only | MEMOPS_CAPABILITY {"remote_write_flush": 0, "gpu": "NVIDIA L20X", "peer_fences_replaced": false, "reason": "Required remote-write visibility flush is unavailable; peer fences retained."}
+hcms-10448-ci-staging-stress-20261121-r7 | correctness/capability-only | SLOT_STRESS rank=0 schedule=overlap-return tokens=1056 normal-owned and delayed-slot consumers bitwise exact; SLOT_STRESS rank=1 schedule=overlap-return tokens=1056 normal-owned and delayed-slot consumers bitwise exact; SLOT_STRESS rank=0 schedule=overlap-return tokens=4128 normal-owned and delayed-slot consumers bitwise exact; SLOT_STRESS rank=1 schedule=overlap-return tokens=4128 normal-owned and delayed-slot consumers bitwise exact; SLOT_STRESS rank=0 schedule=overlap-staging tokens=1056 normal-owned and delayed-slot consumers bitwise exact; SLOT_STRESS rank=1 schedule=overlap-staging tokens=1056 normal-owned and delayed-slot consumers bitwise exact; SLOT_STRESS rank=0 schedule=overlap-staging tokens=4128 normal-owned and delayed-slot consumers bitwise exact; SLOT_STRESS rank=1 schedule=overlap-staging tokens=4128 normal-owned and delayed-slot consumers bitwise exact
+hcms-10448-ci-submitter-stress-20261121-r9 | correctness/capability-only | SLOT_STRESS rank=0 schedule=overlap-return tokens=1056 normal-owned and delayed-slot consumers bitwise exact; SLOT_STRESS rank=1 schedule=overlap-return tokens=1056 normal-owned and delayed-slot consumers bitwise exact; SLOT_STRESS rank=0 schedule=overlap-return tokens=4128 normal-owned and delayed-slot consumers bitwise exact; SLOT_STRESS rank=1 schedule=overlap-return tokens=4128 normal-owned and delayed-slot consumers bitwise exact; SLOT_STRESS rank=0 schedule=overlap-staging tokens=1056 normal-owned and delayed-slot consumers bitwise exact; SLOT_STRESS rank=1 schedule=overlap-staging tokens=1056 normal-owned and delayed-slot consumers bitwise exact; SLOT_STRESS rank=0 schedule=overlap-staging tokens=4128 normal-owned and delayed-slot consumers bitwise exact; SLOT_STRESS rank=1 schedule=overlap-staging tokens=4128 normal-owned and delayed-slot consumers bitwise exact
+
+本轮代码与证据
+all-comparisons.csv：全部方案时延、配对区间、通信估计来源及实际分组。
+all-requests.csv：逐请求shape/dtype/hash/时延；all-audits.csv：所有rank的执行计数与策略。
+execution-budgets.csv：首次调用体数/事件/prepare/finish毫秒；summary.json含源码及C++构建哈希校验。
+ci-evidence.zip保留本轮日志、配置、集成patch及rank审计；诊断大视频字节在远端留存并记录路径/hash。
+历史阶段分别保留，不能混作同一实现的独立样本。以下附录包含先前所有结果。
