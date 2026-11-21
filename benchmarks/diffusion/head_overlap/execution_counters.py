@@ -39,7 +39,7 @@ def install():
     @functools.wraps(original_record)
     def record(event, *args, **kwargs):
         counts["event_records"] += 1
-        counts["timed_event_records"] += int(event.enable_timing)
+        counts["timed_event_records"] += int(getattr(event, "_hcms_lazy_timer", False))
         return original_record(event, *args, **kwargs)
 
     torch.cuda.Event.record = record

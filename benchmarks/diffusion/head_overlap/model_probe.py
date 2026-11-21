@@ -27,7 +27,6 @@ class StableGraph(GraphedForward):
     def _warmup_stream(self):
         learner = getattr(self.module, "learner", None)
         if learner is not None:
-            learner.begin()
             _ACTIVE.get()["learner"] = learner
         yield
 
@@ -107,12 +106,18 @@ def graph_call(original, graphs, component, *args, **kwargs):
     reference = None
     if graph is None:
         state["learner"] = None
-        reference = original(*clone_static(args), **clone_static(kwargs))
         learner = None
         if state["autotune"]:
             from lazy_head_policy import LazyHeadPolicy
 
             learner = LazyHeadPolicy(get_world_group().cpu_group)
+            learner.begin()
+            state["learner"] = learner
+        reference = original(*clone_static(args), **clone_static(kwargs))
+        if learner is not None:
+            # Reference discovers; the existing sync probe and two warmups
+            # provide three passes of real sampling without another forward.
+            learner.prepare(warmup_passes=3)
         graph = graphs[state["variant"]] = StableGraph(
             PackedForward(original, learner),
             device=torch.cuda.current_stream().device,

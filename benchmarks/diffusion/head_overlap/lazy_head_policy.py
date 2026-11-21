@@ -249,6 +249,7 @@ class LazyHeadPolicy:
 
     def prepare(self, *, warmup_passes=1):
         import torch
+        import torch.distributed as dist
         from native_prefilled import prepare_plan
 
         start = time.perf_counter()
@@ -256,8 +257,19 @@ class LazyHeadPolicy:
         for entry in self.entries.values():
             # No extra forward is manufactured when this signature is rare.
             slots = entry.calls * warmup_passes
-            if slots < 8 * len(entry.choices):
+            if slots < 7 * len(entry.choices):
+                entry.choices = entry.choices[:2]
+            if slots < 7 * len(entry.choices):
                 entry.choices = entry.choices[:1]
+        header = [(entry.signature, entry.choices, entry.calls) for entry in self.entries.values()]
+        if any(len(entry.choices) > 1 for entry in self.entries.values()):
+            headers = [None] * dist.get_world_size(self.group)
+            dist.all_gather_object(headers, header, group=self.group)
+            self.stats["control_collectives"] += 1
+            if any(peer != header for peer in headers):
+                raise RuntimeError("Ranks disagree before candidate allocation/sampling")
+        for entry in self.entries.values():
+            slots = entry.calls * warmup_passes
             for widths in entry.choices:
                 prepare_plan(
                     entry.inputs,
@@ -275,6 +287,7 @@ class LazyHeadPolicy:
                 ]
                 # Realize timer handles before measured calls; no kernels/forward.
                 for pair in entry.events:
+                    pair[0]._hcms_lazy_timer = pair[1]._hcms_lazy_timer = True
                     pair[0].record()
                     pair[1].record()
                 self.stats["event_records"] += 2 * len(entry.events)
@@ -308,7 +321,7 @@ class LazyHeadPolicy:
                 if len(set(counts)) != 1:
                     raise RuntimeError("Ranks sampled different candidate schedules")
                 values = [max(peer[index][2][choice][i] for peer in peers) for i in range(counts[0])]
-                maximum.append(values[2:])  # warm kernels using real calls, never extra calls
+                maximum.append(values[2 if len(values) >= 10 else 1 :])  # real calls, never extra calls
             entry.selected = choose(maximum)
             self.reports.append(
                 dict(
