@@ -132,9 +132,15 @@ def main():
                 signature = (hashes, shapes, dtypes)
                 if name == next(iter(variants)) and seed not in expected:
                     expected[seed] = signature
-                if signature != expected[seed]:
+                exact_matches_reference = signature == expected[seed]
+                if not exact_matches_reference:
                     np.savez_compressed(args.out / f"{case['id']}-{phase}-{name}-seed{seed}-mismatch.npz", *values)
-                    raise AssertionError(f"Output differs from serial reference: {case['id']}/{name}/seed{seed}")
+                    message = f"Output differs from serial reference: {case['id']}/{name}/seed{seed}"
+                    if not config.get("correctness_diagnostic", False):
+                        raise AssertionError(message)
+                    # A diagnostic retains failures to compare baseline A/A,
+                    # overlap and original eager outputs. It qualifies no gain.
+                    print("CORRECTNESS_FAILURE " + message, flush=True)
                 if not all(np.isfinite(value).all() for value in values):
                     raise AssertionError("Non-finite output")
                 row = dict(
@@ -149,6 +155,7 @@ def main():
                     shapes=shapes,
                     dtypes=dtypes,
                     hashes=hashes,
+                    exact_matches_reference=exact_matches_reference,
                     stage_durations=[output.stage_durations for output in outputs],
                     peak_memory_mb=[output.peak_memory_mb for output in outputs],
                 )

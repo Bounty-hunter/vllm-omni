@@ -225,6 +225,28 @@ def run_blocks(model, hidden, *, hints, control_scale, **kwargs):
 def install(pipeline_class, *, video_pipeline=False):
     global VIDEO_PIPELINE
     VIDEO_PIPELINE = video_pipeline
+    diagnostic_label = None
+    if video_pipeline and os.environ.get("HCMS_AUDIO_DIAGNOSTIC"):
+        from vllm_omni.diffusion.models.minimax_h3.vae import MiniMaxH3AudioVAE
+
+        original_audio_decode = MiniMaxH3AudioVAE.decode_latent
+
+        @functools.wraps(original_audio_decode)
+        def audio_decode(self, latent):
+            waveform = original_audio_decode(self, latent)
+            if diagnostic_label is not None and dist.get_rank() == 0:
+                import numpy as np
+
+                destination = Path(os.environ["HCMS_AUDIO_DIAGNOSTIC"])
+                destination.mkdir(parents=True, exist_ok=True)
+                np.savez_compressed(
+                    destination / f"{diagnostic_label}.npz",
+                    latent=latent.detach().cpu().numpy(),
+                    waveform=waveform.detach().cpu().numpy(),
+                )
+            return waveform
+
+        MiniMaxH3AudioVAE.decode_latent = audio_decode
     head_module = importlib.import_module("vllm_omni.diffusion.attention.parallel.head_overlap")
     import native_prefilled
     from prefilled_probe import PrefilledPipeline
@@ -307,12 +329,13 @@ def install(pipeline_class, *, video_pipeline=False):
     def forward(self, request):
         global MODE, TRACE, ACTIVE, SCHEDULE, GRAPH_KEY, HEAD_PARTITION, TIMING
         global AUTOTUNE, LEARNER, REAL_PREFIX, EAGER_STEPS
-        nonlocal audited, previous_canvas
+        nonlocal audited, previous_canvas, diagnostic_label
         if request.is_dummy_run():
             return original_forward(self, request)
         counters_before = dict(counters)
         ACTIVE = True
         extra = request.sampling_params.extra_args or {}
+        diagnostic_label = f"{extra['label']}-seed{request.sampling_params.seed}"
         MODE = extra["graph_mode"]
         SCHEDULE = extra["schedule"]
         TRACE = bool(extra.get("trace", False))
