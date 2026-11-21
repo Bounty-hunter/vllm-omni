@@ -4,6 +4,7 @@
 
 import argparse
 import copy
+import importlib
 import json
 import os
 import statistics
@@ -38,6 +39,7 @@ def main():
     pg = dist.group.WORLD
     control = dist.new_group(backend="gloo")
     world = dist.get_world_size(pg)
+    importlib.import_module("vllm_omni.diffusion.attention.parallel.head_overlap")
     import native_prefilled as native
     from native_prefilled import NativePipeline, partition_heads
     from overlap_probe import FlashAttentionImpl, UlyssesParallelAttention
