@@ -147,7 +147,7 @@ class Observation:
 class LazyHeadPolicy:
     """Small graph-owned state; native plan/slot ownership stays in its cache."""
 
-    def __init__(self, group, *, enabled=True):
+    def __init__(self, group, *, enabled=True, candidate_partition=None):
         import torch
 
         from vllm_omni.diffusion.attention.backends.utils.fa import (
@@ -157,6 +157,12 @@ class LazyHeadPolicy:
         )
 
         self.group, self.enabled = group, enabled
+        self.candidate_partition = None if candidate_partition is None else tuple(candidate_partition)
+        if self.candidate_partition is not None and (
+            not 2 <= len(self.candidate_partition) <= 4
+            or any(not isinstance(h, int) or isinstance(h, bool) or h <= 0 for h in self.candidate_partition)
+        ):
+            raise ValueError("An experimental candidate needs two to four positive integer head counts")
         properties = torch.cuda.get_device_properties(torch.accelerator.current_device_index())
         function = dense_flash_attn_func_for(torch.bfloat16)
         backend = (
@@ -259,6 +265,10 @@ class LazyHeadPolicy:
                 if self.enabled and safe and (not packed or tokens >= 4096)
                 else ((heads,),)
             )
+            if self.enabled and safe and (not packed or tokens >= 4096) and self.candidate_partition is not None:
+                if sum(self.candidate_partition) != heads:
+                    raise ValueError("The experimental candidate must cover the per-rank heads exactly")
+                choices = ((heads,), self.candidate_partition)
             entry = self.entries[signature] = Observation(signature, choices)
         if self.phase == "discover":
             entry.inputs, entry.joint, entry.metadata, entry.kernel, entry.group, entry.comm = (

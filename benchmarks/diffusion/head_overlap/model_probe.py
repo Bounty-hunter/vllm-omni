@@ -107,7 +107,7 @@ def graph_call(original, graphs, component, *args, **kwargs):
         if state["autotune"]:
             from lazy_head_policy import LazyHeadPolicy
 
-            learner = LazyHeadPolicy(get_world_group().cpu_group)
+            learner = LazyHeadPolicy(get_world_group().cpu_group, candidate_partition=state["candidate_partition"])
             learner.begin()
             state["learner"] = learner
         reference = original(*clone_static(args), **clone_static(kwargs))
@@ -126,6 +126,11 @@ def graph_call(original, graphs, component, *args, **kwargs):
         graph.output_type = type(reference)
     captures_before, calls_before = graph.captures, state["direct_calls"]
     learner = graph.module.learner
+    requested_candidate = state["candidate_partition"]
+    if learner is not None and learner.candidate_partition != (
+        None if requested_candidate is None else tuple(requested_candidate)
+    ):
+        raise ValueError("An experimental candidate must remain fixed within its graph case")
     body_calls_before = graph.module.forward_calls
     if learner is not None and learner.phase == "frozen":
         state["learner"] = learner
@@ -183,7 +188,9 @@ def real_prefix_call(original, graphs, component, *args, **kwargs):
     graph_key = state.get("graph_variant", state["variant"])
     graph = graphs.get(graph_key)
     if graph is None:
-        learner = LazyHeadPolicy(get_world_group().cpu_group, enabled=state["autotune"])
+        learner = LazyHeadPolicy(
+            get_world_group().cpu_group, enabled=state["autotune"], candidate_partition=state["candidate_partition"]
+        )
         learner.begin()
         graph = graphs[graph_key] = StableGraph(
             PackedForward(original, learner),
@@ -196,6 +203,9 @@ def real_prefix_call(original, graphs, component, *args, **kwargs):
         if state.get("capture_without_probes"):
             graph._probe_pending = False
     learner = graph.module.learner
+    requested_candidate = state["candidate_partition"]
+    if learner.candidate_partition != (None if requested_candidate is None else tuple(requested_candidate)):
+        raise ValueError("An experimental candidate must remain fixed within its graph case")
     state["learner"] = learner
     before = graph.module.forward_calls
     if graph.module.prefix_steps < 2:
@@ -488,6 +498,7 @@ def install(pipeline):
                     fallbacks=0,
                     shapes=set(),
                     autotune=bool(extra.get("autotune", False)),
+                    candidate_partition=extra.get("candidate_partition"),
                     real_prefix=bool(extra.get("real_prefix", False)),
                     eager_forwards={},
                     real_eager_steps={},
