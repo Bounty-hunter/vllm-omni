@@ -113,7 +113,8 @@ def main():
             q, k, v, packed_md, context = strategy.pre_attention(*inputs, copy.copy(metadata))
             expected = strategy.post_attention(impl.forward_cuda(q, k, v, packed_md), context).clone()
             packed = tuple(value.clone() for value in (q, k, v))
-            head_sizes = partition_heads(heads // world, 2, case.get("head_partition"))
+            chunks = len(case["head_partition"]) if case.get("head_partition") else 2
+            head_sizes = partition_heads(heads // world, chunks, case.get("head_partition"))
             parts, offset = [], 0
             for width in head_sizes:
                 parts.append(tuple(value[:, :, offset : offset + width].contiguous() for value in packed))
@@ -124,14 +125,16 @@ def main():
 
             placement = dict(joint_strategy=joint_strategy)
             whole = NativePipeline(inputs, joint, pg, 1, comm, kernel, packed_md, **placement)
-            split = NativePipeline(inputs, joint, pg, 2, comm, kernel, packed_md, head_sizes=head_sizes, **placement)
+            split = NativePipeline(
+                inputs, joint, pg, chunks, comm, kernel, packed_md, head_sizes=head_sizes, **placement
+            )
             serial_split = NativePipeline(
-                inputs, joint, pg, 2, comm, kernel, packed_md, head_sizes=head_sizes, **placement
+                inputs, joint, pg, chunks, comm, kernel, packed_md, head_sizes=head_sizes, **placement
             )
             serial_split.overlap = False
             transport = NativePipeline(inputs, joint, pg, 1, comm, lambda q, k, v, md: q, packed_md, **placement)
             split_transport = NativePipeline(
-                inputs, joint, pg, 2, comm, lambda q, k, v, md: q, packed_md, head_sizes=head_sizes, **placement
+                inputs, joint, pg, chunks, comm, lambda q, k, v, md: q, packed_md, head_sizes=head_sizes, **placement
             )
             split_transport.overlap = False
 
@@ -161,13 +164,13 @@ def main():
                 "attention_whole": attention_whole,
                 "attention_split_serial": attention_split,
                 "attention_first": lambda: kernel(*parts[0], None),
-                "attention_last": lambda: kernel(*parts[1], None),
+                "attention_last": lambda: kernel(*parts[-1], None),
                 "peer_forward": peer_forward,
                 "peer_reverse": peer_reverse,
                 "peer_forward_first": lambda: peer_forward(split_transport, 0),
-                "peer_forward_last": lambda: peer_forward(split_transport, 1),
+                "peer_forward_last": lambda: peer_forward(split_transport, chunks - 1),
                 "peer_reverse_first": lambda: peer_reverse(split_transport, 0),
-                "peer_reverse_last": lambda: peer_reverse(split_transport, 1),
+                "peer_reverse_last": lambda: peer_reverse(split_transport, chunks - 1),
                 "transport_whole_owned": lambda: scheduled(transport, "old").clone(),
                 "transport_whole_borrowed": lambda: scheduled(transport, "old"),
                 "transport_split_serial_borrowed": lambda: scheduled(split_transport, "stage-local"),
@@ -195,7 +198,7 @@ def main():
                 functions.update(
                     local_forward=local_forward,
                     local_reverse=local_reverse,
-                    local_forward_last=lambda: local_forward(split, 1),
+                    local_forward_last=lambda: local_forward(split, chunks - 1),
                     local_reverse_first=lambda: local_reverse(split, 0),
                 )
             graphs = {}
@@ -256,16 +259,24 @@ def main():
             attention = medians["attention_whole"]
             tax = medians["attention_split_serial"] - attention
             first_fraction = head_sizes[0] / sum(head_sizes)
-            hideable = min(medians["attention_first"], medians["peer_forward"] * (1 - first_fraction)) + min(
-                medians["attention_last"], medians["peer_reverse"] * first_fraction
+            hideable = (
+                min(medians["attention_first"], medians["peer_forward"] * (1 - first_fraction))
+                + min(medians["attention_last"], medians["peer_reverse"] * first_fraction)
+                if chunks == 2
+                else None
             )
             saving = medians["core_whole_owned"] - medians["core_overlap_borrowed"]
             row = dict(
                 case=case,
                 exact=True,
                 full_heads=heads // world,
-                chunk_heads=head_sizes[0] if head_sizes[0] == head_sizes[1] else None,
+                chunk_heads=head_sizes[0] if len(set(head_sizes)) == 1 else None,
                 head_sizes=head_sizes,
+                attention_calls=chunks,
+                forward_copy_requests=sum(len(ops) for ops in split.forward_ops),
+                reverse_copy_requests=chunks * world * (1 + int(split.joint_len > 0)),
+                forward_peer_fences=chunks,
+                final_peer_fences=1,
                 qkv_shape=list(inputs[0].shape),
                 qkv_strides=[list(x.stride()) for x in inputs],
                 joint_shapes=None if joint is None else [list(x.shape) for x in joint],
@@ -276,9 +287,13 @@ def main():
                 peer_fraction_of_attention_plus_peer=peer / (attention + peer),
                 split_attention_tax_us=tax,
                 ideal_hideable_peer_us=hideable,
-                ideal_hideable_minus_split_tax_us=hideable - tax,
-                hideable_using_measured_chunks_us=min(medians["attention_first"], medians["peer_forward_last"])
-                + min(medians["attention_last"], medians["peer_reverse_first"]),
+                ideal_hideable_minus_split_tax_us=None if hideable is None else hideable - tax,
+                hideable_using_measured_chunks_us=(
+                    min(medians["attention_first"], medians["peer_forward_last"])
+                    + min(medians["attention_last"], medians["peer_reverse_first"])
+                    if chunks == 2
+                    else None
+                ),
                 split_transport_tax_us=medians["transport_split_serial_borrowed"] - medians["transport_whole_borrowed"],
                 measured_core_saving_us=saving,
                 measured_core_owned_saving_us=medians["core_whole_owned"] - medians["core_overlap_owned"],
