@@ -187,6 +187,9 @@ class LazyHeadPolicy:
         )
         self.reports = []
         self.core_events = {} if os.environ.get("HCMS_CORE_EVENTS") == "1" else None
+        self.force_diagnostic_split = os.environ.get("HCMS_FORCE_DIAGNOSTIC_SPLIT") == "1"
+        if self.force_diagnostic_split and self.core_events is None:
+            raise ValueError("A forced diagnostic split requires explicit core event diagnostics")
 
     def signature(self, q, k, v, md, pg):
         import torch.distributed as dist
@@ -420,7 +423,8 @@ class LazyHeadPolicy:
                 submit_times.append([max(row[2] for row in rank_rows) for rank_rows in rows])
                 rank_rows_by_choice.append(rows)
             maximum = qualified_cycles(rank_rows_by_choice)
-            entry.selected = choose(maximum)
+            forced = self.force_diagnostic_split and len(entry.choices) > 1
+            entry.selected = 1 if forced else choose(maximum)
             self.reports.append(
                 dict(
                     signature=entry.signature,
@@ -429,6 +433,7 @@ class LazyHeadPolicy:
                     raw_samples_max_rank_us=raw_maximum,
                     host_submission_max_rank_us=submit_times,
                     selected=entry.choices[entry.selected],
+                    diagnostic_forced=forced,
                     pairing="complete rotated cycles on every rank",
                     discovery_calls=entry.calls,
                     sampling_pass_calls=entry.sample_calls,
