@@ -9,6 +9,7 @@ after the graph owner's existing synchronization. No timers survive freezing.
 
 import hashlib
 import math
+import os
 import statistics
 import time
 from dataclasses import dataclass, field, is_dataclass, replace
@@ -185,6 +186,7 @@ class LazyHeadPolicy:
             finish_ms=0.0,
         )
         self.reports = []
+        self.core_events = {} if os.environ.get("HCMS_CORE_EVENTS") == "1" else None
 
     def signature(self, q, k, v, md, pg):
         import torch.distributed as dist
@@ -304,7 +306,11 @@ class LazyHeadPolicy:
         if event_pair is not None:
             event_pair[0].record()
             submitted = time.perf_counter()
-        result = scheduled(plan, "stage-local")
+        diagnostic = None
+        if self.core_events is not None and self.phase == "frozen" and torch.cuda.is_current_stream_capturing():
+            if audit["calls"] == min(16, entry.calls):
+                diagnostic = self.core_events[signature, choice]
+        result = scheduled(plan, "stage-local") if diagnostic is None else diagnostic.run(plan, "stage-local")
         if event_pair is not None:
             event_pair[1].record()
             submit_us = (time.perf_counter() - submitted) * 1e6
@@ -364,6 +370,11 @@ class LazyHeadPolicy:
                     ("lazy", entry.signature),
                     joint_strategy="front" if entry.metadata is None else entry.metadata.joint_strategy,
                 )
+            if self.core_events is not None:
+                from schedule_probe import CoreEvents
+
+                for choice, widths in enumerate(entry.choices):
+                    self.core_events[entry.signature, choice] = CoreEvents(len(widths), entry.inputs[0].device)
             if len(entry.choices) > 1:
                 entry.events = [
                     (torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)) for _ in range(slots)
@@ -445,3 +456,16 @@ class LazyHeadPolicy:
         if self.phase != "frozen":
             raise RuntimeError("Capture requires a frozen head policy")
         return self._cache_key
+
+    def diagnostic_offsets_us(self):
+        """The caller must have completed its normal output transfer/sync."""
+        if self.core_events is None:
+            return None
+        return [
+            dict(
+                heads=entry.choices[entry.selected],
+                layer=min(16, entry.calls),
+                offsets_us=self.core_events[entry.signature, entry.selected].offsets_us(),
+            )
+            for entry in self.entries.values()
+        ]

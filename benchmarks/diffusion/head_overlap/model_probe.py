@@ -437,14 +437,17 @@ def install(pipeline):
         },
         gpu=torch.cuda.get_device_name(),
         torch=torch.__version__,
+        core_event_diagnostic=os.environ.get("HCMS_CORE_EVENTS") == "1",
     )
     original_forward = pipeline.forward
     compute = torch.cuda.Stream()
     previous_case = None
+    pending_core_events = None
+    core_events_enabled = os.environ.get("HCMS_CORE_EVENTS") == "1"
 
     @functools.wraps(original_forward)
     def forward(request):
-        nonlocal previous_case
+        nonlocal previous_case, pending_core_events
         caller = torch.cuda.current_stream()
         compute.wait_stream(caller)
         token = None
@@ -454,6 +457,16 @@ def install(pipeline):
             with torch.cuda.stream(compute):
                 if request.is_dummy_run():
                     return original_forward(request)
+                if pending_core_events is not None:
+                    label, learners = pending_core_events
+                    # The benchmark submits the next request only after the
+                    # preceding decoded output reached CPU. Never add a wait.
+                    record(
+                        kind="core_events",
+                        label=label,
+                        components={name: learner.diagnostic_offsets_us() for name, learner in learners.items()},
+                    )
+                    pending_core_events = None
                 extra = request.sampling_params.extra_args or {}
                 case = extra["case"]
                 if case != previous_case:
@@ -506,6 +519,17 @@ def install(pipeline):
                     if (variant[0] if isinstance(variant, tuple) else variant) == state["variant"]
                 }
                 stats = {name: graph.stats() for name, graph in selected_graphs.items()}
+                learners = (
+                    {}
+                    if not core_events_enabled
+                    else {
+                        name: graph.module.learner
+                        for name, graph in selected_graphs.items()
+                        if graph.module.learner is not None and graph.module.learner.core_events is not None
+                    }
+                )
+                if learners:
+                    pending_core_events = extra["label"], learners
                 if not stats and not state["direct_calls"] and not state["reference_whole"]:
                     raise RuntimeError("The requested head-overlap route was not executed")
                 if extra.get("audit"):

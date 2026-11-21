@@ -17,6 +17,63 @@ VARIANTS = {
 }
 
 
+class CoreEvents:
+    """Opt-in timing of one captured layer, read at request completion only."""
+
+    def __init__(self, chunks, device):
+        self.events = {
+            name: torch.Event(device=device, enable_timing=True)
+            for name in (
+                "begin",
+                "end",
+                *(f"{kind}{g}{edge}" for kind in "FAR" for g in range(chunks) for edge in "01"),
+            )
+        }
+        # Realize handles at the candidate preparation boundary, outside trials.
+        for event in self.events.values():
+            event.record()
+        self.recorded = False
+
+    def run(self, plan, variant):
+        originals = plan.submit_forward, plan.kernel, plan.submit_reverse
+        group = 0
+
+        def forward(index):
+            self.events[f"F{index}0"].record(plan.stream)
+            originals[0](index)
+            self.events[f"F{index}1"].record(plan.stream)
+
+        def attention(*args):
+            nonlocal group
+            self.events[f"A{group}0"].record()
+            output = originals[1](*args)
+            self.events[f"A{group}1"].record()
+            group += 1
+            return output
+
+        def reverse(index, output):
+            self.events[f"R{index}0"].record(plan.stream)
+            originals[2](index, output)
+            self.events[f"R{index}1"].record(plan.stream)
+
+        plan.submit_forward, plan.kernel, plan.submit_reverse = forward, attention, reverse
+        try:
+            self.events["begin"].record()
+            output = run(plan, variant)
+            self.events["end"].record()
+            self.recorded = True
+            return output
+        finally:
+            plan.submit_forward, plan.kernel, plan.submit_reverse = originals
+
+    def offsets_us(self):
+        if not self.recorded:
+            return None
+        if not self.events["end"].query():
+            raise RuntimeError("Core diagnostics must follow the preceding request's normal output completion")
+        return {name: self.events["begin"].elapsed_time(event) * 1000 for name, event in self.events.items()}
+
+
 def run(plan, variant):
     if variant == "old" or plan.chunks == 1:
         return ORIGINAL_CALL(plan)
