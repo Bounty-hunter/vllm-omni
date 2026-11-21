@@ -86,6 +86,10 @@ def main():
                 )
                 for value in joint:
                     dist.broadcast(value, src=0)
+                if case.get("fused_joint_v", False):
+                    projected_joint = torch.empty(1, joint_length, 3, heads, 128, device="cuda", dtype=torch.bfloat16)
+                    projected_joint[:, :, 2].copy_(joint[2])
+                    joint = joint[:2] + (projected_joint[:, :, 2],)
                 if "joint_query_length" in case:
                     joint = (joint[0][:, : case["joint_query_length"]], *joint[1:])
                 metadata = AttentionMetadata(
@@ -264,6 +268,8 @@ def main():
                 head_sizes=head_sizes,
                 qkv_shape=list(inputs[0].shape),
                 qkv_strides=[list(x.stride()) for x in inputs],
+                joint_shapes=None if joint is None else [list(x.shape) for x in joint],
+                joint_strides=None if joint is None else [list(x.stride()) for x in joint],
                 median_max_rank_us=medians,
                 samples_max_rank_us=max_samples,
                 samples_local_us=local_samples,
