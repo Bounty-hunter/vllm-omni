@@ -156,6 +156,6 @@
     ],
     "new_profiler_traces": false,
     "paired_audit": false,
-    "selection": "Frozen after eight-round screen. Small whole; f17 4+6; f33 2+8 with 4+6 retained as a control. Whole borrowed baselines retained in larger cases."
+    "selection": "Adaptive learns only from existing pre-capture reference/probe/warmup core calls, then freezes before capture. No extra forward. Insufficient complete queued cycles or confidence retain whole. Oracle arms, when present, use previously measured fixed partitions; they do not control adaptive selection."
   }
 }

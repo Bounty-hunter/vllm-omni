@@ -86,6 +86,6 @@
     ],
     "new_profiler_traces": false,
     "paired_audit": false,
-    "selection": "Learn only during original reference/probe/warmup core calls; retain whole if complete queued cycles or confidence are insufficient. No additional forward."
+    "selection": "Adaptive learns only from existing pre-capture reference/probe/warmup core calls, then freezes before capture. No extra forward. Insufficient complete queued cycles or confidence retain whole. Oracle arms, when present, use previously measured fixed partitions; they do not control adaptive selection."
   }
 }

@@ -112,6 +112,6 @@
     ],
     "new_profiler_traces": false,
     "paired_audit": false,
-    "selection": "Conservative small-canvas whole path after a bitwise failure at SP4/1024 with 7+7. Larger 3K 7+7 and4K 4+10 are from prior independent confirmations; retain borrowed whole baselines."
+    "selection": "Adaptive learns only from existing pre-capture reference/probe/warmup core calls, then freezes before capture. No extra forward. Insufficient complete queued cycles or confidence retain whole. Oracle arms, when present, use previously measured fixed partitions; they do not control adaptive selection."
   }
 }

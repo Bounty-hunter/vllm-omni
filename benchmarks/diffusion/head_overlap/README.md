@@ -60,6 +60,79 @@ Setting `num_splits=1` restores exactness in the pure-attention control;
 the complete model with that setting has not been qualified. The backend
 default remains unchanged and the small H3 recipe keeps whole attention.
 
+## Learning from existing warmups
+
+The opt-in `autotune` variant implements a graph-owned lazy experiment in
+`lazy_head_policy.py`. It observes only shapes reached by actual requests.
+The first existing reference pass discovers attention execution signatures;
+the original probe and warmup passes supply real core observations. Each
+attention call executes one candidate and returns its output to the model.
+It adds no model forward, dummy kernel, candidate graph or shape sweep.
+Models without existing pre-capture eager opportunities cannot learn this way.
+
+A CPU query-tile/SM-wave and communication proxy proposes whole attention
+plus at most two unequal splits. Odd head counts remain eligible. This model
+generates candidates; its constants are not fitted online and its waves are
+not measured launch grids. Real complete-core observations select among them.
+Signatures include device/backend versions, SP, QKV shapes/strides/dtypes and
+metadata, including joint and packed layouts. Same-signature layers share
+samples within their graph owner; subsequent requests replay the frozen graph.
+There is no cross-process policy persistence or cross-expert aggregation.
+
+Candidates rotate and reverse identically on every rank. Buffers and timing
+events are prepared before sampling, using the existing plan/slot caches.
+Timing spans input exchange, attention, output exchange and their dependencies,
+excluding projection and FFN. A nonblocking start-event readiness check rejects
+cores not fully submitted before the GPU started them. A complete rotated
+cycle is discarded if any candidate on any rank fails that check. After the
+original synchronization boundary, one CPU-group gather combines maximum-rank
+durations. Selection needs at least six valid cycles, 80% positive paired
+differences, and a margin above 5 us, 1.5% of core time and twice the paired MAD.
+Otherwise it freezes whole attention. A separate preparation header gather
+checks rank agreement before allocating candidates. Neither is per layer.
+
+The selected signature/partition digest enters the existing graph key. Timing
+event references are then released. Capture and steady replay contain no
+learning timers, event queries or exploration gathers. Existing peer fences
+and pipeline operations still execute. Candidate buffers stay in the existing
+bounded native caches until graph-owner cleanup, increasing memory residency.
+Masked/opaque metadata remains whole; small packed varlen layouts remain whole
+because of the FA3 precision limit
+described above. A new signature unexpectedly reached after discovery fails
+closed rather than allocating or silently changing a captured layout.
+
+`lazy-*-cold.json` repeats the 13 workload cases in both arm orders with shape
+changes invalidating graphs. Both arms use borrowed output slots. Generic
+whole and adaptive arms share the same manual capture preparation. These
+are shape-cache misses within one model process; they are not independent
+process startups. `lazy-*-startup-{base,auto}.json` supplies the separate
+single-arm processes used to measure the first request after model loading.
+First-request wall time includes exploration, preparation, audit and graph
+setup. No extra forward does **not** imply no extra first-request latency.
+
+Use the same isolated-checkout patch composition as the unprofiled matrix
+below, choosing the corresponding `lazy-*.json` recipe. For example, after
+applying the generic and Qwen block adapters on two scheduled devices:
+
+```bash
+export HCMS_LAZY_COUNTERS=1 HCMS_MATRIX_AUDIT="$RUN_DIR/results/audit"
+python "$PROBE_DIR/check_lazy_policy.py"
+python "$PROBE_DIR/check_lazy_runtime.py"
+python "$PROBE_DIR/model_matrix.py" --model "$QWEN_EDIT_MODEL" \
+  --config "$PROBE_DIR/lazy-qwen-cold.json" --out "$RUN_DIR/results" \
+  --rounds 8 --warmups 1
+```
+
+`HCMS_LAZY_COUNTERS=1` installs test-only API counters before importing the
+policy. They verify actual core/body calls, timing, queries and synchronization;
+they are not enabled by normal execution. The audit field `eager_forwards`
+also counts Python capture recording, which must be separated from executed
+eager passes and graph replays when interpreting forward counts.
+
+Results, first-request costs, missed opportunities and evidence identities
+are in [LAZY-RESULTS.txt](LAZY-RESULTS.txt). This remains an explicit offline
+prototype; it does not enable automatic selection in the library default.
+
 ## Files
 
 - `overlap_probe.py`: fixed-buffer CE geometry and controlled workload.

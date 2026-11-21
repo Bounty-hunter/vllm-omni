@@ -213,7 +213,7 @@
     ],
     "new_profiler_traces": false,
     "order": "Rotate every round and reverse after a complete cycle.",
-    "selection": "Frozen after the eight-round screen; paired medians choose candidates. Small text control stays on the whole path.",
+    "selection": "Adaptive learns only from existing pre-capture reference/probe/warmup core calls, then freezes before capture. No extra forward. Insufficient complete queued cycles or confidence retain whole. Oracle arms, when present, use previously measured fixed partitions; they do not control adaptive selection.",
     "baseline_note": "Retain whole borrowed-output controls in large cases; the small text selected arm uses exactly the original whole-owned settings.",
     "paired_audit": false
   }
