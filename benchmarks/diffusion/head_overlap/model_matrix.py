@@ -15,6 +15,21 @@ from vllm_omni.entrypoints.omni import Omni
 from vllm_omni.inputs.data import OmniDiffusionSamplingParams
 
 
+def audio_arrays(output):
+    payload = output.multimodal_output.get("audio")
+    if payload is None:
+        return []
+    result = []
+    for value in payload if isinstance(payload, (list, tuple)) else [payload]:
+        if value is None:
+            continue
+        value = value.detach().cpu().numpy() if hasattr(value, "detach") else np.asarray(value)
+        if not value.size:
+            raise AssertionError("The request returned empty audio")
+        result.append(value)
+    return result
+
+
 def arrays(outputs, *, require_audio=False):
     result = []
     audio_count = 0
@@ -25,16 +40,9 @@ def arrays(outputs, *, require_audio=False):
             else:
                 result.append(np.asarray(value))
         if require_audio:
-            audio = output.multimodal_output.get("audio")
-            if audio is not None:
-                for value in audio if isinstance(audio, (list, tuple)) else [audio]:
-                    if value is None:
-                        continue
-                    value = value.detach().cpu().numpy() if hasattr(value, "detach") else np.asarray(value)
-                    if not value.size:
-                        raise AssertionError("The request returned empty audio")
-                    result.append(value)
-                    audio_count += 1
+            audio = audio_arrays(output)
+            result.extend(audio)
+            audio_count += len(audio)
     if len(result) == audio_count:
         raise AssertionError("The request returned no image/video output")
     if require_audio and not audio_count:
@@ -112,6 +120,12 @@ def main():
                 outputs = omni.generate(prompt, sampling_params_list=[params])
                 elapsed_ms = (time.perf_counter() - started) * 1000
                 values = arrays(outputs, require_audio=config.get("require_audio", False))
+                if config.get("save_audio_outputs"):
+                    for output_index, output in enumerate(outputs):
+                        np.savez_compressed(
+                            args.out / f"{extra['label']}-seed{seed}-output{output_index}-audio.npz",
+                            *audio_arrays(output),
+                        )
                 hashes = [hashlib.sha256(value.tobytes()).hexdigest() for value in values]
                 shapes = [list(value.shape) for value in values]
                 dtypes = [str(value.dtype) for value in values]
