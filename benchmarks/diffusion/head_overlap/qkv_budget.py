@@ -136,9 +136,11 @@ def main():
                     q, k = (value.unflatten(-1, (32, 128)) for value in (q, k))
                     pair = qk_rotary(q, k, norm_q.weight, norm_k.weight, frequencies, 1e-6)
                     if pair is None:
+                        q = norm_q(q).to(hidden.dtype)
+                        k = norm_k(k).to(hidden.dtype)
                         return (
-                            _apply_qwen_image21_rotary_emb(norm_q(q).to(hidden.dtype), frequencies),
-                            _apply_qwen_image21_rotary_emb(norm_k(k).to(hidden.dtype), frequencies),
+                            _apply_qwen_image21_rotary_emb(q, frequencies),
+                            _apply_qwen_image21_rotary_emb(k, frequencies),
                         )
                     return pair
 

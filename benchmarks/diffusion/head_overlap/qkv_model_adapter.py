@@ -72,9 +72,11 @@ def install(pipeline):
                     q, k = (value.unflatten(-1, (module.num_heads, module.head_dim)) for value in (q, k))
                     pair = qk_rotary(q, k, module.norm_q.weight, module.norm_k.weight, freqs, module.norm_q.eps)
                     if pair is None:
+                        q = module.norm_q(q).to(hidden_states.dtype)
+                        k = module.norm_k(k).to(hidden_states.dtype)
                         return (
-                            module._apply_rotary_emb(module.norm_q(q).to(hidden_states.dtype), freqs),
-                            module._apply_rotary_emb(module.norm_k(k).to(hidden_states.dtype), freqs),
+                            module._apply_rotary_emb(q, freqs),
+                            module._apply_rotary_emb(k, freqs),
                         )
                     return pair
 

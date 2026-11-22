@@ -30,6 +30,8 @@ class LazyQKVPolicy(LazyHeadPolicy):
         self.qkv_mode = mode
         self.stats["qkv_mode"] = mode
         self.stats["measurement_scope"] = "projection + QK norm/RoPE + complete attention core"
+        if self.core_events is not None and not self.all_core_spans:
+            raise ValueError("QKV diagnostics require equal complete-core markers with all-cores scope")
 
     @observe_core
     def execute(self, hidden, projector, fused, normalize, normalization, metadata, pg, kernel):
@@ -84,6 +86,12 @@ class LazyQKVPolicy(LazyHeadPolicy):
         if pair is not None:
             pair[0].record()
             submitted = time.perf_counter()
+        diagnostic = None
+        if self.phase == "frozen" and torch.cuda.is_current_stream_capturing() and self.core_events is not None:
+            key = hashlib.sha256(repr(signature).encode()).hexdigest()[:16]
+            index = self.stats.get("capture_plans", {}).get(key, {}).get("calls", 0)
+            diagnostic = self.core_events[signature, choice][index]
+            diagnostic.record("begin", compute)
         if entry.choices[choice] == "fused":
             fields = fused() if fields is None else fields
             entry.whole.bind(fields, joint, kernel, None)
@@ -100,6 +108,9 @@ class LazyQKVPolicy(LazyHeadPolicy):
                 lambda: projector.project(hidden, values, scales, 1).unflatten(-1, (query.shape[2], query.shape[3])),
                 joint,
             )
+        if diagnostic is not None:
+            diagnostic.record("end", compute)
+            diagnostic.recorded = True
         if pair is not None:
             pair[1].record()
             submit_us = (time.perf_counter() - submitted) * 1e6
@@ -151,6 +162,15 @@ class LazyQKVPolicy(LazyHeadPolicy):
             if any(peer != header for peer in peers):
                 raise RuntimeError("Ranks disagree on prepared QKV execution plans")
         for entry in self.entries.values():
+            if self.core_events is not None:
+                from schedule_probe import CoreEvents
+
+                for choice in range(len(entry.choices)):
+                    self.core_events[entry.signature, choice] = [
+                        CoreEvents(0, entry.inputs[0].device, entry.whole.runtime) for _ in range(entry.calls)
+                    ]
+                if self.component_events is None:
+                    self.component_events = CoreEvents(0, entry.inputs[0].device, entry.whole.runtime)
             if len(entry.choices) == 1:
                 continue
             inputs = (
