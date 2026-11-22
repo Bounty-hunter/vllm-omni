@@ -76,5 +76,6 @@ normal性能source SHA逐项保留在all-comparisons.csv；r33完整core诊断so
 r31纯窗口source 0c1d4ca603c05bae6a2cc9bea561ceb4d6568892；r35其余三形状source 292abca62d157b4611b114574e75353718a3cb76。
 收尾仅补了非overlap多块使用input-staging时的拒绝校验；合法路径的GPU操作不变，CPU边界检查通过。
 所有trace.json为明确标注的逻辑CUDA event区间，非新采集的Nsight/PyTorch kernel trace。
-尚未达到净节省为纯P2P预算50%的目标；目前实测约27%-30%，不能用旧含同步分母或孤立core收益替代E2E。
+尚未达到净节省为纯P2P预算50%的目标；原3+5三轮点估计约27%-35.5%，每轮均保留，不能只选较高点。
+不能用旧含同步分母或孤立core收益替代E2E；输入staging对照也未证实额外收益。
 没有建立core外增长的具体kernel/host因果链，仍需继续定位。没有PR、共享依赖升级或生产默认集成。
