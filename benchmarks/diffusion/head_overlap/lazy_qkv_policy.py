@@ -121,11 +121,7 @@ class LazyQKVPolicy(LazyHeadPolicy):
                 group = projector.groups[part]
                 widths = tuple(projector.field_widths[field] for field in group)
                 tensors = dict(zip(group, projector.project(hidden, values, scales, part).split(widths, dim=-1)))
-                query, key = normalize(tensors.get(0), tensors.get(1))
-                if query is not None:
-                    tensors[0] = query
-                if key is not None:
-                    tensors[1] = key
+                tensors.update(normalize(tensors.get(0), tensors.get(1)))
                 if 2 in tensors:
                     tensors[2] = tensors[2].unflatten(
                         -1, (projector.field_widths[2] // projector.head_dim, projector.head_dim)
@@ -135,9 +131,24 @@ class LazyQKVPolicy(LazyHeadPolicy):
             if self.fieldwise_ready:
                 raw = projector.project(hidden, values, scales, 0)
                 q, k = raw.split(projector.field_widths[:2], dim=-1)
+                normalizing = iter(normalize(q, k))
+                del raw, q, k
+
+                def ready(field):
+                    nonlocal normalizing
+                    produced_field, tensor = next(normalizing)
+                    if produced_field != field:
+                        raise ValueError("The QK normalizer must yield Q then K")
+                    if field == 1:
+                        # Release normalization temporaries after their last
+                        # compute-stream consumer, rather than pinning them
+                        # through attention and its peer return.
+                        normalizing = None
+                    return (tensor,)
+
                 producers = (
-                    lambda: (normalize(q, None)[0],),
-                    lambda: (normalize(None, k)[1],),
+                    lambda: ready(0),
+                    lambda: ready(1),
                     lambda: produce(1),
                 )
             else:

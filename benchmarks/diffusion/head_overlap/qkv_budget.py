@@ -31,6 +31,7 @@ from vllm.model_executor.layers.quantization.utils.quant_utils import kFp8Static
 from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata
 from vllm_omni.diffusion.attention.backends.flash_attn import FlashAttentionImpl
 from vllm_omni.diffusion.attention.parallel.ulysses import UlyssesParallelAttention
+from vllm_omni.diffusion.layers.exact_bf16_pointwise import supports_exact_rope
 from vllm_omni.diffusion.layers.exact_bf16_qk_norm_rope import qk_rotary
 from vllm_omni.diffusion.models.qwen_image_21.qwen_image_21_transformer import _apply_qwen_image21_rotary_emb
 
@@ -58,6 +59,7 @@ def main():
     compute.wait_stream(torch.cuda.current_stream())
     torch.cuda.set_stream(compute)
     device = torch.device("cuda", rank)
+    fused_norm_available = supports_exact_rope(device)
     torch.set_default_dtype(torch.bfloat16)
     args.out.mkdir(parents=True, exist_ok=True)
     index = json.loads((args.model / "transformer/diffusion_pytorch_model.safetensors.index.json").read_text())[
@@ -141,41 +143,37 @@ def main():
                     q, k = (None if value is None else value.unflatten(-1, (32, 128)) for value in (q, k))
                     pair = (
                         None
-                        if q is None or k is None
+                        if not fused_norm_available or q is None or k is None
                         else qk_rotary(q, k, norm_q.weight, norm_k.weight, frequencies, 1e-6)
                     )
                     if pair is None:
                         q = None if q is None else norm_q(q).to(hidden.dtype)
                         k = None if k is None else norm_k(k).to(hidden.dtype)
-                        return (
-                            None if q is None else _apply_qwen_image21_rotary_emb(q, frequencies),
-                            None if k is None else _apply_qwen_image21_rotary_emb(k, frequencies),
-                        )
-                    return pair
+                        if q is not None:
+                            yield 0, _apply_qwen_image21_rotary_emb(q, frequencies)
+                        if k is not None:
+                            yield 1, _apply_qwen_image21_rotary_emb(k, frequencies)
+                    else:
+                        yield 0, pair[0]
+                        yield 1, pair[1]
 
                 def fused():
                     q, k, v = kernel.apply_weights(linear, hidden).split(4096, dim=-1)
-                    return *normalize(q, k), v.unflatten(-1, (32, 128))
+                    normalized = dict(normalize(q, k))
+                    return normalized[0], normalized[1], v.unflatten(-1, (32, 128))
 
                 def produced(part, quantized, activation_scale):
                     group = projection.groups[part]
                     fields = dict(
                         zip(group, projection.project(hidden, quantized, activation_scale, part).split(4096, dim=-1))
                     )
-                    q, k = normalize(fields.get(0), fields.get(1))
-                    if q is not None:
-                        fields[0] = q
-                    if k is not None:
-                        fields[1] = k
+                    fields.update(normalize(fields.get(0), fields.get(1)))
                     if 2 in fields:
                         fields[2] = fields[2].unflatten(-1, (32, 128))
                     return tuple(fields[field] for field in group)
 
                 def split():
                     quantized, activation_scale = projection.quantize(hidden)
-                    if args.fieldwise_ready:
-                        q, k = projection.project(hidden, quantized, activation_scale, 0).split(4096, dim=-1)
-                        return normalize(q, None)[0], normalize(None, k)[1], produced(1, quantized, activation_scale)[0]
                     fields = {}
                     for part in range(2):
                         fields.update(zip(projection.groups[part], produced(part, quantized, activation_scale)))
@@ -207,9 +205,20 @@ def main():
                     quantized, activation_scale = projection.quantize(hidden)
                     if args.fieldwise_ready:
                         q, k = projection.project(hidden, quantized, activation_scale, 0).split(4096, dim=-1)
+                        normalizing = iter(normalize(q, k))
+                        del q, k
+
+                        def ready(field):
+                            nonlocal normalizing
+                            produced_field, tensor = next(normalizing)
+                            assert produced_field == field
+                            if field == 1:
+                                normalizing = None
+                            return (tensor,)
+
                         producers = (
-                            lambda: (normalize(q, None)[0],),
-                            lambda: (normalize(None, k)[1],),
+                            lambda: ready(0),
+                            lambda: ready(1),
                             lambda: produced(1, quantized, activation_scale),
                         )
                     else:
@@ -278,10 +287,25 @@ def main():
                 functions["early_copy_control"] = copy_control
                 copy_names = ["early_copy_control"]
                 if args.fieldwise_ready:
-                    raw_key = projection.project(hidden, quantized, activation_scale, 0).split(4096, dim=-1)[1]
+                    raw_q, raw_k = (
+                        projection.project(hidden, quantized, activation_scale, 0)
+                        .unflatten(-1, (2, 32, 128))
+                        .unbind(-3)
+                    )
+                    pair = (
+                        qk_rotary(raw_q, raw_k, norm_q.weight, norm_k.weight, frequencies, 1e-6)
+                        if fused_norm_available
+                        else None
+                    )
+                    prepared_key = norm_k(raw_k).to(hidden.dtype) if pair is None else pair[1]
 
                     def key_ready_control():
-                        key = normalize(None, raw_key)[1]
+                        # The first iterator advance already performed both
+                        # norms. Only K's RoPE (or an already fused result)
+                        # and its local staging remain for the second stage.
+                        key = (
+                            _apply_qwen_image21_rotary_emb(prepared_key, frequencies) if pair is None else prepared_key
+                        )
                         staged.bind_field(1, key, joint[1])
                         staged.emit_batch_on(staged.field_local[1], compute)
 

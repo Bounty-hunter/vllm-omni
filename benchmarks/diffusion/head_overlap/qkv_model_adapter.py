@@ -10,6 +10,7 @@ from lazy_head_policy import tensor_spec
 from staged_projection import StagedProjection
 
 from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata
+from vllm_omni.diffusion.layers.exact_bf16_pointwise import supports_exact_rope
 from vllm_omni.diffusion.layers.exact_bf16_qk_norm_rope import qk_rotary
 from vllm_omni.diffusion.models.qwen_image_21.qwen_image_21_transformer import QwenImage21Attention
 
@@ -37,7 +38,7 @@ def install(pipeline):
             continue
         original = module.forward
 
-        def make_forward(module, original, projection):
+        def make_forward(module, original, projection, fused_norm_available):
             @functools.wraps(original)
             def forward(hidden_states, freqs, attn_metadata=None, **kwargs):
                 state = _ACTIVE.get()
@@ -77,32 +78,37 @@ def install(pipeline):
                 metadata.joint_strategy = "front"
 
                 def normalize(q, k):
+                    """Yield ready fields while preserving the original QK operator order."""
                     q, k = (
                         None if value is None else value.unflatten(-1, (module.num_heads, module.head_dim))
                         for value in (q, k)
                     )
                     pair = (
                         None
-                        if q is None or k is None
+                        if not fused_norm_available or q is None or k is None
                         else qk_rotary(q, k, module.norm_q.weight, module.norm_k.weight, freqs, module.norm_q.eps)
                     )
                     if pair is None:
                         q = None if q is None else module.norm_q(q).to(hidden_states.dtype)
                         k = None if k is None else module.norm_k(k).to(hidden_states.dtype)
-                        return (
-                            None if q is None else module._apply_rotary_emb(q, freqs),
-                            None if k is None else module._apply_rotary_emb(k, freqs),
-                        )
-                    return pair
+                        if q is not None:
+                            yield 0, module._apply_rotary_emb(q, freqs)
+                        if k is not None:
+                            yield 1, module._apply_rotary_emb(k, freqs)
+                    else:
+                        yield 0, pair[0]
+                        yield 1, pair[1]
 
                 def fused():
                     qkv, _ = module.to_qkv(hidden_states)
                     width = module.num_heads * module.head_dim
                     q, k, v = qkv.split(width, dim=-1)
-                    return *normalize(q, k), v.unflatten(-1, (module.num_heads, module.head_dim))
+                    normalized = dict(normalize(q, k))
+                    return normalized[0], normalized[1], v.unflatten(-1, (module.num_heads, module.head_dim))
 
                 normalization = (
-                    "original_qk_norm_rope",
+                    "native_order_qk_ready_iterator",
+                    fused_norm_available,
                     tensor_spec(freqs),
                     module.norm_q.eps,
                     tensor_spec(module.norm_q.weight),
@@ -124,7 +130,7 @@ def install(pipeline):
 
             return forward
 
-        module.forward = make_forward(module, original, projection)
+        module.forward = make_forward(module, original, projection, supports_exact_rope(module.norm_q.weight.device))
         prepared += 1
     record(
         kind="qkv_adapters",
