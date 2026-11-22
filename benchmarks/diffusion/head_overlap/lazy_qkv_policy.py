@@ -18,6 +18,8 @@ from staged_attention import StagedAttention
 class ProjectionObservation(Observation):
     whole: object = None
     staged: object = None
+    groups: tuple = ()
+    value_pitch: int = 0
 
 
 class LazyQKVPolicy(LazyHeadPolicy):
@@ -59,6 +61,8 @@ class LazyQKVPolicy(LazyHeadPolicy):
             type(projector.kernel).__qualname__,
             repr(projector.kernel.config),
             tuple((tuple(w.shape), tuple(w.stride()), str(w.dtype)) for w in projector.weights),
+            projector.groups,
+            projector.head_dim,
             normalization,
             semantic,
         )
@@ -70,8 +74,15 @@ class LazyQKVPolicy(LazyHeadPolicy):
             fields = fused()
             heads = fields[0].shape[2] // dist.get_world_size(pg)
             plan = prepare_plan(fields, joint, pg, (heads,), comm, kernel, None, ("qkv", signature))
-            choices = ("fused", "qk_then_v") if self.enabled else ("fused",)
-            entry = self.entries[signature] = ProjectionObservation(signature, choices, whole=plan)
+            split_name = "qk_then_v" if projector.groups[0] == (0, 1) else "kv_then_q"
+            choices = ("fused", split_name) if self.enabled else ("fused",)
+            entry = self.entries[signature] = ProjectionObservation(
+                signature,
+                choices,
+                whole=plan,
+                groups=projector.groups,
+                value_pitch=projector.widths[next(i for i, group in enumerate(projector.groups) if 2 in group)],
+            )
         pair = None
         choice = entry.selected
         if self.phase == "discover":
@@ -98,14 +109,27 @@ class LazyQKVPolicy(LazyHeadPolicy):
             result = entry.whole()
         else:
             values, scales = projector.quantize(hidden)
-            qk = projector.project(hidden, values, scales, 0)
-            q_width = projector.widths[0] - projector.widths[1]
-            query, key = normalize(*qk.split((q_width, projector.widths[1]), dim=-1))
+
+            def produce(part):
+                group = projector.groups[part]
+                widths = tuple(projector.field_widths[field] for field in group)
+                tensors = dict(zip(group, projector.project(hidden, values, scales, part).split(widths, dim=-1)))
+                query, key = normalize(tensors.get(0), tensors.get(1))
+                if query is not None:
+                    tensors[0] = query
+                if key is not None:
+                    tensors[1] = key
+                if 2 in tensors:
+                    tensors[2] = tensors[2].unflatten(
+                        -1, (projector.field_widths[2] // projector.head_dim, projector.head_dim)
+                    )
+                return tuple(tensors[field] for field in group)
+
+            early = produce(0)
             entry.staged.attention_kernel = kernel
             result = entry.staged.run_staged(
-                query,
-                key,
-                lambda: projector.project(hidden, values, scales, 1).unflatten(-1, (query.shape[2], query.shape[3])),
+                early,
+                lambda: produce(1),
                 joint,
             )
         if diagnostic is not None:
@@ -173,13 +197,18 @@ class LazyQKVPolicy(LazyHeadPolicy):
                     self.component_events = CoreEvents(0, entry.inputs[0].device, entry.whole.runtime)
             if len(entry.choices) == 1:
                 continue
-            inputs = (
-                *entry.inputs[:2],
-                torch.empty(entry.inputs[2].shape, device=entry.inputs[2].device, dtype=entry.inputs[2].dtype),
+            value = entry.inputs[2]
+            value_width = value.shape[2] * value.shape[3]
+            storage = torch.empty((*value.shape[:2], entry.value_pitch), device=value.device, dtype=value.dtype)
+            staged_value = storage.narrow(-1, entry.value_pitch - value_width, value_width).unflatten(
+                -1, value.shape[2:]
             )
+            inputs = (*entry.inputs[:2], staged_value)
             if len(native._PLANS) >= native._PLAN_LIMIT:
                 raise RuntimeError("QKV candidates exceed the existing plan cache budget")
-            entry.staged = StagedAttention(inputs, entry.joint, entry.group, entry.comm, entry.kernel, None)
+            entry.staged = StagedAttention(
+                inputs, entry.joint, entry.group, entry.comm, entry.kernel, None, early_fields=entry.groups[0]
+            )
             # Reuse the native graph owner's cache and release lifecycle.
             key = (inputs[0].device, entry.group.group_name, 1, ("qkv-staged", id(self), entry.signature))
             native._PLANS[key] = (entry.signature, entry.staged)

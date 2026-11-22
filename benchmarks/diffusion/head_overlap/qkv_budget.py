@@ -43,6 +43,7 @@ def main():
     parser.add_argument("--sizes", type=int, nargs="+", default=[1024, 1536, 2048])
     parser.add_argument("--rounds", type=int, default=30)
     parser.add_argument("--inner", type=int, default=8)
+    parser.add_argument("--early-fields", choices=("qk", "kv"), default="qk")
     args = parser.parse_args()
     rank = int(os.environ["LOCAL_RANK"])
     torch.accelerator.set_device_index(rank)
@@ -103,7 +104,8 @@ def main():
                 quant_method=SimpleNamespace(fp8_linear=kernel),
             )
             kernel.process_weights_after_loading(linear)
-            projection = StagedProjection.prepare(linear, 4096, 4096)
+            early_fields = (0, 1) if args.early_fields == "qk" else (1, 2)
+            projection = StagedProjection.prepare(linear, 4096, 4096, head_dim=128, early_fields=early_fields)
             if projection is None:
                 raise RuntimeError(f"Unsupported loaded projection backend: {type(kernel).__name__}")
             assert all(
@@ -133,14 +135,18 @@ def main():
                 metadata = AttentionMetadata(joint_query=joint[0], joint_key=joint[1], joint_value=joint[2])
 
                 def normalize(q, k):
-                    q, k = (value.unflatten(-1, (32, 128)) for value in (q, k))
-                    pair = qk_rotary(q, k, norm_q.weight, norm_k.weight, frequencies, 1e-6)
+                    q, k = (None if value is None else value.unflatten(-1, (32, 128)) for value in (q, k))
+                    pair = (
+                        None
+                        if q is None or k is None
+                        else qk_rotary(q, k, norm_q.weight, norm_k.weight, frequencies, 1e-6)
+                    )
                     if pair is None:
-                        q = norm_q(q).to(hidden.dtype)
-                        k = norm_k(k).to(hidden.dtype)
+                        q = None if q is None else norm_q(q).to(hidden.dtype)
+                        k = None if k is None else norm_k(k).to(hidden.dtype)
                         return (
-                            _apply_qwen_image21_rotary_emb(q, frequencies),
-                            _apply_qwen_image21_rotary_emb(k, frequencies),
+                            None if q is None else _apply_qwen_image21_rotary_emb(q, frequencies),
+                            None if k is None else _apply_qwen_image21_rotary_emb(k, frequencies),
                         )
                     return pair
 
@@ -148,20 +154,34 @@ def main():
                     q, k, v = kernel.apply_weights(linear, hidden).split(4096, dim=-1)
                     return *normalize(q, k), v.unflatten(-1, (32, 128))
 
-                def qk_prepared(quantized, activation_scale):
-                    q, k = projection.project(hidden, quantized, activation_scale, 0).split(4096, dim=-1)
-                    return normalize(q, k)
+                def produced(part, quantized, activation_scale):
+                    group = projection.groups[part]
+                    fields = dict(
+                        zip(group, projection.project(hidden, quantized, activation_scale, part).split(4096, dim=-1))
+                    )
+                    q, k = normalize(fields.get(0), fields.get(1))
+                    if q is not None:
+                        fields[0] = q
+                    if k is not None:
+                        fields[1] = k
+                    if 2 in fields:
+                        fields[2] = fields[2].unflatten(-1, (32, 128))
+                    return tuple(fields[field] for field in group)
 
                 def split():
                     quantized, activation_scale = projection.quantize(hidden)
-                    q, k = qk_prepared(quantized, activation_scale)
-                    return q, k, projection.project(hidden, quantized, activation_scale, 1).unflatten(-1, (32, 128))
+                    fields = {}
+                    for part in range(2):
+                        fields.update(zip(projection.groups[part], produced(part, quantized, activation_scale)))
+                    return tuple(fields[field] for field in range(3))
 
                 inputs, split_inputs = fused(), split()
                 impl = FlashAttentionImpl(32 // world, 128, 128**-0.5)
                 full = NativePipeline(inputs, joint, pg, 1, comm, impl.forward_cuda, None)
                 serial = NativePipeline(split_inputs, joint, pg, 1, comm, impl.forward_cuda, None)
-                staged = StagedAttention(split_inputs, joint, pg, comm, impl.forward_cuda, None)
+                staged = StagedAttention(
+                    split_inputs, joint, pg, comm, impl.forward_cuda, None, early_fields=early_fields
+                )
 
                 def fused_core():
                     full.bind(fused(), joint, impl.forward_cuda, None)
@@ -173,11 +193,10 @@ def main():
 
                 def overlap_core():
                     quantized, activation_scale = projection.quantize(hidden)
-                    q, k = qk_prepared(quantized, activation_scale)
+                    early = produced(0, quantized, activation_scale)
                     return staged.run_staged(
-                        q,
-                        k,
-                        lambda: projection.project(hidden, quantized, activation_scale, 1).unflatten(-1, (32, 128)),
+                        early,
+                        lambda: produced(1, quantized, activation_scale),
                         joint,
                     )
 
@@ -202,7 +221,7 @@ def main():
                 quantized, activation_scale = projection.quantize(hidden)
                 functions = dict(
                     fused_projection=lambda: kernel.apply_weights(linear, hidden),
-                    v_gemm=lambda: projection.project(hidden, quantized, activation_scale, 1),
+                    remaining_projection=lambda: projection.project(hidden, quantized, activation_scale, 1),
                     fused_producer=fused,
                     split_producer=split,
                     fused_core=fused_core,
@@ -218,23 +237,23 @@ def main():
                 functions["split_projection"] = split_projection
 
                 def value_ready_control():
-                    value = projection.project(hidden, quantized, activation_scale, 1).unflatten(-1, (32, 128))
-                    staged.bind_field(2, value, joint[2])
-                    staged.emit_batch_on(staged.field_local[2], compute)
+                    for field, value in zip(staged.late_fields, produced(1, quantized, activation_scale), strict=True):
+                        staged.bind_field(field, value, joint[field])
+                    staged.emit_batch_on(staged.late_local, compute)
 
-                functions["v_gemm_and_local_staging"] = value_ready_control
+                functions["remaining_producer_and_staging"] = value_ready_control
                 copy_events = CopyEvents(staged.runtime, device)
 
                 def copy_control():
                     staged.enter.record(compute)
                     with torch.cuda.stream(comm):
                         comm.wait_event(staged.enter)
-                        copy_events.run(lambda: staged.emit_batch_on(staged.qk_remote, comm), comm)
+                        copy_events.run(lambda: staged.emit_batch_on(staged.early_remote, comm), comm)
                         staged.forward[0].handle.barrier()
                         staged.done.record(comm)
                     compute.wait_event(staged.done)
 
-                functions["qk_copy_control"] = copy_control
+                functions["early_copy_control"] = copy_control
                 graphs = {}
                 owner = StableGraph(nn.Identity(), device=device, max_entries=1)
                 for name, function in functions.items():
@@ -260,7 +279,7 @@ def main():
                         end.record()
                         end.synchronize()
                         local_samples[name].append(begin.elapsed_time(end) * 1000 / args.inner)
-                        if name == "qk_copy_control":
+                        if name == "early_copy_control":
                             copy_samples.append(copy_events.begin.elapsed_time(copy_events.end) * 1000)
                 peers = [None] * world
                 dist.all_gather_object(
@@ -274,6 +293,7 @@ def main():
                 copy_us = statistics.median(max(peer["copy"][i] for peer in peers) for i in range(args.rounds))
                 row = dict(
                     layer=number,
+                    early_fields=args.early_fields,
                     size=size,
                     qkv_input=[1, local, 32, 128],
                     prefix=4055,
@@ -283,9 +303,9 @@ def main():
                     all_exact=all(check["exact"] for peer in peers for check in peer["checks"]),
                     median_max_rank_us=medians,
                     samples_max_rank_us=samples,
-                    qk_copy_window_us=copy_us,
-                    v_gemm_only_overlap_us=min(copy_us, medians["v_gemm"]),
-                    v_overlap_bound_us=min(copy_us, medians["v_gemm_and_local_staging"]),
+                    early_copy_window_us=copy_us,
+                    remaining_projection_only_bound_us=min(copy_us, medians["remaining_projection"]),
+                    remaining_ready_bound_us=min(copy_us, medians["remaining_producer_and_staging"]),
                     producer_tax_us=medians["split_producer"] - medians["fused_producer"],
                     schedule_saving_us=medians["serial_core"] - medians["overlap_core"],
                     net_core_saving_us=medians["fused_core"] - medians["overlap_core"],

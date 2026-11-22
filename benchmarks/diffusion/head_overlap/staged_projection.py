@@ -18,12 +18,16 @@ class StagedProjection:
     """
 
     @classmethod
-    def prepare(cls, layer, q_width, kv_width):
+    def prepare(cls, layer, q_width, kv_width, *, head_dim, early_fields=(0, 1)):
         kernel = getattr(getattr(layer, "quant_method", None), "fp8_linear", None)
         if not isinstance(kernel, CutlassFP8ScaledMMLinearKernel):
             return None
         weight, scale, input_scale, upper = kernel._get_layer_params(layer)
-        widths = (q_width + kv_width, kv_width)
+        if early_fields not in ((0, 1), (1, 2)):
+            raise ValueError("Early projection must be contiguous QK or KV columns")
+        field_widths = (q_width, kv_width, kv_width)
+        groups = (early_fields, tuple(field for field in range(3) if field not in early_fields))
+        widths = tuple(sum(field_widths[field] for field in group) for group in groups)
         if (
             weight.ndim != 2
             or weight.shape[1] != sum(widths)
@@ -33,12 +37,16 @@ class StagedProjection:
             or any(width % 16 for width in (*widths, weight.shape[0]))
         ):
             return None
-        return cls(kernel, weight, scale, input_scale, upper, widths)
+        return cls(kernel, weight, scale, input_scale, upper, widths, groups, field_widths, head_dim)
 
-    def __init__(self, kernel, weight, scale, input_scale, upper, widths):
+    def __init__(self, kernel, weight, scale, input_scale, upper, widths, groups, field_widths, head_dim):
         self.kernel, self.widths = kernel, tuple(widths)
+        self.groups, self.field_widths = groups, field_widths
+        self.head_dim = head_dim
         self.scale, self.input_scale, self.upper = scale, input_scale, upper
-        self.weights = tuple(weight.split(self.widths, dim=1))
+        self.weights = tuple(
+            weight.narrow(1, sum(field_widths[: group[0]]), width) for group, width in zip(groups, widths, strict=True)
+        )
         self.kernels = []
         for part in self.weights:
             config = replace(kernel.config, weight_shape=(part.shape[1], part.shape[0]))

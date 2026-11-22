@@ -14,10 +14,14 @@ from native_prefilled import NativePipeline
 
 
 class StagedAttention(NativePipeline):
-    def __init__(self, inputs, joint, pg, comm, kernel, metadata):
+    def __init__(self, inputs, joint, pg, comm, kernel, metadata, *, early_fields=(0, 1)):
         super().__init__(inputs, joint, pg, 1, comm, kernel, metadata)
-        self.value_ready = torch.cuda.Event()
-        self.value_ready.record()
+        if early_fields not in ((0, 1), (1, 2)):
+            raise ValueError("Early transport must contain QK or KV")
+        self.early_fields = early_fields
+        self.late_fields = tuple(field for field in range(3) if field not in early_fields)
+        self.remaining_ready = torch.cuda.Event()
+        self.remaining_ready.record()
         self.field_bindings = [[], [], []]
         self.field_local, self.field_remote = [[], [], []], [[], [], []]
         offset = 0
@@ -29,10 +33,12 @@ class StagedAttention(NativePipeline):
             self.field_remote[field] = [op for op in operations if id(op) not in local_ids]
             self.field_bindings[field] = [binding for binding in self.bindings if binding[1] % 3 == field]
             offset += count
-        self.qk_local = self.field_local[0] + self.field_local[1]
-        self.qk_remote = self.field_remote[0] + self.field_remote[1]
+        self.early_local = [op for field in self.early_fields for op in self.field_local[field]]
+        self.early_remote = [op for field in self.early_fields for op in self.field_remote[field]]
+        self.late_local = self.field_local[self.late_fields[0]]
+        self.late_remote = self.field_remote[self.late_fields[0]]
         if hasattr(self, "copy_batches"):
-            for operations in (self.qk_local, self.qk_remote, self.field_local[2], self.field_remote[2]):
+            for operations in (self.early_local, self.early_remote, self.late_local, self.late_remote):
                 self.copy_batches[tuple(map(id, operations))] = (ctypes.POINTER(ctypes.c_size_t) * len(operations))(
                     *operations
                 )
@@ -47,24 +53,25 @@ class StagedAttention(NativePipeline):
         for operation, source, offset in self.field_bindings[field]:
             operation[2] = (tensor if source < 3 else joint).data_ptr() + offset
 
-    def run_staged(self, query, key, value_producer, joint=None):
+    def run_staged(self, early, remaining_producer, joint=None):
         compute = torch.cuda.current_stream()
-        self.bind_field(0, query, None if joint is None else joint[0])
-        self.bind_field(1, key, None if joint is None else joint[1])
-        self.emit_batch_on(self.qk_local, compute)
+        for field, tensor in zip(self.early_fields, early, strict=True):
+            self.bind_field(field, tensor, None if joint is None else joint[field])
+        self.emit_batch_on(self.early_local, compute)
         self.enter.record(compute)
         with torch.cuda.stream(self.stream):
             self.stream.wait_event(self.enter)
-            self.emit_batch_on(self.qk_remote, self.stream)
-        # No QK peer barrier is needed here: attention consumes all three
+            self.emit_batch_on(self.early_remote, self.stream)
+        # No early peer barrier is needed here: attention consumes all three
         # fields only after the original single forward-ready peer fence.
-        value = value_producer()
-        self.bind_field(2, value, None if joint is None else joint[2])
-        self.emit_batch_on(self.field_local[2], compute)
-        self.value_ready.record(compute)
+        remaining = remaining_producer()
+        for field, tensor in zip(self.late_fields, remaining, strict=True):
+            self.bind_field(field, tensor, None if joint is None else joint[field])
+        self.emit_batch_on(self.late_local, compute)
+        self.remaining_ready.record(compute)
         with torch.cuda.stream(self.stream):
-            self.stream.wait_event(self.value_ready)
-            self.emit_batch_on(self.field_remote[2], self.stream)
+            self.stream.wait_event(self.remaining_ready)
+            self.emit_batch_on(self.late_remote, self.stream)
             self.mark_forward_ready(0)
         compute.wait_event(self.ready[0])
         output = self.kernel(*self.parts[0], None)

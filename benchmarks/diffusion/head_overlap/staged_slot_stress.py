@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 """Asymmetric V producers and old-output consumers on a reused staged slot."""
 
+import argparse
 import copy
 import os
 import weakref
@@ -17,6 +18,10 @@ from vllm_omni.diffusion.attention.parallel.ulysses import UlyssesParallelAttent
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--early-fields", choices=("qk", "kv"), default="qk")
+    args = parser.parse_args()
+    early_fields = (0, 1) if args.early_fields == "qk" else (1, 2)
     rank = int(os.environ["LOCAL_RANK"])
     torch.accelerator.set_device_index(rank)
     dist.init_process_group("nccl")
@@ -62,21 +67,24 @@ def main():
             references = [
                 weakref.ref(value) for value in prototypes + (() if prototype_joint is None else prototype_joint)
             ]
-            plan = StagedAttention(prototypes, prototype_joint, pg, comm, impl.forward_cuda, None)
+            plan = StagedAttention(
+                prototypes, prototype_joint, pg, comm, impl.forward_cuda, None, early_fields=early_fields
+            )
             del prototypes, prototype_joint
             assert all(reference() is None for reference in references), "Plan retained preparation-only tensors"
 
             def body():
                 saved = []
                 for i in range(6):
-                    q, k, v = frames[i % 2]
+                    frame = frames[i % 2]
 
-                    def value_producer(v=v, i=i):
+                    def remaining_producer(frame=frame, i=i):
                         if rank != i % world:
                             torch.cuda._sleep(2_000_000)
-                        return v
+                        return tuple(frame[field] for field in plan.late_fields)
 
-                    pooled = plan.run_staged(q, k, value_producer, joints[i % 2])
+                    early = tuple(frame[field] for field in plan.early_fields)
+                    pooled = plan.run_staged(early, remaining_producer, joints[i % 2])
                     if rank == i % world:
                         torch.cuda._sleep(2_000_000)
                     saved.append(pooled.clone())
@@ -97,8 +105,9 @@ def main():
                 for i, value in enumerate(outputs):
                     torch.testing.assert_close(value, expected[i % 2], atol=0, rtol=0)
             print(
-                f"QKV_SLOT_STRESS rank={rank} tokens={total} prefix={prefix} eager/graph exact "
-                "under delayed V producers and delayed old-slot consumers; prototypes released",
+                f"QKV_SLOT_STRESS rank={rank} tokens={total} prefix={prefix} early={args.early_fields} "
+                "eager/graph exact "
+                "under delayed remaining producers and delayed old-slot consumers; prototypes released",
                 flush=True,
             )
             del graph, outputs, actual

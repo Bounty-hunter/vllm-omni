@@ -4,6 +4,7 @@
 
 import copy
 import functools
+import os
 
 from lazy_head_policy import tensor_spec
 from staged_projection import StagedProjection
@@ -17,12 +18,19 @@ def install(pipeline):
     from model_probe import _ACTIVE, record
 
     prepared, unsupported = 0, 0
+    order = os.environ.get("HCMS_QKV_EARLY_FIELDS", "qk")
+    if order not in ("qk", "kv"):
+        raise ValueError("QKV early fields must be qk or kv")
     modules = (module for name in pipeline._dit_modules for module in getattr(pipeline, name).modules())
     for module in modules:
         if not isinstance(module, QwenImage21Attention):
             continue
         projection = StagedProjection.prepare(
-            module.to_qkv, module.num_heads * module.head_dim, module.num_kv_heads * module.head_dim
+            module.to_qkv,
+            module.num_heads * module.head_dim,
+            module.num_kv_heads * module.head_dim,
+            head_dim=module.head_dim,
+            early_fields=(0, 1) if order == "qk" else (1, 2),
         )
         if projection is None:
             unsupported += 1
@@ -69,14 +77,21 @@ def install(pipeline):
                 metadata.joint_strategy = "front"
 
                 def normalize(q, k):
-                    q, k = (value.unflatten(-1, (module.num_heads, module.head_dim)) for value in (q, k))
-                    pair = qk_rotary(q, k, module.norm_q.weight, module.norm_k.weight, freqs, module.norm_q.eps)
+                    q, k = (
+                        None if value is None else value.unflatten(-1, (module.num_heads, module.head_dim))
+                        for value in (q, k)
+                    )
+                    pair = (
+                        None
+                        if q is None or k is None
+                        else qk_rotary(q, k, module.norm_q.weight, module.norm_k.weight, freqs, module.norm_q.eps)
+                    )
                     if pair is None:
-                        q = module.norm_q(q).to(hidden_states.dtype)
-                        k = module.norm_k(k).to(hidden_states.dtype)
+                        q = None if q is None else module.norm_q(q).to(hidden_states.dtype)
+                        k = None if k is None else module.norm_k(k).to(hidden_states.dtype)
                         return (
-                            module._apply_rotary_emb(q, freqs),
-                            module._apply_rotary_emb(k, freqs),
+                            None if q is None else module._apply_rotary_emb(q, freqs),
+                            None if k is None else module._apply_rotary_emb(k, freqs),
                         )
                     return pair
 
