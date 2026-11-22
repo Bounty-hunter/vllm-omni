@@ -25,12 +25,14 @@ class ProjectionObservation(Observation):
 class LazyQKVPolicy(LazyHeadPolicy):
     """One real producer/core per call; inherited all-rank conservative selection."""
 
-    def __init__(self, group, *, mode):
+    def __init__(self, group, *, mode, fieldwise_ready=False):
         if mode not in ("fused", "auto"):
             raise ValueError("QKV plan must be fused or auto")
         super().__init__(group, enabled=mode == "auto")
         self.qkv_mode = mode
+        self.fieldwise_ready = fieldwise_ready
         self.stats["qkv_mode"] = mode
+        self.stats["fieldwise_ready"] = fieldwise_ready
         self.stats["measurement_scope"] = "projection + QK norm/RoPE + complete attention core"
         if self.core_events is not None and not self.all_core_spans:
             raise ValueError("QKV diagnostics require equal complete-core markers with all-cores scope")
@@ -63,6 +65,7 @@ class LazyQKVPolicy(LazyHeadPolicy):
             tuple((tuple(w.shape), tuple(w.stride()), str(w.dtype)) for w in projector.weights),
             projector.groups,
             projector.head_dim,
+            self.fieldwise_ready,
             normalization,
             semantic,
         )
@@ -75,6 +78,10 @@ class LazyQKVPolicy(LazyHeadPolicy):
             heads = fields[0].shape[2] // dist.get_world_size(pg)
             plan = prepare_plan(fields, joint, pg, (heads,), comm, kernel, None, ("qkv", signature))
             split_name = "qk_then_v" if projector.groups[0] == (0, 1) else "kv_then_q"
+            if self.fieldwise_ready:
+                if projector.groups != ((0, 1), (2,)):
+                    raise ValueError("Fieldwise readiness requires shared QK and separate V projection")
+                split_name = "q_then_k_then_v"
             choices = ("fused", split_name) if self.enabled else ("fused",)
             entry = self.entries[signature] = ProjectionObservation(
                 signature,
@@ -125,13 +132,18 @@ class LazyQKVPolicy(LazyHeadPolicy):
                     )
                 return tuple(tensors[field] for field in group)
 
-            early = produce(0)
+            if self.fieldwise_ready:
+                raw = projector.project(hidden, values, scales, 0)
+                q, k = raw.split(projector.field_widths[:2], dim=-1)
+                producers = (
+                    lambda: (normalize(q, None)[0],),
+                    lambda: (normalize(None, k)[1],),
+                    lambda: produce(1),
+                )
+            else:
+                producers = (lambda: produce(0), lambda: produce(1))
             entry.staged.attention_kernel = kernel
-            result = entry.staged.run_staged(
-                early,
-                lambda: produce(1),
-                joint,
-            )
+            result = entry.staged.run_staged(producers, joint)
         if diagnostic is not None:
             diagnostic.record("end", compute)
             diagnostic.recorded = True
@@ -207,7 +219,13 @@ class LazyQKVPolicy(LazyHeadPolicy):
             if len(native._PLANS) >= native._PLAN_LIMIT:
                 raise RuntimeError("QKV candidates exceed the existing plan cache budget")
             entry.staged = StagedAttention(
-                inputs, entry.joint, entry.group, entry.comm, entry.kernel, None, early_fields=entry.groups[0]
+                inputs,
+                entry.joint,
+                entry.group,
+                entry.comm,
+                entry.kernel,
+                None,
+                field_groups=((0,), (1,), (2,)) if self.fieldwise_ready else entry.groups,
             )
             # Reuse the native graph owner's cache and release lifecycle.
             key = (inputs[0].device, entry.group.group_name, 1, ("qkv-staged", id(self), entry.signature))

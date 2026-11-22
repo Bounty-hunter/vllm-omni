@@ -20,8 +20,14 @@ from vllm_omni.diffusion.attention.parallel.ulysses import UlyssesParallelAttent
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--early-fields", choices=("qk", "kv"), default="qk")
+    parser.add_argument("--fieldwise-ready", action="store_true")
     args = parser.parse_args()
     early_fields = (0, 1) if args.early_fields == "qk" else (1, 2)
+    groups = (
+        ((0,), (1,), (2,))
+        if args.fieldwise_ready
+        else (early_fields, tuple(i for i in range(3) if i not in early_fields))
+    )
     rank = int(os.environ["LOCAL_RANK"])
     torch.accelerator.set_device_index(rank)
     dist.init_process_group("nccl")
@@ -67,9 +73,7 @@ def main():
             references = [
                 weakref.ref(value) for value in prototypes + (() if prototype_joint is None else prototype_joint)
             ]
-            plan = StagedAttention(
-                prototypes, prototype_joint, pg, comm, impl.forward_cuda, None, early_fields=early_fields
-            )
+            plan = StagedAttention(prototypes, prototype_joint, pg, comm, impl.forward_cuda, None, field_groups=groups)
             del prototypes, prototype_joint
             assert all(reference() is None for reference in references), "Plan retained preparation-only tensors"
 
@@ -78,13 +82,18 @@ def main():
                 for i in range(6):
                     frame = frames[i % 2]
 
-                    def remaining_producer(frame=frame, i=i):
-                        if rank != i % world:
+                    def produce(group, last):
+                        if last and rank != i % world:
                             torch.cuda._sleep(2_000_000)
-                        return tuple(frame[field] for field in plan.late_fields)
+                        # Ephemeral producers exercise source lifetime as well
+                        # as delayed consumers; these copies are stress-only.
+                        return tuple(frame[field].clone() for field in group)
 
-                    early = tuple(frame[field] for field in plan.early_fields)
-                    pooled = plan.run_staged(early, remaining_producer, joints[i % 2])
+                    producers = tuple(
+                        (lambda group=group, last=j == len(groups) - 1: produce(group, last))
+                        for j, group in enumerate(groups)
+                    )
+                    pooled = plan.run_staged(producers, joints[i % 2])
                     if rank == i % world:
                         torch.cuda._sleep(2_000_000)
                     saved.append(pooled.clone())

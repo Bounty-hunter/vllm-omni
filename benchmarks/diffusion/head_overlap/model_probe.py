@@ -97,7 +97,9 @@ def make_learner(state):
     if state["qkv_mode"] is not None:
         from lazy_qkv_policy import LazyQKVPolicy
 
-        return LazyQKVPolicy(get_world_group().cpu_group, mode=state["qkv_mode"])
+        return LazyQKVPolicy(
+            get_world_group().cpu_group, mode=state["qkv_mode"], fieldwise_ready=state["qkv_fieldwise_ready"]
+        )
     from lazy_head_policy import LazyHeadPolicy
 
     return LazyHeadPolicy(
@@ -227,6 +229,8 @@ def real_prefix_call(original, graphs, component, *args, **kwargs):
     learner = graph.module.learner
     if getattr(learner, "qkv_mode", None) != state["qkv_mode"]:
         raise ValueError("A QKV execution policy must remain fixed within its graph case")
+    if getattr(learner, "fieldwise_ready", False) != state["qkv_fieldwise_ready"]:
+        raise ValueError("A QKV readiness partition must remain fixed within its graph case")
     if learner.schedule != state["schedule"]:
         raise ValueError("A communication schedule must remain fixed within its graph case")
     if learner.candidate_family != state["candidate_family"]:
@@ -538,6 +542,7 @@ def install(pipeline):
                     candidate_partition=extra.get("candidate_partition"),
                     candidate_family=extra.get("candidate_family"),
                     qkv_mode=extra.get("qkv_mode"),
+                    qkv_fieldwise_ready=bool(extra.get("qkv_fieldwise_ready", False)),
                     qkv_execution_calls=0,
                     real_prefix=bool(extra.get("real_prefix", False)),
                     eager_forwards={},

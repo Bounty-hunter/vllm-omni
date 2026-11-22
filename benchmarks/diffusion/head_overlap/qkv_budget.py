@@ -44,7 +44,10 @@ def main():
     parser.add_argument("--rounds", type=int, default=30)
     parser.add_argument("--inner", type=int, default=8)
     parser.add_argument("--early-fields", choices=("qk", "kv"), default="qk")
+    parser.add_argument("--fieldwise-ready", action="store_true")
     args = parser.parse_args()
+    if args.fieldwise_ready and args.early_fields != "qk":
+        parser.error("Fieldwise readiness requires QK/V projection views")
     rank = int(os.environ["LOCAL_RANK"])
     torch.accelerator.set_device_index(rank)
     dist.init_process_group("nccl")
@@ -170,6 +173,9 @@ def main():
 
                 def split():
                     quantized, activation_scale = projection.quantize(hidden)
+                    if args.fieldwise_ready:
+                        q, k = projection.project(hidden, quantized, activation_scale, 0).split(4096, dim=-1)
+                        return normalize(q, None)[0], normalize(None, k)[1], produced(1, quantized, activation_scale)[0]
                     fields = {}
                     for part in range(2):
                         fields.update(zip(projection.groups[part], produced(part, quantized, activation_scale)))
@@ -180,7 +186,13 @@ def main():
                 full = NativePipeline(inputs, joint, pg, 1, comm, impl.forward_cuda, None)
                 serial = NativePipeline(split_inputs, joint, pg, 1, comm, impl.forward_cuda, None)
                 staged = StagedAttention(
-                    split_inputs, joint, pg, comm, impl.forward_cuda, None, early_fields=early_fields
+                    split_inputs,
+                    joint,
+                    pg,
+                    comm,
+                    impl.forward_cuda,
+                    None,
+                    field_groups=((0,), (1,), (2,)) if args.fieldwise_ready else projection.groups,
                 )
 
                 def fused_core():
@@ -193,12 +205,19 @@ def main():
 
                 def overlap_core():
                     quantized, activation_scale = projection.quantize(hidden)
-                    early = produced(0, quantized, activation_scale)
-                    return staged.run_staged(
-                        early,
-                        lambda: produced(1, quantized, activation_scale),
-                        joint,
-                    )
+                    if args.fieldwise_ready:
+                        q, k = projection.project(hidden, quantized, activation_scale, 0).split(4096, dim=-1)
+                        producers = (
+                            lambda: (normalize(q, None)[0],),
+                            lambda: (normalize(None, k)[1],),
+                            lambda: produced(1, quantized, activation_scale),
+                        )
+                    else:
+                        producers = (
+                            lambda: produced(0, quantized, activation_scale),
+                            lambda: produced(1, quantized, activation_scale),
+                        )
+                    return staged.run_staged(producers, joint)
 
                 checks = []
                 for seed in (42, 43, 44):
@@ -237,23 +256,39 @@ def main():
                 functions["split_projection"] = split_projection
 
                 def value_ready_control():
-                    for field, value in zip(staged.late_fields, produced(1, quantized, activation_scale), strict=True):
+                    for field, value in zip(
+                        staged.field_groups[-1], produced(1, quantized, activation_scale), strict=True
+                    ):
                         staged.bind_field(field, value, joint[field])
                     staged.emit_batch_on(staged.late_local, compute)
 
                 functions["remaining_producer_and_staging"] = value_ready_control
                 copy_events = CopyEvents(staged.runtime, device)
 
-                def copy_control():
+                def copy_control(operations=None):
+                    operations = staged.early_remote if operations is None else operations
                     staged.enter.record(compute)
                     with torch.cuda.stream(comm):
                         comm.wait_event(staged.enter)
-                        copy_events.run(lambda: staged.emit_batch_on(staged.early_remote, comm), comm)
+                        copy_events.run(lambda: staged.emit_batch_on(operations, comm), comm)
                         staged.forward[0].handle.barrier()
                         staged.done.record(comm)
                     compute.wait_event(staged.done)
 
                 functions["early_copy_control"] = copy_control
+                copy_names = ["early_copy_control"]
+                if args.fieldwise_ready:
+                    raw_key = projection.project(hidden, quantized, activation_scale, 0).split(4096, dim=-1)[1]
+
+                    def key_ready_control():
+                        key = normalize(None, raw_key)[1]
+                        staged.bind_field(1, key, joint[1])
+                        staged.emit_batch_on(staged.field_local[1], compute)
+
+                    functions["key_producer_and_staging"] = key_ready_control
+                    functions["query_copy_control"] = lambda: copy_control(staged.field_remote[0])
+                    functions["key_copy_control"] = lambda: copy_control(staged.field_remote[1])
+                    copy_names += ["query_copy_control", "key_copy_control"]
                 graphs = {}
                 owner = StableGraph(nn.Identity(), device=device, max_entries=1)
                 for name, function in functions.items():
@@ -265,7 +300,8 @@ def main():
                     copy_events.external = False
                 torch.accelerator.synchronize()
                 begin, end = (torch.Event(device=device, enable_timing=True) for _ in range(2))
-                local_samples, copy_samples = {name: [] for name in functions}, []
+                local_samples = {name: [] for name in functions}
+                copy_samples = {name: [] for name in copy_names}
                 for iteration in range(args.rounds):
                     names = list(functions)
                     offset = iteration % len(names)
@@ -279,8 +315,8 @@ def main():
                         end.record()
                         end.synchronize()
                         local_samples[name].append(begin.elapsed_time(end) * 1000 / args.inner)
-                        if name == "early_copy_control":
-                            copy_samples.append(copy_events.begin.elapsed_time(copy_events.end) * 1000)
+                        if name in copy_samples:
+                            copy_samples[name].append(copy_events.begin.elapsed_time(copy_events.end) * 1000)
                 peers = [None] * world
                 dist.all_gather_object(
                     peers, dict(samples=local_samples, copy=copy_samples, checks=checks), group=control
@@ -290,10 +326,20 @@ def main():
                     for name in functions
                 }
                 medians = {name: statistics.median(values) for name, values in samples.items()}
-                copy_us = statistics.median(max(peer["copy"][i] for peer in peers) for i in range(args.rounds))
+                copies = {
+                    name: statistics.median(max(peer["copy"][name][i] for peer in peers) for i in range(args.rounds))
+                    for name in copy_names
+                }
+                copy_us = copies["early_copy_control"]
+                bound = min(copy_us, medians["remaining_producer_and_staging"])
+                if args.fieldwise_ready:
+                    cq, ck = copies["query_copy_control"], copies["key_copy_control"]
+                    tk, tv = (medians[name] for name in ("key_producer_and_staging", "remaining_producer_and_staging"))
+                    bound = cq + ck - max(0.0, max(tk, cq) + ck - (tk + tv))
                 row = dict(
                     layer=number,
                     early_fields=args.early_fields,
+                    fieldwise_ready=args.fieldwise_ready,
                     size=size,
                     qkv_input=[1, local, 32, 128],
                     prefix=4055,
@@ -305,7 +351,8 @@ def main():
                     samples_max_rank_us=samples,
                     early_copy_window_us=copy_us,
                     remaining_projection_only_bound_us=min(copy_us, medians["remaining_projection"]),
-                    remaining_ready_bound_us=min(copy_us, medians["remaining_producer_and_staging"]),
+                    remaining_ready_bound_us=bound,
+                    isolated_copy_windows_us=copies,
                     producer_tax_us=medians["split_producer"] - medians["fused_producer"],
                     schedule_saving_us=medians["serial_core"] - medians["overlap_core"],
                     net_core_saving_us=medians["fused_core"] - medians["overlap_core"],
