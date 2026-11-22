@@ -93,6 +93,22 @@ def assert_equal(actual, expected):
         assert actual == expected
 
 
+def make_learner(state):
+    if state["qkv_mode"] is not None:
+        from lazy_qkv_policy import LazyQKVPolicy
+
+        return LazyQKVPolicy(get_world_group().cpu_group, mode=state["qkv_mode"])
+    from lazy_head_policy import LazyHeadPolicy
+
+    return LazyHeadPolicy(
+        get_world_group().cpu_group,
+        enabled=state["autotune"],
+        candidate_partition=state["candidate_partition"],
+        candidate_family=state["candidate_family"],
+        schedule=state["schedule"],
+    )
+
+
 def graph_call(original, graphs, component, *args, **kwargs):
     state = _ACTIVE.get()
     if state is None or state["mode"] == "eager":
@@ -192,19 +208,11 @@ def real_prefix_call(original, graphs, component, *args, **kwargs):
     They replace existing warmup opportunities. The original sync-debug probe,
     capture boundary and graph validation remain; none supplies timing samples.
     """
-    from lazy_head_policy import LazyHeadPolicy
-
     state = _ACTIVE.get()
     graph_key = state.get("graph_variant", state["variant"])
     graph = graphs.get(graph_key)
     if graph is None:
-        learner = LazyHeadPolicy(
-            get_world_group().cpu_group,
-            enabled=state["autotune"],
-            candidate_partition=state["candidate_partition"],
-            candidate_family=state["candidate_family"],
-            schedule=state["schedule"],
-        )
+        learner = make_learner(state)
         learner.begin()
         graph = graphs[graph_key] = StableGraph(
             PackedForward(original, learner),
@@ -217,6 +225,8 @@ def real_prefix_call(original, graphs, component, *args, **kwargs):
         if state.get("capture_without_probes"):
             graph._probe_pending = False
     learner = graph.module.learner
+    if getattr(learner, "qkv_mode", None) != state["qkv_mode"]:
+        raise ValueError("A QKV execution policy must remain fixed within its graph case")
     if learner.schedule != state["schedule"]:
         raise ValueError("A communication schedule must remain fixed within its graph case")
     if learner.candidate_family != state["candidate_family"]:
@@ -387,7 +397,7 @@ def install(pipeline):
         before = state["fallbacks"]
         slot = (state["variant"], "borrowed") if state["borrow"] else None
         with native.output_slot(slot):
-            if state.get("learner") is not None:
+            if state.get("learner") is not None and not hasattr(state["learner"], "qkv_mode"):
                 result = state["learner"].run(q, k, v, md, pg, kernel, streams=kwargs["streams"])
             else:
                 result = original_native(q, k, v, md, pg, chunks, kernel, **kwargs)
@@ -452,6 +462,10 @@ def install(pipeline):
         module.forward = make_forward(original, graphs, name)
     if not components:
         raise RuntimeError("The probe found no declared DiT components")
+    if os.environ.get("HCMS_QKV_EXPERIMENT") == "1":
+        from qkv_model_adapter import install as install_qkv_adapters
+
+        install_qkv_adapters(pipeline)
     record(
         kind="model",
         pipeline=type(pipeline).__name__,
@@ -519,6 +533,8 @@ def install(pipeline):
                     autotune=bool(extra.get("autotune", False)),
                     candidate_partition=extra.get("candidate_partition"),
                     candidate_family=extra.get("candidate_family"),
+                    qkv_mode=extra.get("qkv_mode"),
+                    qkv_execution_calls=0,
                     real_prefix=bool(extra.get("real_prefix", False)),
                     eager_forwards={},
                     real_eager_steps={},
@@ -570,6 +586,7 @@ def install(pipeline):
                         variant=state["variant"],
                         mode=state["mode"],
                         direct_python_calls=state["direct_calls"],
+                        qkv_execution_calls=state["qkv_execution_calls"],
                         fallbacks=state["fallbacks"],
                         requested_head_partition=state["head_partition"],
                         resident_head_partitions=sorted({plan.head_sizes for _, plan in native._PLANS.values()}),

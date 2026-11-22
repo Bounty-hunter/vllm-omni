@@ -15,6 +15,7 @@ from types import SimpleNamespace
 import torch
 import torch.distributed as dist
 from core_budget import CopyEvents
+from diffusers.models.normalization import RMSNorm
 from model_probe import StableGraph
 from native_prefilled import NativePipeline
 from safetensors import safe_open
@@ -31,6 +32,7 @@ from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata
 from vllm_omni.diffusion.attention.backends.flash_attn import FlashAttentionImpl
 from vllm_omni.diffusion.attention.parallel.ulysses import UlyssesParallelAttention
 from vllm_omni.diffusion.layers.exact_bf16_qk_norm_rope import qk_rotary
+from vllm_omni.diffusion.models.qwen_image_21.qwen_image_21_transformer import _apply_qwen_image21_rotary_emb
 
 
 def main():
@@ -108,6 +110,9 @@ def main():
                 w.untyped_storage().data_ptr() == linear.weight.untyped_storage().data_ptr() for w in projection.weights
             )
             wq, wk = (tensor(prefix + f"norm_{field}.weight") for field in "qk")
+            norm_q, norm_k = (RMSNorm(128, eps=1e-6).to(device=device, dtype=torch.bfloat16) for _ in range(2))
+            norm_q.weight.copy_(wq)
+            norm_k.weight.copy_(wk)
             for size in args.sizes:
                 total = (size // 16) ** 2
                 assert total % world == 0
@@ -128,9 +133,13 @@ def main():
                 metadata = AttentionMetadata(joint_query=joint[0], joint_key=joint[1], joint_value=joint[2])
 
                 def normalize(q, k):
-                    pair = qk_rotary(q.unflatten(-1, (32, 128)), k.unflatten(-1, (32, 128)), wq, wk, frequencies, 1e-6)
+                    q, k = (value.unflatten(-1, (32, 128)) for value in (q, k))
+                    pair = qk_rotary(q, k, norm_q.weight, norm_k.weight, frequencies, 1e-6)
                     if pair is None:
-                        raise RuntimeError("Expected original fused QK norm/RoPE")
+                        return (
+                            _apply_qwen_image21_rotary_emb(norm_q(q).to(hidden.dtype), frequencies),
+                            _apply_qwen_image21_rotary_emb(norm_k(k).to(hidden.dtype), frequencies),
+                        )
                     return pair
 
                 def fused():
