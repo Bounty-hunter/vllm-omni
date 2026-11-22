@@ -214,6 +214,13 @@ def main():
                     return tuple(projection.project(hidden, values, scales, i) for i in range(2))
 
                 functions["split_projection"] = split_projection
+
+                def value_ready_control():
+                    value = projection.project(hidden, quantized, activation_scale, 1).unflatten(-1, (32, 128))
+                    staged.bind_field(2, value, joint[2])
+                    staged.emit_batch_on(staged.field_local[2], compute)
+
+                functions["v_gemm_and_local_staging"] = value_ready_control
                 copy_events = CopyEvents(staged.runtime, device)
 
                 def copy_control():
@@ -275,7 +282,8 @@ def main():
                     median_max_rank_us=medians,
                     samples_max_rank_us=samples,
                     qk_copy_window_us=copy_us,
-                    v_overlap_bound_us=min(copy_us, medians["v_gemm"]),
+                    v_gemm_only_overlap_us=min(copy_us, medians["v_gemm"]),
+                    v_overlap_bound_us=min(copy_us, medians["v_gemm_and_local_staging"]),
                     producer_tax_us=medians["split_producer"] - medians["fused_producer"],
                     schedule_saving_us=medians["serial_core"] - medians["overlap_core"],
                     net_core_saving_us=medians["fused_core"] - medians["overlap_core"],
