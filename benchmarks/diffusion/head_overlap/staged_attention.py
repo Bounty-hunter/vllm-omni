@@ -67,10 +67,10 @@ class StagedAttention(NativePipeline):
             sources.extend(tensors)
             for field, tensor in zip(fields, tensors, strict=True):
                 self.bind_field(field, tensor, None if joint is None else joint[field])
+            self.emit_batch_on(local, compute)
             ready.record(compute)
             with torch.cuda.stream(self.stream):
                 self.stream.wait_event(ready)
-                self.emit_batch_on(local, self.stream)
                 self.emit_batch_on(peer, self.stream)
         # One original peer fence publishes all fields and acknowledges old
         # output consumers. No peer barrier is introduced between producers.

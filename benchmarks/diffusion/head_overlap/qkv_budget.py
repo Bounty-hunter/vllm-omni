@@ -364,7 +364,6 @@ def main():
                     layer=number,
                     early_fields=args.early_fields,
                     fieldwise_ready=args.fieldwise_ready,
-                    staging_stream="communication",
                     size=size,
                     qkv_input=[1, local, 32, 128],
                     prefix=4055,
