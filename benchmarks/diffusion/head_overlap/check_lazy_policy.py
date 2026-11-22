@@ -6,7 +6,15 @@ from collections import Counter
 from dataclasses import dataclass
 from types import SimpleNamespace
 
-from lazy_head_policy import candidate_index, candidates, choose, metadata_spec, qualified_cycles, tensor_spec
+from lazy_head_policy import (
+    candidate_index,
+    candidates,
+    choose,
+    metadata_spec,
+    qualified_cycles,
+    symmetric_candidates,
+    tensor_spec,
+)
 
 
 class TensorLayout:
@@ -62,6 +70,14 @@ def main():
             assert len(set(choices)) == len(choices)
             assert all(sum(widths) == heads and min(widths) > 0 for widths in choices)
     assert any(any(width % 2 for width in widths) for widths in candidates(14, 9248, 128, 4, 132)[1:])
+    assert symmetric_candidates(8) == ((8,), (1, 6, 1), (2, 4, 2))
+    assert symmetric_candidates(14) == ((14,), (1, 12, 1), (2, 10, 2))
+    for heads in range(1, 33):
+        choices = symmetric_candidates(heads)
+        assert choices[0] == (heads,) and len(choices) <= 3
+        assert all(sum(parts) == heads and min(parts) > 0 for parts in choices)
+        assert all(parts[0] == parts[-1] <= parts[1] for parts in choices[1:])
+    assert Counter(candidate_index(i, 3) for i in range(24)) == {0: 8, 1: 8, 2: 8}
     for count in (1, 2, 3):
         cycle = [candidate_index(i, count) for i in range(2 * count * count)]
         assert Counter(cycle) == {i: 2 * count for i in range(count)}

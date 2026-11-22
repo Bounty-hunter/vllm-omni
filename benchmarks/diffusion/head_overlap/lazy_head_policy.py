@@ -96,6 +96,11 @@ def candidates(heads, tokens, dim, world, sms, *, flops=6e14, bandwidth=None, kv
     return (whole,) + tuple((h, heads - h) for _, h in ranked[:2])
 
 
+def symmetric_candidates(heads):
+    """Try small ends of one then two heads within the existing prefix budget."""
+    return ((heads,),) + tuple((edge, heads - 2 * edge, edge) for edge in (1, 2) if heads - 2 * edge >= edge)
+
+
 def choose(samples, *, minimum=6, relative_margin=0.015, absolute_margin_us=5.0):
     """Use position-paired observations and an explicit noise margin."""
     baseline = samples[0]
@@ -147,7 +152,7 @@ class Observation:
 class LazyHeadPolicy:
     """Small graph-owned state; native plan/slot ownership stays in its cache."""
 
-    def __init__(self, group, *, enabled=True, candidate_partition=None, schedule="stage-local"):
+    def __init__(self, group, *, enabled=True, candidate_partition=None, candidate_family=None, schedule="stage-local"):
         import torch
 
         from vllm_omni.diffusion.attention.backends.utils.fa import (
@@ -168,6 +173,11 @@ class LazyHeadPolicy:
         ):
             raise ValueError("Lazy learning requires an explicit local-staging schedule")
         self.schedule = schedule
+        if candidate_family not in (None, "symmetric-ends"):
+            raise ValueError("Unknown head candidate family")
+        if candidate_family is not None and candidate_partition is not None:
+            raise ValueError("Choose either a candidate partition or a candidate family")
+        self.candidate_family = candidate_family
         self.candidate_partition = None if candidate_partition is None else tuple(candidate_partition)
         if self.candidate_partition is not None and (
             not 2 <= len(self.candidate_partition) <= 4
@@ -196,6 +206,7 @@ class LazyHeadPolicy:
         self.flops, self.bandwidth = 6e14, None
         self.stats = dict(
             schedule=schedule,
+            candidate_family=candidate_family,
             core_calls=0,
             event_records=0,
             preparation_calls=0,
@@ -285,6 +296,8 @@ class LazyHeadPolicy:
                 if sum(self.candidate_partition) != heads:
                     raise ValueError("The experimental candidate must cover the per-rank heads exactly")
                 choices = ((heads,), self.candidate_partition)
+            if self.enabled and safe and (not packed or tokens >= 4096) and self.candidate_family == "symmetric-ends":
+                choices = symmetric_candidates(heads)
             entry = self.entries[signature] = Observation(signature, choices)
         if self.phase == "discover":
             entry.inputs, entry.joint, entry.metadata, entry.kernel, entry.group, entry.comm = (
@@ -372,7 +385,7 @@ class LazyHeadPolicy:
         for entry in self.entries.values():
             # No extra forward is manufactured when this signature is rare.
             slots = slots_for(entry)
-            if sample_limit is not None:
+            if sample_limit is not None and self.candidate_family is None:
                 # A short real prefix prioritizes one promising split:
                 # more paired evidence and one fewer resident CE allocation.
                 entry.choices = entry.choices[:2]

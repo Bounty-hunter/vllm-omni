@@ -111,6 +111,7 @@ def graph_call(original, graphs, component, *args, **kwargs):
             learner = LazyHeadPolicy(
                 get_world_group().cpu_group,
                 candidate_partition=state["candidate_partition"],
+                candidate_family=state["candidate_family"],
                 schedule=state["schedule"],
             )
             learner.begin()
@@ -133,6 +134,8 @@ def graph_call(original, graphs, component, *args, **kwargs):
     learner = graph.module.learner
     if learner is not None and learner.schedule != state["schedule"]:
         raise ValueError("A communication schedule must remain fixed within its graph case")
+    if learner is not None and learner.candidate_family != state["candidate_family"]:
+        raise ValueError("A candidate family must remain fixed within its graph case")
     requested_candidate = state["candidate_partition"]
     if learner is not None and learner.candidate_partition != (
         None if requested_candidate is None else tuple(requested_candidate)
@@ -199,6 +202,7 @@ def real_prefix_call(original, graphs, component, *args, **kwargs):
             get_world_group().cpu_group,
             enabled=state["autotune"],
             candidate_partition=state["candidate_partition"],
+            candidate_family=state["candidate_family"],
             schedule=state["schedule"],
         )
         learner.begin()
@@ -215,6 +219,8 @@ def real_prefix_call(original, graphs, component, *args, **kwargs):
     learner = graph.module.learner
     if learner.schedule != state["schedule"]:
         raise ValueError("A communication schedule must remain fixed within its graph case")
+    if learner.candidate_family != state["candidate_family"]:
+        raise ValueError("A candidate family must remain fixed within its graph case")
     requested_candidate = state["candidate_partition"]
     if learner.candidate_partition != (None if requested_candidate is None else tuple(requested_candidate)):
         raise ValueError("An experimental candidate must remain fixed within its graph case")
@@ -512,6 +518,7 @@ def install(pipeline):
                     shapes=set(),
                     autotune=bool(extra.get("autotune", False)),
                     candidate_partition=extra.get("candidate_partition"),
+                    candidate_family=extra.get("candidate_family"),
                     real_prefix=bool(extra.get("real_prefix", False)),
                     eager_forwards={},
                     real_eager_steps={},
