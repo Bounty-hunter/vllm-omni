@@ -4,6 +4,7 @@
 
 import copy
 import os
+import weakref
 from types import SimpleNamespace
 
 import torch
@@ -56,7 +57,14 @@ def main():
                 )
                 q, k, v, md, context = strategy.pre_attention(*frame, copy.copy(metadata))
                 expected.append(strategy.post_attention(impl.forward_cuda(q, k, v, md), context).clone())
-            plan = StagedAttention(frames[0], joints[0], pg, comm, impl.forward_cuda, None)
+            prototypes = tuple(value.clone() for value in frames[0])
+            prototype_joint = None if joints[0] is None else tuple(value.clone() for value in joints[0])
+            references = [
+                weakref.ref(value) for value in prototypes + (() if prototype_joint is None else prototype_joint)
+            ]
+            plan = StagedAttention(prototypes, prototype_joint, pg, comm, impl.forward_cuda, None)
+            del prototypes, prototype_joint
+            assert all(reference() is None for reference in references), "Plan retained preparation-only tensors"
 
             def body():
                 saved = []
@@ -90,7 +98,7 @@ def main():
                     torch.testing.assert_close(value, expected[i % 2], atol=0, rtol=0)
             print(
                 f"QKV_SLOT_STRESS rank={rank} tokens={total} prefix={prefix} eager/graph exact "
-                "under delayed V producers and delayed old-slot consumers",
+                "under delayed V producers and delayed old-slot consumers; prototypes released",
                 flush=True,
             )
             del graph, outputs, actual
