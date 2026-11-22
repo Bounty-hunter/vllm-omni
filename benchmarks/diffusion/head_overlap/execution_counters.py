@@ -59,7 +59,9 @@ def install():
         def counted(*args, **kwargs):
             counts[label] += 1
             counts["sampling_host_syncs"] += int(
-                label != "event_queries" and _CORE_PHASE in ("sample", "settle", "frozen")
+                label != "event_queries"
+                and _CORE_PHASE in ("sample", "settle", "frozen")
+                and (label != "tensor_item" or args[0].device.type != "cpu")
             )
             if label == "tensor_item" and _CORE_PHASE is not None:
                 device = args[0].device.type
