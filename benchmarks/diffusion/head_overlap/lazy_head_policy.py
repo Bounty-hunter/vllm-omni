@@ -163,6 +163,7 @@ class LazyHeadPolicy:
             "stage-defer-fence",
             "stage-gated",
             "overlap-return",
+            "overlap-input",
             "overlap-staging",
         ):
             raise ValueError("Lazy learning requires an explicit local-staging schedule")

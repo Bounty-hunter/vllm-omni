@@ -18,6 +18,7 @@ VARIANTS = {
     "stage-early": (True, True, False),
     "stage-early-defer-local": (True, True, True),
     "overlap-return": (True, False, False),
+    "overlap-input": (True, False, False),
     "overlap-staging": (True, False, False),
 }
 
@@ -113,7 +114,7 @@ def run(plan, variant):
     staged, early, deferred = VARIANTS[variant]
     overlap = plan.overlap and variant != "stage-serial"
     defer_fence = variant == "stage-defer-fence"
-    comm_input = variant == "overlap-staging"
+    comm_input = variant in ("overlap-input", "overlap-staging")
     comm_output = variant in ("overlap-return", "overlap-staging")
     if comm_output and not overlap:
         raise ValueError("Staging overlap requires an overlapping plan")

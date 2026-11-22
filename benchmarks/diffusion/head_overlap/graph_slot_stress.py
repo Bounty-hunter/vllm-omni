@@ -15,7 +15,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--schedule",
-        choices=("original", "stage-gated", "stage-defer-fence", "overlap-return", "overlap-staging"),
+        choices=("original", "stage-gated", "stage-defer-fence", "overlap-return", "overlap-input", "overlap-staging"),
         default="original",
     )
     args = parser.parse_args()
