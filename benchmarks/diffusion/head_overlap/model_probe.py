@@ -39,7 +39,8 @@ class StableGraph(GraphedForward):
             learner.finish()
         graph.capture_begin(pool=self._pool)
         try:
-            outputs = body()
+            events = getattr(learner, "component_events", None)
+            outputs = body() if events is None else events.measure(body, torch.cuda.current_stream())
         finally:
             graph.capture_end()
         if self._pool is None:

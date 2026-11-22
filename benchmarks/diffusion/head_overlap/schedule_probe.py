@@ -50,6 +50,8 @@ class CoreEvents:
         self.runtime.CUDART_CHECK(self.record_external(self.events[name].event_id, stream.cuda_stream, 1))
 
     def run(self, plan, variant, compute):
+        if len(self.events) == 2:
+            return self.measure(lambda: run(plan, variant), compute)
         originals = plan.copy_forward, plan.mark_forward_ready, plan.kernel, plan.submit_reverse
         group = 0
 
@@ -86,6 +88,13 @@ class CoreEvents:
             return output
         finally:
             plan.copy_forward, plan.mark_forward_ready, plan.kernel, plan.submit_reverse = originals
+
+    def measure(self, function, stream):
+        self.record("begin", stream)
+        result = function()
+        self.record("end", stream)
+        self.recorded = True
+        return result
 
     def offsets_us(self):
         if not self.recorded:

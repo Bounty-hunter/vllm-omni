@@ -204,6 +204,10 @@ class LazyHeadPolicy:
         )
         self.reports = []
         self.core_events = {} if os.environ.get("HCMS_CORE_EVENTS") == "1" else None
+        self.all_core_spans = os.environ.get("HCMS_CORE_EVENT_SCOPE") == "all-cores"
+        self.component_events = None
+        if self.all_core_spans and self.core_events is None:
+            raise ValueError("All-core spans require explicit core event diagnostics")
         self.force_diagnostic_split = os.environ.get("HCMS_FORCE_DIAGNOSTIC_SPLIT") == "1"
         if self.force_diagnostic_split and self.core_events is None:
             raise ValueError("A forced diagnostic split requires explicit core event diagnostics")
@@ -332,7 +336,9 @@ class LazyHeadPolicy:
             submitted = time.perf_counter()
         diagnostic = None
         if self.core_events is not None and self.phase == "frozen" and torch.cuda.is_current_stream_capturing():
-            if audit["calls"] == min(16, entry.calls):
+            if self.all_core_spans:
+                diagnostic = self.core_events[signature, choice][audit["calls"] - 1]
+            elif audit["calls"] == min(16, entry.calls):
                 diagnostic = self.core_events[signature, choice]
         result = scheduled(plan, self.schedule) if diagnostic is None else diagnostic.run(plan, self.schedule, compute)
         if event_pair is not None:
@@ -398,9 +404,16 @@ class LazyHeadPolicy:
                 from schedule_probe import CoreEvents
 
                 for choice, widths in enumerate(entry.choices):
-                    self.core_events[entry.signature, choice] = CoreEvents(
-                        len(widths), entry.inputs[0].device, plan.runtime
-                    )
+                    if self.all_core_spans:
+                        self.core_events[entry.signature, choice] = [
+                            CoreEvents(0, entry.inputs[0].device, plan.runtime) for _ in range(entry.calls)
+                        ]
+                        if self.component_events is None:
+                            self.component_events = CoreEvents(0, entry.inputs[0].device, plan.runtime)
+                    else:
+                        self.core_events[entry.signature, choice] = CoreEvents(
+                            len(widths), entry.inputs[0].device, plan.runtime
+                        )
             if len(entry.choices) > 1:
                 entry.events = [
                     (torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)) for _ in range(slots)
@@ -492,6 +505,20 @@ class LazyHeadPolicy:
         """The caller must have completed its normal output transfer/sync."""
         if self.core_events is None:
             return None
+        if self.all_core_spans:
+            origin = self.component_events.events["begin"]
+            component_span = self.component_events.offsets_us()["end"]
+            return [
+                dict(
+                    heads=entry.choices[entry.selected],
+                    layer=layer,
+                    offsets_us=events.offsets_us(),
+                    component_offset_us=origin.elapsed_time(events.events["begin"]) * 1000,
+                    component_span_us=component_span,
+                )
+                for entry in self.entries.values()
+                for layer, events in enumerate(self.core_events[entry.signature, entry.selected], 1)
+            ]
         return [
             dict(
                 heads=entry.choices[entry.selected],
