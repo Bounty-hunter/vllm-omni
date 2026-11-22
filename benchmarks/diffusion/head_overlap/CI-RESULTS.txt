@@ -3,10 +3,10 @@ Attention通算重叠：CI/常见shape与调度优化的完整结果
 硬件：NVIDIA L20X，NV18；batch/concurrency=1；离线完整generate请求，不含HTTP/视频mux。
 attention BF16/FA3，DiT FP8；Wan/H3 VAE4。Qwen2.1使用DistributedAutoencoderKLQwenImage21并配置VAE4；未采集逐请求瓦片分配。
 此前旧Qwen/FLUX的VAE2配置被registry忽略；不能把该限制套到Qwen2.1，也不能把配置度数当每张小图的活跃瓦片数。
-真实DiT调用一发现布局，调用二的前24个同签名core比较whole与一个候选。每层只执行一次并进入后续计算。
+真实DiT调用一发现布局，调用二的前24个同签名core比较whole与一个候选；symmetric-ends家族试两个对称三块候选。每层只执行一次并进入后续计算。
 两个真实调用替代原有预热机会；capture记录、同步检查及验证replay按adapter分别计数。稳态直接replay，无探测事件/查询/采样等待。
 H3与generic保留一次验证replay；Qwen2.1 block adapter不添加辅助sync probe或验证replay，后续真实步骤replay已capture的图。
-多段为指定候选实验，默认CPU候选生成器仍只生成两段；不是通用的2/3/4段自动选择器。
+多段原为指定候选实验；新增opt-in symmetric-ends家族比较whole、1:x:1、2:x:2。默认CPU候选生成器仍只生成两段；不是通用的2/3/4段最优搜索器。
 H3视频所有对照臂启用确定性音频解码：cudnn benchmark=False,deterministic=True。原始A/A波形不逐位一致的失败仍保留。
 H3 original参考是eager block loop+whole direct CE；Qwen/Hy reference_whole参考才是原始Ulysses。
 正值=同一run/case内中位数时延降低；whole回退的正负波动是A/A，不能算overlap收益。
@@ -16,7 +16,7 @@ Qwen2.1估计不含原始prefill；不含text encoder/VAE通信，不是请求�
 总通信字节未减少；优化减少暴露时间。纯attention拆分税仅在控制分组与实际capture分组一致时列出。
 首请求含事件、资源准备、可能慢候选及编译成本。warm是完整请求的脚本标签，不是辅助forward；首请求顺序有缓存偏差，不是纯探索税。
 
-本轮验证：60条比较，1828个正常完整请求，52条完整core控制，20批失败/中断。
+本轮验证：66条比较，2125个正常完整请求，61条完整core控制，20批失败/中断。
 比较条数包含同场景复测和不同方案，不是独立shape数；失败sequence与其失败子任务分别留痕，不重复当作数值错误。
 
 本轮结论
@@ -28,6 +28,7 @@ H3视频1024/107f的尾块方案提升3.38%（8对）；此前约49%的分母含
 Qwen2.1 1536/ref1启用host submitter后独立30对提升2.66%；旧独立复核曾回退whole，两个结果均保留。
 官方Qwen2.1-Turbo使用原生8步sigma/CFG1：1536/ref1的30对提升1.43%，独立确认1.35%；2048/ref1提升1.62%；512/1024回退whole。
 Turbo1536纯P2P窗口估计占E2E5.04%，净节省约为其28%；旧35步和Turbo均未证明达到50%目标。
+新增三种分辨率的有界对称三块家族及旧双块对照见SYMMETRIC-ENDS-RESULTS.txt；保留低置信度回退，不能把isolated core收益当模型E2E收益。
 同分组输入staging对照30对：原调度1377.497ms，input-only1385.492ms，新方案未替换默认。
 所有32层等计时点诊断：core省3.36ms/step，core外区间多0.99ms，component净省2.37ms；最后一步外推仍有约3.2ms完整请求差额，未宣称根因全部解决。
 纯P2P窗口的50%目标需要修正后的对应布局证据；旧含同步分母不再用于达标判断。
@@ -67,6 +68,12 @@ hcms-10448-ci-qwen21-defer-confirm-20261121-r29 | qwen21-1536x1536-steps35-ref1 
 hcms-10448-ci-qwen21-defer-confirm-20261121-r29 | qwen21-1536x1536-steps35-ref1 | deferred/stage-defer-fence-shared-slots | 30 | 3703.047 | 3607.458 | +2.581 | 9.16 | 28.2 | transformer/cond:3+5 | [89.546,110.560] | This independent 30-pair run supports a gain
 hcms-10448-ci-qwen21-ref-confirm-20261121-r6 | qwen21-1536x1536-steps35-ref1 | adaptive/stage-local-shared-slots | 30 | 3710.129 | 3709.213 | +0.025 | 9.15 | A/A或未匹配 | transformer/cond:8 | [-4.936,3.048] | Whole fallback: A/A, not overlap gain
 hcms-10448-ci-qwen21-smoke-20261121-r4 | qwen21-ci-512x512_steps20 | adaptive/stage-local-shared-slots | 1 | 385.546 | 378.748 | +1.763 | 未匹配 | A/A或未匹配 | transformer/cond:8 | [6.798,6.798] | Whole fallback: A/A, not overlap gain
+hcms-10448-ci-qwen21-symmetric-family-20261121-r37 | qwen21-turbo-1536x1536-steps8-ref1 | previous/stage-local-shared-slots | 30 | 1374.040 | 1360.832 | +0.961 | 5.09 | 18.9 | transformer/cond:3+5 | [14.481,20.886] | This independent 30-pair run supports a gain
+hcms-10448-ci-qwen21-symmetric-family-20261121-r37 | qwen21-turbo-1536x1536-steps8-ref1 | adaptive/stage-local-shared-slots | 30 | 1374.040 | 1374.708 | -0.049 | 5.09 | A/A或未匹配 | transformer/cond:8 | [-6.889,2.611] | Whole fallback: A/A, not overlap gain
+hcms-10448-ci-qwen21-symmetric-shapes-matrix-20261121-r38 | qwen21-turbo-1024x1024-steps8-ref1 | previous/stage-local-shared-slots | 30 | 892.093 | 893.402 | -0.147 | 3.96 | A/A或未匹配 | transformer/cond:8 | [-6.588,1.388] | Whole fallback: A/A, not overlap gain
+hcms-10448-ci-qwen21-symmetric-shapes-matrix-20261121-r38 | qwen21-turbo-1024x1024-steps8-ref1 | adaptive/stage-local-shared-slots | 30 | 892.093 | 894.849 | -0.309 | 3.96 | A/A或未匹配 | transformer/cond:8 | [-6.097,2.567] | Whole fallback: A/A, not overlap gain
+hcms-10448-ci-qwen21-symmetric-shapes-matrix-20261121-r38 | qwen21-turbo-2048x2048-steps8-ref1 | previous/stage-local-shared-slots | 30 | 2227.180 | 2187.023 | +1.803 | 5.42 | 33.3 | transformer/cond:2+6 | [37.840,44.878] | This independent 30-pair run supports a gain
+hcms-10448-ci-qwen21-symmetric-shapes-matrix-20261121-r38 | qwen21-turbo-2048x2048-steps8-ref1 | adaptive/stage-local-shared-slots | 30 | 2227.180 | 2184.478 | +1.917 | 5.42 | 35.4 | transformer/cond:2+4+2 | [42.407,48.797] | This independent 30-pair run supports a gain
 hcms-10448-ci-qwen21-turbo-input-staging-20261121-r36 | qwen21-turbo-1536x1536-steps8-ref1 | adaptive/stage-local-shared-slots | 30 | 1402.296 | 1377.497 | +1.768 | 4.98 | 35.5 | transformer/cond:3+5 | [13.049,25.849] | This independent 30-pair run supports a gain
 hcms-10448-ci-qwen21-turbo-input-staging-20261121-r36 | qwen21-turbo-1536x1536-steps8-ref1 | input_staging/overlap-input-shared-slots | 30 | 1402.296 | 1385.492 | +1.198 | 4.98 | 24.1 | transformer/cond:3+5 | [4.901,23.288] | This independent 30-pair run supports a gain
 hcms-10448-ci-qwen21-turbo-matrix-20261121-r32 | qwen21-turbo-512x512-steps8-ref1 | adaptive/stage-local-shared-slots | 30 | 544.991 | 542.108 | +0.529 | 2.86 | A/A或未匹配 | transformer/cond:8 | [0.148,8.515] | Whole fallback: A/A, not overlap gain
@@ -137,6 +144,12 @@ hcms-10448-ci-qwen21-defer-confirm-20261121-r29 | qwen21-1536x1536-steps35-ref1 
 hcms-10448-ci-qwen21-defer-confirm-20261121-r29 | qwen21-1536x1536-steps35-ref1 | deferred | 7435.758 | 3806.283
 hcms-10448-ci-qwen21-ref-confirm-20261121-r6 | qwen21-1536x1536-steps35-ref1 | adaptive | 7349.469 | 4342.164
 hcms-10448-ci-qwen21-smoke-20261121-r4 | qwen21-ci-512x512_steps20 | adaptive | 2549.003 | 591.448
+hcms-10448-ci-qwen21-symmetric-family-20261121-r37 | qwen21-turbo-1536x1536-steps8-ref1 | previous | 5057.557 | 2033.635
+hcms-10448-ci-qwen21-symmetric-family-20261121-r37 | qwen21-turbo-1536x1536-steps8-ref1 | adaptive | 5057.557 | 2674.744
+hcms-10448-ci-qwen21-symmetric-shapes-matrix-20261121-r38 | qwen21-turbo-1024x1024-steps8-ref1 | previous | 4583.570 | 1748.872
+hcms-10448-ci-qwen21-symmetric-shapes-matrix-20261121-r38 | qwen21-turbo-1024x1024-steps8-ref1 | adaptive | 4583.570 | 2326.840
+hcms-10448-ci-qwen21-symmetric-shapes-matrix-20261121-r38 | qwen21-turbo-2048x2048-steps8-ref1 | previous | 4030.481 | 2821.020
+hcms-10448-ci-qwen21-symmetric-shapes-matrix-20261121-r38 | qwen21-turbo-2048x2048-steps8-ref1 | adaptive | 4030.481 | 3976.690
 hcms-10448-ci-qwen21-turbo-input-staging-20261121-r36 | qwen21-turbo-1536x1536-steps8-ref1 | adaptive | 5083.008 | 2145.033
 hcms-10448-ci-qwen21-turbo-input-staging-20261121-r36 | qwen21-turbo-1536x1536-steps8-ref1 | input_staging | 5083.008 | 1619.721
 hcms-10448-ci-qwen21-turbo-matrix-20261121-r32 | qwen21-turbo-512x512-steps8-ref1 | adaptive | 3538.425 | 823.207
@@ -212,6 +225,15 @@ hcms-10448-ci-core-wan-stride-ba-20261121-r3 | wan33-contiguous-v | 3+7 | 1482.5
 hcms-10448-ci-core-wan3plus7-20261121-r1 | wan-a14b-480x832-f33-heads3plus7 | 3+7 | 1495.46/1517.82 | 2025.67/1739.26 | 586.65 | +22.35 | 旧记录未分列 | 未分列/未分列
 hcms-10448-ci-core-wan3plus7-20261121-r2 | wan-a14b-480x832-f33-heads3plus7 | 3+7 | 1473.71/1507.11 | 2015.86/1721.70 | 588.25 | +33.40 | 旧记录未分列 | 未分列/未分列
 hcms-10448-ci-qwen21-copy-window-20261121-r31 | observed-sp4-2471178c6c8b | 3+5 | 749.28/739.69 | 1102.42/940.06 | 342.10 | -9.59 | 2 | 2/1
+hcms-10448-ci-qwen21-symmetric-core-20261121-r37 | qwen21-1536-ref1-heads-3-5 | 3+5 | 749.34/739.51 | 1102.15/937.42 | 325.27 | -9.83 | 2 | 2/1
+hcms-10448-ci-qwen21-symmetric-core-20261121-r37 | qwen21-1536-ref1-heads-1-6-1 | 1+6+1 | 748.50/878.41 | 1098.85/1033.34 | 324.32 | +129.90 | 3 | 3/1
+hcms-10448-ci-qwen21-symmetric-core-20261121-r37 | qwen21-1536-ref1-heads-2-4-2 | 2+4+2 | 747.67/1026.46 | 1098.13/1170.19 | 326.63 | +278.79 | 3 | 3/1
+hcms-10448-ci-qwen21-symmetric-shapes-core-20261121-r38 | qwen21-1024-ref1-heads-4-4 | 4+4 | 193.52/199.03 | 398.33/336.14 | 173.02 | +5.51 | 2 | 2/1
+hcms-10448-ci-qwen21-symmetric-shapes-core-20261121-r38 | qwen21-1024-ref1-heads-1-6-1 | 1+6+1 | 193.44/367.93 | 397.05/473.47 | 172.75 | +174.49 | 3 | 3/1
+hcms-10448-ci-qwen21-symmetric-shapes-core-20261121-r38 | qwen21-1024-ref1-heads-2-4-2 | 2+4+2 | 193.59/281.46 | 397.54/390.48 | 173.20 | +87.87 | 3 | 3/1
+hcms-10448-ci-qwen21-symmetric-shapes-core-20261121-r38 | qwen21-2048-ref1-heads-2-6 | 2+6 | 1923.83/1935.69 | 2447.23/2197.40 | 556.43 | +11.87 | 2 | 2/1
+hcms-10448-ci-qwen21-symmetric-shapes-core-20261121-r38 | qwen21-2048-ref1-heads-1-6-1 | 1+6+1 | 1917.68/1950.86 | 2438.87/2123.06 | 548.98 | +33.17 | 3 | 3/1
+hcms-10448-ci-qwen21-symmetric-shapes-core-20261121-r38 | qwen21-2048-ref1-heads-2-4-2 | 2+4+2 | 1914.50/1966.56 | 2433.86/2138.17 | 550.48 | +52.06 | 3 | 3/1
 hcms-10448-ci-qwen21-turbo-copy-windows-20261121-r35 | qwen21-turbo-512x512-steps8-ref1-whole-copy-budget | 8 | 60.27/60.07 | 170.52/169.70 | 97.72 | 单块A/A不适用 | 1 | 1/1
 hcms-10448-ci-qwen21-turbo-copy-windows-20261121-r35 | qwen21-turbo-1024x1024-steps8-ref1-whole-copy-budget | 8 | 193.54/193.31 | 398.57/395.85 | 186.22 | 单块A/A不适用 | 1 | 1/1
 hcms-10448-ci-qwen21-turbo-copy-windows-20261121-r35 | qwen21-turbo-2048x2048-steps8-ref1-whole-copy-budget | 8 | 1895.22/1923.17 | 2428.62/2445.58 | 575.90 | 单块A/A不适用 | 1 | 1/1

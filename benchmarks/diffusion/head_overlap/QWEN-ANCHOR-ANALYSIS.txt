@@ -9,6 +9,12 @@ KV prefix长度4055，joint query长度0；参考图为仓库qwen_image_edit_251
 
 无计时完整请求：每项30对，三个seed逐字节一致，所有rank策略一致。单块回退的波动不计作overlap收益。
 run | case | variant | heads | whole ms | variant ms | latency reduction % | P2P window estimate % | saved / P2P estimate % | paired95 ms
+hcms-10448-ci-qwen21-symmetric-family-20261121-r37 | qwen21-turbo-1536x1536-steps8-ref1 | previous | 3+5 | 1374.040 | 1360.832 | +0.961 | 5.085 | 18.90 | [14.480538666248322, 20.885996520519257]
+hcms-10448-ci-qwen21-symmetric-family-20261121-r37 | qwen21-turbo-1536x1536-steps8-ref1 | adaptive | 8 | 1374.040 | 1374.708 | -0.049 | 5.085 | A/A | [-6.889160722494125, 2.6108063757419586]
+hcms-10448-ci-qwen21-symmetric-shapes-matrix-20261121-r38 | qwen21-turbo-1024x1024-steps8-ref1 | previous | 8 | 892.093 | 893.402 | -0.147 | 3.957 | A/A | [-6.58788438886404, 1.3880971819162369]
+hcms-10448-ci-qwen21-symmetric-shapes-matrix-20261121-r38 | qwen21-turbo-1024x1024-steps8-ref1 | adaptive | 8 | 892.093 | 894.849 | -0.309 | 3.957 | A/A | [-6.096557714045048, 2.566698007285595]
+hcms-10448-ci-qwen21-symmetric-shapes-matrix-20261121-r38 | qwen21-turbo-2048x2048-steps8-ref1 | previous | 2+6 | 2227.180 | 2187.023 | +1.803 | 5.422 | 33.26 | [37.840304896235466, 44.87778339534998]
+hcms-10448-ci-qwen21-symmetric-shapes-matrix-20261121-r38 | qwen21-turbo-2048x2048-steps8-ref1 | adaptive | 2+4+2 | 2227.180 | 2184.478 | +1.917 | 5.422 | 35.36 | [42.40737855434418, 48.79738762974739]
 hcms-10448-ci-qwen21-turbo-input-staging-20261121-r36 | qwen21-turbo-1536x1536-steps8-ref1 | adaptive | 3+5 | 1402.296 | 1377.497 | +1.768 | 4.983 | 35.49 | [13.049490749835968, 25.8488142862916]
 hcms-10448-ci-qwen21-turbo-input-staging-20261121-r36 | qwen21-turbo-1536x1536-steps8-ref1 | input_staging | 3+5 | 1402.296 | 1385.492 | +1.198 | 4.983 | 24.05 | [4.900535568594933, 23.288102820515633]
 hcms-10448-ci-qwen21-turbo-matrix-20261121-r32 | qwen21-turbo-512x512-steps8-ref1 | adaptive | 8 | 544.991 | 542.108 | +0.529 | 2.858 | A/A | [0.14770962297916412, 8.514675311744213]
@@ -62,6 +68,12 @@ r36同3+5原调度 -> 输入staging：1377.497 -> 1385.492ms；配对节省-1.29
 capture记录保留；Qwen2.1无辅助sync probe/validation replay。正常稳态没有计时事件、查询、采样同步或Python attention。
 首次generate包含资源准备/候选试错/建图；不同策略按顺序首次运行会共享已热缓存，不能把下表差值当纯探索成本。
 case | variant | first whole generate ms | first variant generate ms
+qwen21-turbo-1536x1536-steps8-ref1 | previous | 5057.557 | 2033.635
+qwen21-turbo-1536x1536-steps8-ref1 | adaptive | 5057.557 | 2674.744
+qwen21-turbo-1024x1024-steps8-ref1 | previous | 4583.570 | 1748.872
+qwen21-turbo-1024x1024-steps8-ref1 | adaptive | 4583.570 | 2326.840
+qwen21-turbo-2048x2048-steps8-ref1 | previous | 4030.481 | 2821.020
+qwen21-turbo-2048x2048-steps8-ref1 | adaptive | 4030.481 | 3976.690
 qwen21-turbo-1536x1536-steps8-ref1 | adaptive | 5083.008 | 2145.033
 qwen21-turbo-1536x1536-steps8-ref1 | input_staging | 5083.008 | 1619.721
 qwen21-turbo-512x512-steps8-ref1 | adaptive | 3538.425 | 823.207
@@ -74,8 +86,8 @@ execution-budgets.csv另外保留各rank的prepare/finish耗时、事件及调�
 证据与限制
 normal性能source SHA逐项保留在all-comparisons.csv；r33完整core诊断source f73f3fb7e5da48ed9f823d9ca599d3a239f8df11。
 r31纯窗口source 0c1d4ca603c05bae6a2cc9bea561ceb4d6568892；r35其余三形状source 292abca62d157b4611b114574e75353718a3cb76。
-收尾仅补了非overlap多块使用input-staging时的拒绝校验；合法路径的GPU操作不变，CPU边界检查通过。
+后续symmetric-ends新增有界候选家族，仍在前24个真实core内试错，未改CE调度；详见SYMMETRIC-ENDS-RESULTS.txt。
 所有trace.json为明确标注的逻辑CUDA event区间，非新采集的Nsight/PyTorch kernel trace。
-尚未达到净节省为纯P2P预算50%的目标；原3+5三轮点估计约27%-35.5%，每轮均保留，不能只选较高点。
+原stage-local 3+5全部复测点估计为纯P2P窗口预算的18.9%-35.5%；每轮均保留，不能只选较高点。
 不能用旧含同步分母或孤立core收益替代E2E；输入staging对照也未证实额外收益。
 没有建立core外增长的具体kernel/host因果链，仍需继续定位。没有PR、共享依赖升级或生产默认集成。

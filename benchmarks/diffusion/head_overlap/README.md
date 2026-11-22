@@ -192,6 +192,38 @@ The default CPU candidate generator still predicts two groups. These supplied
 multi-group candidates are controlled experiments, without a general automatic
 selector among two, three and four groups.
 
+`candidate_family="symmetric-ends"` instead compares whole attention with
+`1 + (H-2) + 1` and `2 + (H-4) + 2`, where the middle group must be at least
+as large as either end. For eight heads per rank this is whole, 1+6+1 and
+2+4+2. The existing first 24 real prefix cores rotate and reverse these
+three choices eight times each. The family is mutually exclusive with an
+explicit partition and remains opt-in; the default two-group generator is
+unchanged. The original sample-confidence and all-rank qualification checks
+still apply. Insufficient real-call budget reduces the candidate set rather
+than adding a forward. This bounded family does not search every possible
+end width for larger head counts.
+
+The [symmetric-end results](SYMMETRIC-ENDS-RESULTS.txt) cover 297 complete
+Turbo requests and nine isolated core controls. Each shape uses 30 paired
+rounds with whole, the previous learner and the symmetric family:
+
+| Canvas with one reference | Previous choice / reduction | Symmetric choice / reduction |
+| --- | --- | --- |
+| 1024 square | whole, A/A | whole, A/A |
+| 1536 square | 3+5, 0.96% | whole, A/A |
+| 2048 square | 2+6, 1.80% | 2+4+2, 1.92% |
+
+At 2048 the extra paired saving over the old learner has a 95% interval of
+-7.62 to 12.89 ms, so an additional E2E gain is unconfirmed. The new family's
+42.70 ms saving is about 35.4% of the frozen barrier-excluded P2P-window
+estimate; the 50% E2E target remains unmet. At 1536 all three choices execute
+eight times, but zero complete cycles qualify as fully queued on every rank.
+Whole fallback reflects insufficient evidence, not proof that three chunks
+cannot help graph execution. Candidate preparation takes about 1.1-1.3 seconds
+in these family trials, including allocation and distributed alignment.
+First requests, all-rank counters, failed qualification and negative results
+are retained. There are no extra forwards or steady probing operations.
+
 The learner freezes its communication schedule with the selected partition.
 The schedule participates in the rank agreement and policy cache key; changing
 it within a generic graph case raises instead of replaying an incompatible
