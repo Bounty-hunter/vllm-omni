@@ -14,12 +14,11 @@ from native_prefilled import NativePipeline
 
 
 class StagedAttention(NativePipeline):
-    def __init__(self, inputs, joint, pg, comm, kernel, metadata, *, early_fields=(0, 1), defer_early=False):
+    def __init__(self, inputs, joint, pg, comm, kernel, metadata, *, early_fields=(0, 1)):
         super().__init__(inputs, joint, pg, 1, comm, kernel, metadata)
         if early_fields not in ((0, 1), (1, 2)):
             raise ValueError("Early transport must contain QK or KV")
         self.early_fields = early_fields
-        self.defer_early = defer_early
         self.late_fields = tuple(field for field in range(3) if field not in early_fields)
         self.remaining_ready = torch.cuda.Event()
         self.remaining_ready.record()
@@ -59,27 +58,13 @@ class StagedAttention(NativePipeline):
         for field, tensor in zip(self.early_fields, early, strict=True):
             self.bind_field(field, tensor, None if joint is None else joint[field])
         self.emit_batch_on(self.early_local, compute)
-        admitted = False
-
-        def admit():
-            nonlocal admitted
-            if admitted:
-                raise RuntimeError("An early peer batch must be admitted exactly once")
-            admitted = True
-            # The optional producer milestone moves this same dependency;
-            # it does not add an event, kernel or peer fence.
-            self.enter.record(compute)
-            with torch.cuda.stream(self.stream):
-                self.stream.wait_event(self.enter)
-                self.emit_batch_on(self.early_remote, self.stream)
-
-        if not self.defer_early:
-            admit()
+        self.enter.record(compute)
+        with torch.cuda.stream(self.stream):
+            self.stream.wait_event(self.enter)
+            self.emit_batch_on(self.early_remote, self.stream)
         # No early peer barrier is needed here: attention consumes all three
         # fields only after the original single forward-ready peer fence.
-        remaining = remaining_producer(admit if self.defer_early else None)
-        if not admitted:
-            raise RuntimeError("The deferred producer did not admit its peer batch")
+        remaining = remaining_producer()
         for field, tensor in zip(self.late_fields, remaining, strict=True):
             self.bind_field(field, tensor, None if joint is None else joint[field])
         self.emit_batch_on(self.late_local, compute)
