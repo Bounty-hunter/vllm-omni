@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 """Prepared QK/V output slices sharing fused weights and input quantization."""
 
+import copy
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -41,7 +42,8 @@ class StagedProjection:
         self.kernels = []
         for part in self.weights:
             config = replace(kernel.config, weight_shape=(part.shape[1], part.shape[0]))
-            selected = type(kernel)(config, kernel.layer_param_names)
+            selected = copy.copy(kernel)
+            selected.config = config
             # All dimensions are aligned: this sets kernel metadata only.
             params = dict(zip(kernel.layer_param_names, (part, scale, input_scale, upper), strict=True))
             owner = SimpleNamespace(**params)

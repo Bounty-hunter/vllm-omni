@@ -22,6 +22,7 @@ from staged_attention import StagedAttention
 from staged_projection import StagedProjection
 from torch import nn
 from vllm import _custom_ops as ops
+from vllm.config import VllmConfig, set_current_vllm_config
 from vllm.model_executor.kernels.linear import init_fp8_linear_kernel
 from vllm.model_executor.layers.quantization.online.fp8 import Fp8PerTensorOnlineLinearMethod, _fp8_scale
 from vllm.model_executor.layers.quantization.utils.quant_utils import kFp8StaticTensorSym, weight_amax
@@ -285,4 +286,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    with set_current_vllm_config(VllmConfig()):
+        main()
