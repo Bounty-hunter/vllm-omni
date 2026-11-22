@@ -459,6 +459,7 @@ def install(pipeline):
         gpu=torch.cuda.get_device_name(),
         torch=torch.__version__,
         core_event_diagnostic=os.environ.get("HCMS_CORE_EVENTS") == "1",
+        sample_sigmas=getattr(pipeline, "sample_sigmas", None),
     )
     original_forward = pipeline.forward
     compute = torch.cuda.Stream()
