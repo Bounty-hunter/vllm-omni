@@ -130,5 +130,6 @@ def install(pipeline):
         kind="qkv_adapters",
         prepared=prepared,
         unsupported=unsupported,
+        early_fields=order,
         scope="CUTLASS tensorwise FP8 MHA decode; original prefill/cache writes retained",
     )
