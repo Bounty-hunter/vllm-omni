@@ -466,6 +466,10 @@ def install(pipeline):
         from qkv_model_adapter import install as install_qkv_adapters
 
         install_qkv_adapters(pipeline)
+        if os.environ.get("HCMS_QKV_PHASE_EVENTS") == "1":
+            from qkv_phase_probe import install as install_qkv_phases
+
+            install_qkv_phases()
     record(
         kind="model",
         pipeline=type(pipeline).__name__,
