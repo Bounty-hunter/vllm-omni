@@ -32,9 +32,10 @@ class CopyEvents:
         self.record = runtime.lib.cudaEventRecordWithFlags
         self.record.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint]
         self.record.restype = ctypes.c_int
+        self.external = False
 
     def mark(self, event, stream):
-        self.runtime.CUDART_CHECK(self.record(event.event_id, stream.cuda_stream, 1))
+        self.runtime.CUDART_CHECK(self.record(event.event_id, stream.cuda_stream, int(self.external)))
 
     def run(self, function, stream):
         self.mark(self.begin, stream)
@@ -252,8 +253,12 @@ def main():
                     function()
                 torch.accelerator.synchronize()
                 graph = torch.cuda.CUDAGraph()
+                if name in copy_timers:
+                    copy_timers[name].external = True
                 with torch.cuda.graph(graph, stream=stream):
                     output = function()
+                if name in copy_timers:
+                    copy_timers[name].external = False
                 graph.replay()
                 torch.accelerator.synchronize()
                 if name.startswith("core_"):
