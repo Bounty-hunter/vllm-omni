@@ -37,6 +37,9 @@ class StagedAttention(NativePipeline):
                     *operations
                 )
         self.source_layout = [(tuple(x.shape), canonical_strides(x), x.dtype, x.device) for x in inputs]
+        # Geometry owns integer descriptors; neither the dummy V allocation nor
+        # the discovering request's prefix cache is a replay input owner.
+        self.inputs, self.joint = (), None
 
     def bind_field(self, field, tensor, joint):
         if (tuple(tensor.shape), canonical_strides(tensor), tensor.dtype, tensor.device) != self.source_layout[field]:
