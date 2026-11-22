@@ -1,0 +1,9 @@
+{
+  "normal_requests": 1581,
+  "comparisons": 42,
+  "core_controls": 36,
+  "stress_runs": 7,
+  "diagnostic_requests": 91,
+  "retained_setup_failures": 2,
+  "verified_source_hashes": 3007
+}

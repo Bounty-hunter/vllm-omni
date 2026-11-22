@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 """Publish each ready field group while producing the next one.
 
-Model adapters supply tensors and a V producer; all stream ownership, peer
+Model adapters supply ordered field producers; all stream ownership, peer
 fences, slot lifetime and copy geometry remain inside the attention plan.
 """
 

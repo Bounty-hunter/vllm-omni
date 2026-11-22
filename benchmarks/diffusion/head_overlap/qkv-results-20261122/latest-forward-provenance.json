@@ -1,0 +1,72 @@
+{
+  "measured_sha": "ae925b009d6114241d64e499629eb754c09bda9c",
+  "scope": "R16 normal performance and R15 diagnostics. R17 was rejected and reverted; only module-docstring wording differs in these runtime modules. Source equality does not assert identical allocator state or timing.",
+  "files": [
+    {
+      "file": "benchmarks/diffusion/head_overlap/staged_attention.py",
+      "ast_equal": true,
+      "measured_sha256": "24e7a19e2e5f91ceec5bc05b4424f9a13b6c9837b6871ab4e1e3c3397d784f57",
+      "publication_sha256": "88d094f6eb9c36c2c8d598fb6e184363863b5f4329499ddefccb02c4d361007d"
+    },
+    {
+      "file": "benchmarks/diffusion/head_overlap/staged_projection.py",
+      "ast_equal": true,
+      "measured_sha256": "d795d6b84727174da94425688ce673428f89ce0351e7f3bf42008de6d661ad1f",
+      "publication_sha256": "d795d6b84727174da94425688ce673428f89ce0351e7f3bf42008de6d661ad1f"
+    },
+    {
+      "file": "benchmarks/diffusion/head_overlap/lazy_qkv_policy.py",
+      "ast_equal": true,
+      "measured_sha256": "9e621a028eac7c663a6f353aa05eb65a410ea720ee9b44f70b1aaf2bf6aa3299",
+      "publication_sha256": "9e621a028eac7c663a6f353aa05eb65a410ea720ee9b44f70b1aaf2bf6aa3299"
+    },
+    {
+      "file": "benchmarks/diffusion/head_overlap/qkv_model_adapter.py",
+      "ast_equal": true,
+      "measured_sha256": "baa9daf0a4ce162fbe49d38f050ab8f093a69552a04518bbe0ec2b8f08d964bb",
+      "publication_sha256": "baa9daf0a4ce162fbe49d38f050ab8f093a69552a04518bbe0ec2b8f08d964bb"
+    },
+    {
+      "file": "benchmarks/diffusion/head_overlap/model_probe.py",
+      "ast_equal": true,
+      "measured_sha256": "b7b0750e8ee825d18c4f9dc5129e7322bfc2c915eb52ab3787d88ac7da465f66",
+      "publication_sha256": "b7b0750e8ee825d18c4f9dc5129e7322bfc2c915eb52ab3787d88ac7da465f66"
+    },
+    {
+      "file": "benchmarks/diffusion/head_overlap/execution_counters.py",
+      "ast_equal": true,
+      "measured_sha256": "65afe6d2e2d2813f714e0a01acb3929915ada82176244e7eb14e4d115a320049",
+      "publication_sha256": "65afe6d2e2d2813f714e0a01acb3929915ada82176244e7eb14e4d115a320049"
+    },
+    {
+      "file": "benchmarks/diffusion/head_overlap/lazy_head_policy.py",
+      "ast_equal": true,
+      "measured_sha256": "96a407e52e403ea3a8953f4c952cd991088e720daa5bebe8edcd42f9971c1176",
+      "publication_sha256": "96a407e52e403ea3a8953f4c952cd991088e720daa5bebe8edcd42f9971c1176"
+    },
+    {
+      "file": "benchmarks/diffusion/head_overlap/native_prefilled.py",
+      "ast_equal": true,
+      "measured_sha256": "374a74a053d7769f35d834d0ce25ec8e779588cb1b0bfc60aa275cd6b2250cbc",
+      "publication_sha256": "374a74a053d7769f35d834d0ce25ec8e779588cb1b0bfc60aa275cd6b2250cbc"
+    },
+    {
+      "file": "benchmarks/diffusion/head_overlap/prefilled_probe.py",
+      "ast_equal": true,
+      "measured_sha256": "2d0ec4d6bed9f65ac92d16c9c96da52eaae20a701c81b5461d38cd0587171298",
+      "publication_sha256": "2d0ec4d6bed9f65ac92d16c9c96da52eaae20a701c81b5461d38cd0587171298"
+    },
+    {
+      "file": "benchmarks/diffusion/head_overlap/overlap_probe.py",
+      "ast_equal": true,
+      "measured_sha256": "b36df60215c752b51b0b16cbeb67d8e0f4218f3071055e3b64a3bad17b3dd97e",
+      "publication_sha256": "b36df60215c752b51b0b16cbeb67d8e0f4218f3071055e3b64a3bad17b3dd97e"
+    },
+    {
+      "file": "benchmarks/diffusion/head_overlap/qkv_phase_probe.py",
+      "ast_equal": true,
+      "measured_sha256": "6464346fb95b9a5e7681d6289acd2f0ee31a443c2229fb46404f317433e96a42",
+      "publication_sha256": "6464346fb95b9a5e7681d6289acd2f0ee31a443c2229fb46404f317433e96a42"
+    }
+  ]
+}

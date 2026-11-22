@@ -1,0 +1,3 @@
+﻿size,pure_p2p_us_per_core,estimated_decode_p2p_ms,estimated_decode_p2p_share_pct,half_p2p_target_ms,normal_e2e_saved_ms,saved_fraction_of_estimated_p2p_pct,scope
+1536,259.77399200201035,58.18937420845032,4.219981815348108,29.09468710422516,15.708369202911854,26.995253715292005,R15 last-decode critical-component rank; extrapolated decode only
+2048,539.0719920396805,120.75212621688843,5.471006036674661,60.376063108444214,31.007994897663593,25.67904671257607,Frozen independent geometry; estimated decode only

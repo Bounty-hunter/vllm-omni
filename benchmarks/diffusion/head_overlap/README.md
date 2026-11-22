@@ -1,5 +1,10 @@
 # CE head-overlap experiments
 
+The separate QK/V projection experiment, its complete test matrix, first-request
+costs and rejected variants are recorded in
+[QKV_EXPERIMENT_20261122.md](QKV_EXPERIMENT_20261122.md).
+It remains opt-in and has not met the 50%-of-P2P end-to-end savings target.
+
 This branch records the prototype for
 [issue #10448](https://github.com/vllm-project/vllm-omni/issues/10448).
 The library's `ulysses_head_chunks=2` route is the pooled generic prototype.

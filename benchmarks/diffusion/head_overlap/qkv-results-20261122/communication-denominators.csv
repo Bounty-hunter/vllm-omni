@@ -1,0 +1,4 @@
+﻿size,source_run,source_sha,pure_p2p_us_per_core,decode_cores,estimated_decode_p2p_ms,estimated_share_of_r6_generate_pct,scope
+1024,hcms-10448-ci-qwen21-turbo-copy-windows-20261121-r35,292abca62d157b4611b114574e75353718a3cb76,157.58400224149227,224,35.29881650209427,4.065176355382505,Frozen isolated geometry control; excludes barriers/local/stream waits. Not in-request communication occupancy.
+1536,hcms-10448-ci-qwen21-copy-window-20261121-r31,0c1d4ca603c05bae6a2cc9bea561ceb4d6568892,311.92000582814217,224,69.87008130550385,5.0805398915104725,Frozen isolated geometry control; excludes barriers/local/stream waits. Not in-request communication occupancy.
+2048,hcms-10448-ci-qwen21-turbo-copy-windows-20261121-r35,292abca62d157b4611b114574e75353718a3cb76,539.0719920396805,224,120.75212621688843,5.509438906061386,Frozen isolated geometry control; excludes barriers/local/stream waits. Not in-request communication occupancy.
