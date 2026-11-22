@@ -97,6 +97,11 @@ These writes address a distinct group buffer, so they can overlap the preceding
 attention's reads. Its consumer still waits for the same forward-ready event.
 No new stream, event, allocation or peer fence is introduced.
 
+overlap-input uses the same input ordering as overlap-staging, while retaining
+all local output copies on compute in their original positions. A_(g+1) still
+waits for the forward-ready peer fence after its local and incoming inputs.
+All source lifetimes and F0's preceding-output acknowledgement remain intact.
+
 Both overlap-return and overlap-staging place nonfinal local output copies on
 communication after the corresponding produced event and peer return, while
 the next attention runs on compute. The final local copy remains on compute
@@ -123,6 +128,22 @@ there is no timing event, host wait or allocation in the sampling call.
 CUDA Graph retains these dependencies; no new Python work runs on replay.
 An added edge may reduce useful lookahead, so performance must be measured
 against the same partition without the gate. It is not the default schedule.
+
+Optional deferred forward-ready fence
+stage-defer-fence separates F_(g+1)'s copies from its ready peer barrier.
+Copies remain before the wait for produced[g], allowing CE/attention overlap.
+For g>0 the previous reverse writes are also submitted before that wait, so
+R_(g-1) can still overlap A_g. Only the next forward-ready barrier waits for
+the existing produced[g] event. It then records the original ready[g+1].
+
+There is no cycle: A_g depends on ready[g], whose peer barrier is already
+earlier than this new wait on every rank. A_(g+1) still waits for ready[g+1],
+so it cannot consume incomplete incoming copies. The final peer barrier,
+compute completion wait, local returns and retained CE sources are unchanged.
+F0-ready still acknowledges the preceding output consumers on every rank.
+No peer fence, allocation, event handle or transfer byte is added or removed;
+one stream dependency per nonfinal group is added. The schedule is an opt-in
+diagnostic and needs matched-partition request evidence before promotion.
 
 Explicit static-graph output slots
 native_prefilled.output_slot(key) opts a fixed graph/layer into a private

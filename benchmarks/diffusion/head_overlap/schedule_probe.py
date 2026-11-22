@@ -24,7 +24,10 @@ VARIANTS = {
 
 
 class CoreEvents:
-    """Opt-in timing of one captured layer, read at request completion only."""
+    """Opt-in replay timing, read at request completion only.
+
+    Zero chunks select an equal two-marker complete-call window.
+    """
 
     def __init__(self, chunks, device, runtime):
         self.runtime = runtime
@@ -116,7 +119,7 @@ def run(plan, variant):
     defer_fence = variant == "stage-defer-fence"
     comm_input = variant in ("overlap-input", "overlap-staging")
     comm_output = variant in ("overlap-return", "overlap-staging")
-    if comm_output and not overlap:
+    if (comm_input or comm_output) and not overlap:
         raise ValueError("Staging overlap requires an overlapping plan")
     compute = torch.cuda.current_stream()
 

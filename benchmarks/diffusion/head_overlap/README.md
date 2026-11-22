@@ -228,11 +228,76 @@ Ulysses. The reports distinguish these references.
 Runtime audits verify actual FP8 module counts, and H3 verifies native VAE
 world size four. Qwen2.1 uses `DistributedAutoencoderKLQwenImage21` with VAE4
 configured; the earlier Qwen/FLUX VAE2 warning does not apply to this model.
-Per-request active VAE tile allocation was not recorded. Communication shares
-use frozen matching-layout peer controls and actual graph core occurrences;
-they are estimates, exclude Qwen2.1's original prefill, and do not measure
-the text encoder or VAE's other communication. New schedule controls do not
-change this denominator after the comparison.
+Per-request active VAE tile allocation was not recorded. Historical
+"communication shares" use frozen matching-layout peer controls and actual
+graph core occurrences. Those controls include peer barriers and stream
+dependencies: they are peer-exchange envelopes, **not pure P2P shares**.
+They exclude Qwen2.1's original prefill and text-encoder/VAE communication.
+The historical numerical denominator is retained with this corrected label;
+it must not decide whether savings reach half of pure P2P time.
+
+The Qwen2.1 1536-square reference-image anchor separately measures CE-only
+event windows with `ci-core-qwen21-copy-window.json`. The markers surround
+only outgoing copies on the communication stream. Required peer barriers
+remain after the end marker, and local staging remains outside the window.
+Results are read after the control's existing completion synchronization.
+These windows still include marker and inter-copy scheduling overhead;
+they are neither a memcpy-kernel busy union nor an in-request measurement.
+Other geometries retain an unavailable pure-copy estimate until measured.
+
+`stage-defer-fence` is an opt-in causal control. It overlaps the next group's
+copies and previous group's return with current attention, but waits for the
+current produced event before the next forward-ready peer barrier. It reuses
+the existing events, buffers and byte counts. A longer gap can outweigh any
+reduction of concurrent-fence interference; the schedule is not a default.
+The matched `ci-qwen21-defer-events.json` diagnostic forces the same partition
+with equal marker counts on all split arms. Only the uninstrumented
+`ci-qwen21-defer-confirm.json` qualifies request performance, and its real
+prefix learner may conservatively fall back to whole attention. Different
+selected partitions cannot establish a pure scheduling speedup.
+
+The later anchor uses official `Qwen/Qwen-Image-2.1-Turbo` revision
+`fc13ba1986fcb905854dc8de2f52eee395f49b5b`, its saved eight-sigma schedule and
+CFG one. Original prefix KV caching is retained. Every request has 224 decode
+cores, plus the original prefill. Three-seed output equality also covers the
+original Ulysses eager reference. The complete budget and negative controls
+are in [QWEN-ANCHOR-ANALYSIS.txt](QWEN-ANCHOR-ANALYSIS.txt).
+
+Thirty-pair Turbo results with one reference image:
+
+| Canvas | Captured heads | Whole / adaptive ms | Latency reduction |
+| --- | --- | ---: | ---: |
+| 512 square | whole | 544.991 / 542.108 | A/A |
+| 1024 square | whole | 887.257 / 885.453 | A/A |
+| 1536 square | 3+5 | 1387.173 / 1367.366 | 1.43% |
+| 2048 square | 2+6 | 2213.527 / 2177.634 | 1.62% |
+
+An independent 30-pair 1536 confirmation reduced 1391.992 to 1373.226 ms
+(1.35%). Pure-copy-window estimates cover all four Turbo layouts. At 1536,
+the estimated share is 5.04% of E2E, and the measured saving is about 28% of
+that budget. The target of half the pure P2P budget is not established.
+Splitting identical bytes into 3+5 increases isolated serial copy windows
+from about 313 to 353 microseconds. Copy latency does not scale strictly
+with head width. These are window estimates, not hardware busy-time sums.
+
+`HCMS_CORE_EVENT_SCOPE=all-cores` additionally requires `HCMS_CORE_EVENTS=1`.
+This diagnostic records exactly two external events per complete core and
+one pair around the component, with identical counts for whole and split.
+It reads all 32 layers of the last decode replay at request completion;
+normal recipes retain zero steady diagnostic events. In the four-pair
+diagnostic, cores save 3.36 ms per step, while other component intervals grow
+0.99 ms. The resulting 2.37 ms step saving predicts 16.6 ms across seven
+decodes, versus 19.8 ms measured E2E. Last-step extrapolation, marker effects
+and other request stages remain uncertainty. The outside intervals include
+device gaps; they do not establish a slower FFN kernel or a hardware cause.
+
+`overlap-input` moves only the next local input staging to communication;
+local output staging keeps its original ordering. The same captured 3+5
+partition reduced 1402.296 to 1377.497 ms with the original schedule, versus
+1385.492 ms with input overlap. The input change and deferred-fence change
+remain rejected optional controls. All buffers, bytes, required peer fences
+and output ownership are preserved. Invalid multi-group staging without an
+overlapping plan is rejected before device submission.
 
 The verification checks actual captured widths, identical rank decisions,
 normal prefix call counts, and no added steady API synchronization,
