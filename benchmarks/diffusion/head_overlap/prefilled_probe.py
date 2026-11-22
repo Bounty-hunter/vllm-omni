@@ -34,13 +34,19 @@ class PrefilledPipeline(DirectPipeline):
 
     def submit_forward(self, g):
         with self.region(f"prefilled/F{g}/peer-only"):
-            if hasattr(self, "emit_batch_on"):
-                self.emit_batch_on(self.remote_forward[g], self.stream)
-            else:
-                for operation in self.remote_forward[g]:
-                    self.emit(operation)
-            self.forward[g].handle.barrier()
-            self.ready[g].record(self.stream)
+            self.copy_forward(g)
+            self.mark_forward_ready(g)
+
+    def copy_forward(self, g):
+        if hasattr(self, "emit_batch_on"):
+            self.emit_batch_on(self.remote_forward[g], self.stream)
+        else:
+            for operation in self.remote_forward[g]:
+                self.emit(operation)
+
+    def mark_forward_ready(self, g):
+        self.forward[g].handle.barrier()
+        self.ready[g].record(self.stream)
 
     def reverse_operations(self, g, out, peer):
         head_bytes = self.dim * out.element_size()

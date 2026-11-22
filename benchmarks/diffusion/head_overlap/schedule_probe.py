@@ -12,6 +12,7 @@ VARIANTS = {
     "old": (False, False, False),
     "stage-local": (True, False, False),
     "stage-serial": (True, False, False),
+    "stage-defer-fence": (True, False, False),
     "stage-gated": (True, False, False),
     "early-peer": (False, True, False),
     "stage-early": (True, True, False),
@@ -35,7 +36,7 @@ class CoreEvents:
                 "begin",
                 "end",
                 *(f"{kind}{g}{edge}" for kind in "FAR" for g in range(chunks) for edge in "01"),
-                *(f"F{g}c" for g in range(chunks)),
+                *(f"F{g}{edge}" for g in range(chunks) for edge in "cb"),
             )
         }
         # Realize handles at the candidate preparation boundary, outside trials.
@@ -49,42 +50,34 @@ class CoreEvents:
         self.runtime.CUDART_CHECK(self.record_external(self.events[name].event_id, stream.cuda_stream, 1))
 
     def run(self, plan, variant, compute):
-        originals = plan.submit_forward, plan.kernel, plan.submit_reverse, plan.emit_batch_on
+        originals = plan.copy_forward, plan.mark_forward_ready, plan.kernel, plan.submit_reverse
         group = 0
-        forward_group = None
 
-        def forward(index):
-            nonlocal forward_group
+        def copies(index):
             self.record(f"F{index}0", plan.stream)
-            forward_group = index
-            try:
-                originals[0](index)
-            finally:
-                forward_group = None
-            self.record(f"F{index}1", plan.stream)
+            originals[0](index)
+            self.record(f"F{index}c", plan.stream)
 
-        def copies(operations, stream):
-            originals[3](operations, stream)
-            if forward_group is not None:
-                # Same copies and fence as normal execution. The marker splits
-                # outgoing CE completion from the incoming-ready peer fence.
-                self.record(f"F{forward_group}c", stream)
+        def ready(index):
+            # Separate the deliberate scheduling wait from the peer fence.
+            self.record(f"F{index}b", plan.stream)
+            originals[1](index)
+            self.record(f"F{index}1", plan.stream)
 
         def attention(*args):
             nonlocal group
             self.record(f"A{group}0", compute)
-            output = originals[1](*args)
+            output = originals[2](*args)
             self.record(f"A{group}1", compute)
             group += 1
             return output
 
         def reverse(index, output):
             self.record(f"R{index}0", plan.stream)
-            originals[2](index, output)
+            originals[3](index, output)
             self.record(f"R{index}1", plan.stream)
 
-        plan.submit_forward, plan.kernel, plan.submit_reverse = forward, attention, reverse
-        plan.emit_batch_on = copies
+        plan.copy_forward, plan.mark_forward_ready, plan.kernel, plan.submit_reverse = copies, ready, attention, reverse
         try:
             self.record("begin", compute)
             output = run(plan, variant)
@@ -92,7 +85,7 @@ class CoreEvents:
             self.recorded = True
             return output
         finally:
-            plan.submit_forward, plan.kernel, plan.submit_reverse, plan.emit_batch_on = originals
+            plan.copy_forward, plan.mark_forward_ready, plan.kernel, plan.submit_reverse = originals
 
     def offsets_us(self):
         if not self.recorded:
@@ -110,6 +103,7 @@ def run(plan, variant):
         return ORIGINAL_CALL(plan)
     staged, early, deferred = VARIANTS[variant]
     overlap = plan.overlap and variant != "stage-serial"
+    defer_fence = variant == "stage-defer-fence"
     comm_input = variant == "overlap-staging"
     comm_output = variant in ("overlap-return", "overlap-staging")
     if comm_output and not overlap:
@@ -164,12 +158,21 @@ def run(plan, variant):
                         # run alongside the current attention. Its consumer
                         # still waits for the group's original ready event.
                         prefill((group + 1,), plan.stream)
-                    plan.submit_forward(group + 1)
+                    if defer_fence:
+                        plan.copy_forward(group + 1)
+                    else:
+                        plan.submit_forward(group + 1)
                 if group:
                     plan.stream.wait_event(plan.produced[group - 1])
                     plan.submit_reverse(group - 1, sources[group - 1])
                     if comm_output:
                         return_local(group - 1, sources[group - 1], plan.stream)
+                if defer_fence and group + 1 < plan.chunks:
+                    # Keep both the next CE input and previous peer return
+                    # concurrent with attention. Only its ready fence waits;
+                    # no consumer may use that next input before the fence.
+                    plan.stream.wait_event(plan.produced[group])
+                    plan.mark_forward_ready(group + 1)
             else:
                 plan.stream.wait_event(plan.produced[group])
                 plan.submit_reverse(group, output)
