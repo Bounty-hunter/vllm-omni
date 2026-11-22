@@ -157,7 +157,7 @@ class LazyHeadPolicy:
         )
 
         self.group, self.enabled = group, enabled
-        if schedule not in ("stage-local", "stage-gated", "overlap-return", "overlap-staging"):
+        if schedule not in ("stage-local", "stage-serial", "stage-gated", "overlap-return", "overlap-staging"):
             raise ValueError("Lazy learning requires an explicit local-staging schedule")
         self.schedule = schedule
         self.candidate_partition = None if candidate_partition is None else tuple(candidate_partition)
@@ -314,7 +314,7 @@ class LazyHeadPolicy:
                 dict(
                     chunks=plan.chunks,
                     heads=plan.head_sizes,
-                    overlap_branch=plan.chunks > 1 and plan.overlap,
+                    overlap_branch=plan.chunks > 1 and plan.overlap and self.schedule != "stage-serial",
                     output_pointer=plan.output.tensor.data_ptr(),
                     calls=0,
                 ),

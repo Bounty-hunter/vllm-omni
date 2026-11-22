@@ -11,6 +11,7 @@ ORIGINAL_CALL = PrefilledPipeline.__call__
 VARIANTS = {
     "old": (False, False, False),
     "stage-local": (True, False, False),
+    "stage-serial": (True, False, False),
     "stage-gated": (True, False, False),
     "early-peer": (False, True, False),
     "stage-early": (True, True, False),
@@ -34,6 +35,7 @@ class CoreEvents:
                 "begin",
                 "end",
                 *(f"{kind}{g}{edge}" for kind in "FAR" for g in range(chunks) for edge in "01"),
+                *(f"F{g}c" for g in range(chunks)),
             )
         }
         # Realize handles at the candidate preparation boundary, outside trials.
@@ -47,13 +49,26 @@ class CoreEvents:
         self.runtime.CUDART_CHECK(self.record_external(self.events[name].event_id, stream.cuda_stream, 1))
 
     def run(self, plan, variant, compute):
-        originals = plan.submit_forward, plan.kernel, plan.submit_reverse
+        originals = plan.submit_forward, plan.kernel, plan.submit_reverse, plan.emit_batch_on
         group = 0
+        forward_group = None
 
         def forward(index):
+            nonlocal forward_group
             self.record(f"F{index}0", plan.stream)
-            originals[0](index)
+            forward_group = index
+            try:
+                originals[0](index)
+            finally:
+                forward_group = None
             self.record(f"F{index}1", plan.stream)
+
+        def copies(operations, stream):
+            originals[3](operations, stream)
+            if forward_group is not None:
+                # Same copies and fence as normal execution. The marker splits
+                # outgoing CE completion from the incoming-ready peer fence.
+                self.record(f"F{forward_group}c", stream)
 
         def attention(*args):
             nonlocal group
@@ -69,6 +84,7 @@ class CoreEvents:
             self.record(f"R{index}1", plan.stream)
 
         plan.submit_forward, plan.kernel, plan.submit_reverse = forward, attention, reverse
+        plan.emit_batch_on = copies
         try:
             self.record("begin", compute)
             output = run(plan, variant)
@@ -76,7 +92,7 @@ class CoreEvents:
             self.recorded = True
             return output
         finally:
-            plan.submit_forward, plan.kernel, plan.submit_reverse = originals
+            plan.submit_forward, plan.kernel, plan.submit_reverse, plan.emit_batch_on = originals
 
     def offsets_us(self):
         if not self.recorded:
@@ -93,9 +109,10 @@ def run(plan, variant):
     if variant == "old" or plan.chunks == 1:
         return ORIGINAL_CALL(plan)
     staged, early, deferred = VARIANTS[variant]
+    overlap = plan.overlap and variant != "stage-serial"
     comm_input = variant == "overlap-staging"
     comm_output = variant in ("overlap-return", "overlap-staging")
-    if comm_output and not plan.overlap:
+    if comm_output and not overlap:
         raise ValueError("Staging overlap requires an overlapping plan")
     compute = torch.cuda.current_stream()
 
@@ -127,14 +144,14 @@ def run(plan, variant):
         compute.wait_event(plan.ready[group])
         if variant == "stage-gated" and group + 1 < plan.chunks:
             plan.admitted[group].record(compute)
-        if early and plan.overlap and group + 1 < plan.chunks:
+        if early and overlap and group + 1 < plan.chunks:
             with torch.cuda.stream(plan.stream):
                 plan.submit_forward(group + 1)
         output = plan.kernel(*plan.parts[group], None)
         sources.append(output)
         plan.produced[group].record(compute)
         with torch.cuda.stream(plan.stream):
-            if plan.overlap:
+            if overlap:
                 if not early and group + 1 < plan.chunks:
                     if variant == "stage-gated":
                         # Host enqueue order is not a cross-stream dependency
@@ -168,7 +185,7 @@ def run(plan, variant):
         for group, output in enumerate(sources):
             return_local(group, output)
     with torch.cuda.stream(plan.stream):
-        if plan.overlap:
+        if overlap:
             plan.stream.wait_event(plan.produced[-1])
             plan.submit_reverse(plan.chunks - 1, sources[-1])
         plan.output.handle.barrier()
