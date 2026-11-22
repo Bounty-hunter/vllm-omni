@@ -3,6 +3,9 @@
 """Opt-in test counters; no events, forwards or synchronization are added."""
 
 import functools
+import json
+import os
+import traceback
 
 _COUNTS = None
 _CORE_PHASE = None
@@ -41,9 +44,13 @@ def install():
         sampling_host_syncs=0,
         captured_timer_records=0,
         event_queries=0,
+        core_cpu_items=0,
+        core_device_items=0,
     )
     global _COUNTS
     _COUNTS = counts
+    stack_keys = set()
+    stacks = os.environ.get("HCMS_COUNTER_STACKS") == "1"
 
     def wrap(owner, name, label):
         original = getattr(owner, name)
@@ -54,6 +61,17 @@ def install():
             counts["sampling_host_syncs"] += int(
                 label != "event_queries" and _CORE_PHASE in ("sample", "settle", "frozen")
             )
+            if label == "tensor_item" and _CORE_PHASE is not None:
+                device = args[0].device.type
+                counts["core_cpu_items" if device == "cpu" else "core_device_items"] += 1
+                key = (_CORE_PHASE, device)
+                if stacks and key not in stack_keys:
+                    stack_keys.add(key)
+                    print(
+                        "HCMS_COUNTER_STACK "
+                        + json.dumps(dict(phase=_CORE_PHASE, device=device, stack=traceback.format_stack(limit=12))),
+                        flush=True,
+                    )
             return original(*args, **kwargs)
 
         setattr(owner, name, counted)
