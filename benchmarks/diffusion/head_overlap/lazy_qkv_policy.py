@@ -181,7 +181,7 @@ class LazyQKVPolicy(LazyHeadPolicy):
                 raise RuntimeError("QKV candidates exceed the existing plan cache budget")
             entry.staged = StagedAttention(inputs, entry.joint, entry.group, entry.comm, entry.kernel, None)
             # Reuse the native graph owner's cache and release lifecycle.
-            key = (inputs[0].device, entry.group.group_name, 1, ("qkv-staged", entry.signature))
+            key = (inputs[0].device, entry.group.group_name, 1, ("qkv-staged", id(self), entry.signature))
             native._PLANS[key] = (entry.signature, entry.staged)
             entry.events = [
                 (torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True))
