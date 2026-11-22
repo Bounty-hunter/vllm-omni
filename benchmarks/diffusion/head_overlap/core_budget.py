@@ -4,6 +4,7 @@
 
 import argparse
 import copy
+import ctypes
 import hashlib
 import importlib
 import json
@@ -18,6 +19,27 @@ import torch.distributed as dist
 
 from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata
 from vllm_omni.diffusion.attention.backends.utils.fa import dense_flash_attn_func_for
+
+
+class CopyEvents:
+    """Diagnostic CE-only window; the required peer fence stays outside it."""
+
+    def __init__(self, runtime, device):
+        self.begin, self.end = (torch.Event(device=device, enable_timing=True) for _ in range(2))
+        for event in (self.begin, self.end):
+            event.record()
+        self.runtime = runtime
+        self.record = runtime.lib.cudaEventRecordWithFlags
+        self.record.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint]
+        self.record.restype = ctypes.c_int
+
+    def mark(self, event, stream):
+        self.runtime.CUDART_CHECK(self.record(event.event_id, stream.cuda_stream, 1))
+
+    def run(self, function, stream):
+        self.mark(self.begin, stream)
+        function()
+        self.mark(self.end, stream)
 
 
 def main():
@@ -137,6 +159,21 @@ def main():
                 inputs, joint, pg, chunks, comm, lambda q, k, v, md: q, packed_md, head_sizes=head_sizes, **placement
             )
             split_transport.overlap = False
+            copy_timers = (
+                {
+                    name: CopyEvents(transport.runtime, inputs[0].device)
+                    for name in (
+                        "peer_forward",
+                        "peer_reverse",
+                        "peer_forward_first",
+                        "peer_forward_last",
+                        "peer_reverse_first",
+                        "peer_reverse_last",
+                    )
+                }
+                if case.get("copy_event_diagnostic")
+                else {}
+            )
 
             def attention_whole():
                 return kernel(*packed, None)
@@ -144,18 +181,25 @@ def main():
             def attention_split():
                 return tuple(kernel(*part, None) for part in parts)
 
-            def peer_forward(plan=transport, group=0):
+            def peer_forward(plan=transport, group=0, name="peer_forward"):
                 plan.enter.record(stream)
                 with torch.cuda.stream(comm):
                     comm.wait_event(plan.enter)
-                    plan.submit_forward(group)
+                    if name in copy_timers:
+                        copy_timers[name].run(lambda: plan.copy_forward(group), comm)
+                        plan.mark_forward_ready(group)
+                    else:
+                        plan.submit_forward(group)
                 stream.wait_event(plan.ready[group])
 
-            def peer_reverse(plan=transport, group=0):
+            def peer_reverse(plan=transport, group=0, name="peer_reverse"):
                 plan.enter.record(stream)
                 with torch.cuda.stream(comm):
                     comm.wait_event(plan.enter)
-                    plan.submit_reverse(group, plan.parts[group][0])
+                    if name in copy_timers:
+                        copy_timers[name].run(lambda: plan.submit_reverse(group, plan.parts[group][0]), comm)
+                    else:
+                        plan.submit_reverse(group, plan.parts[group][0])
                     plan.output.handle.barrier()
                     plan.done.record(comm)
                 stream.wait_event(plan.done)
@@ -167,10 +211,10 @@ def main():
                 "attention_last": lambda: kernel(*parts[-1], None),
                 "peer_forward": peer_forward,
                 "peer_reverse": peer_reverse,
-                "peer_forward_first": lambda: peer_forward(split_transport, 0),
-                "peer_forward_last": lambda: peer_forward(split_transport, chunks - 1),
-                "peer_reverse_first": lambda: peer_reverse(split_transport, 0),
-                "peer_reverse_last": lambda: peer_reverse(split_transport, chunks - 1),
+                "peer_forward_first": lambda: peer_forward(split_transport, 0, "peer_forward_first"),
+                "peer_forward_last": lambda: peer_forward(split_transport, chunks - 1, "peer_forward_last"),
+                "peer_reverse_first": lambda: peer_reverse(split_transport, 0, "peer_reverse_first"),
+                "peer_reverse_last": lambda: peer_reverse(split_transport, chunks - 1, "peer_reverse_last"),
                 "transport_whole_owned": lambda: scheduled(transport, "old").clone(),
                 "transport_whole_borrowed": lambda: scheduled(transport, "old"),
                 "transport_split_serial_borrowed": lambda: scheduled(split_transport, "stage-local"),
@@ -182,7 +226,7 @@ def main():
                 "core_overlap_borrowed": lambda: scheduled(split, "stage-local"),
             }
             for variant in case.get("staging_variants", ()):
-                if variant not in ("stage-gated", "overlap-return", "overlap-staging"):
+                if variant not in ("stage-gated", "stage-defer-fence", "overlap-return", "overlap-staging"):
                     raise ValueError(f"Unknown staging ablation: {variant}")
                 functions[f"core_{variant}_borrowed"] = lambda variant=variant: scheduled(split, variant)
             if case.get("staging_variants"):
@@ -230,6 +274,8 @@ def main():
             )
             local_samples = {name: [] for name in functions}
             max_samples = {name: [] for name in functions}
+            copy_samples = {name: [] for name in copy_timers}
+            local_copy_samples = {name: [] for name in copy_timers}
             for iteration in range(args.rounds):
                 names = list(functions)
                 # Rotate as well as reverse, so controls do not always follow
@@ -252,8 +298,19 @@ def main():
                     value = begin.elapsed_time(end) * 1000 / args.inner
                     local_samples[name].append(value)
                     peers = [None] * world
-                    dist.all_gather_object(peers, value, group=control)
-                    max_samples[name].append(max(peers))
+                    if name in copy_timers:
+                        # The existing end.synchronize() above completes the
+                        # final replay. Read that replay's external event pair;
+                        # no additional replay or host synchronization is used.
+                        timer = copy_timers[name]
+                        copy_us = timer.begin.elapsed_time(timer.end) * 1000
+                        local_copy_samples[name].append(copy_us)
+                        dist.all_gather_object(peers, (value, copy_us), group=control)
+                        max_samples[name].append(max(peer[0] for peer in peers))
+                        copy_samples[name].append(max(peer[1] for peer in peers))
+                    else:
+                        dist.all_gather_object(peers, value, group=control)
+                        max_samples[name].append(max(peers))
             medians = {name: statistics.median(samples) for name, samples in max_samples.items()}
             peer = medians["peer_forward"] + medians["peer_reverse"]
             attention = medians["attention_whole"]
@@ -284,6 +341,18 @@ def main():
                 median_max_rank_us=medians,
                 samples_max_rank_us=max_samples,
                 samples_local_us=local_samples,
+                copy_event_windows=(
+                    dict(
+                        median_max_rank_us={name: statistics.median(values) for name, values in copy_samples.items()},
+                        samples_max_rank_us=copy_samples,
+                        samples_local_us=local_copy_samples,
+                        scope="CE-only event window on the communication stream, last replay per round. "
+                        "Excludes peer barriers, enter/ready waits and local staging. Includes inter-copy "
+                        "scheduling gaps and marker overhead; not a kernel-busy union or in-request measurement.",
+                    )
+                    if copy_timers
+                    else None
+                ),
                 peer_fraction_of_attention_plus_peer=peer / (attention + peer),
                 split_attention_tax_us=tax,
                 ideal_hideable_peer_us=hideable,
