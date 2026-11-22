@@ -44,6 +44,7 @@ def main():
     parser.add_argument("--rounds", type=int, default=30)
     parser.add_argument("--inner", type=int, default=8)
     parser.add_argument("--early-fields", choices=("qk", "kv"), default="qk")
+    parser.add_argument("--defer-early", action="store_true")
     args = parser.parse_args()
     rank = int(os.environ["LOCAL_RANK"])
     torch.accelerator.set_device_index(rank)
@@ -154,11 +155,12 @@ def main():
                     q, k, v = kernel.apply_weights(linear, hidden).split(4096, dim=-1)
                     return *normalize(q, k), v.unflatten(-1, (32, 128))
 
-                def produced(part, quantized, activation_scale):
+                def produced(part, quantized, activation_scale, admit=None):
                     group = projection.groups[part]
-                    fields = dict(
-                        zip(group, projection.project(hidden, quantized, activation_scale, part).split(4096, dim=-1))
-                    )
+                    projected = projection.project(hidden, quantized, activation_scale, part)
+                    if admit is not None:
+                        admit()
+                    fields = dict(zip(group, projected.split(4096, dim=-1)))
                     q, k = normalize(fields.get(0), fields.get(1))
                     if q is not None:
                         fields[0] = q
@@ -180,7 +182,14 @@ def main():
                 full = NativePipeline(inputs, joint, pg, 1, comm, impl.forward_cuda, None)
                 serial = NativePipeline(split_inputs, joint, pg, 1, comm, impl.forward_cuda, None)
                 staged = StagedAttention(
-                    split_inputs, joint, pg, comm, impl.forward_cuda, None, early_fields=early_fields
+                    split_inputs,
+                    joint,
+                    pg,
+                    comm,
+                    impl.forward_cuda,
+                    None,
+                    early_fields=early_fields,
+                    defer_early=args.defer_early,
                 )
 
                 def fused_core():
@@ -196,7 +205,7 @@ def main():
                     early = produced(0, quantized, activation_scale)
                     return staged.run_staged(
                         early,
-                        lambda: produced(1, quantized, activation_scale),
+                        lambda admit: produced(1, quantized, activation_scale, admit),
                         joint,
                     )
 
@@ -291,9 +300,13 @@ def main():
                 }
                 medians = {name: statistics.median(values) for name, values in samples.items()}
                 copy_us = statistics.median(max(peer["copy"][i] for peer in peers) for i in range(args.rounds))
+                ready_window = medians["remaining_producer_and_staging"]
+                if args.defer_early:
+                    ready_window -= medians["remaining_projection"]
                 row = dict(
                     layer=number,
                     early_fields=args.early_fields,
+                    defer_early=args.defer_early,
                     size=size,
                     qkv_input=[1, local, 32, 128],
                     prefix=4055,
@@ -305,7 +318,7 @@ def main():
                     samples_max_rank_us=samples,
                     early_copy_window_us=copy_us,
                     remaining_projection_only_bound_us=min(copy_us, medians["remaining_projection"]),
-                    remaining_ready_bound_us=min(copy_us, medians["remaining_producer_and_staging"]),
+                    remaining_ready_bound_us=min(copy_us, max(0.0, ready_window)),
                     producer_tax_us=medians["split_producer"] - medians["fused_producer"],
                     schedule_saving_us=medians["serial_core"] - medians["overlap_core"],
                     net_core_saving_us=medians["fused_core"] - medians["overlap_core"],

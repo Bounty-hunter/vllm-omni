@@ -20,6 +20,7 @@ from vllm_omni.diffusion.attention.parallel.ulysses import UlyssesParallelAttent
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--early-fields", choices=("qk", "kv"), default="qk")
+    parser.add_argument("--defer-early", action="store_true")
     args = parser.parse_args()
     early_fields = (0, 1) if args.early_fields == "qk" else (1, 2)
     rank = int(os.environ["LOCAL_RANK"])
@@ -68,7 +69,14 @@ def main():
                 weakref.ref(value) for value in prototypes + (() if prototype_joint is None else prototype_joint)
             ]
             plan = StagedAttention(
-                prototypes, prototype_joint, pg, comm, impl.forward_cuda, None, early_fields=early_fields
+                prototypes,
+                prototype_joint,
+                pg,
+                comm,
+                impl.forward_cuda,
+                None,
+                early_fields=early_fields,
+                defer_early=args.defer_early,
             )
             del prototypes, prototype_joint
             assert all(reference() is None for reference in references), "Plan retained preparation-only tensors"
@@ -78,9 +86,11 @@ def main():
                 for i in range(6):
                     frame = frames[i % 2]
 
-                    def remaining_producer(frame=frame, i=i):
+                    def remaining_producer(admit, frame=frame, i=i):
                         if rank != i % world:
                             torch.cuda._sleep(2_000_000)
+                        if admit is not None:
+                            admit()
                         return tuple(frame[field] for field in plan.late_fields)
 
                     early = tuple(frame[field] for field in plan.early_fields)
