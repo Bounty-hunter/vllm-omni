@@ -117,6 +117,26 @@ def main():
         previous = Counter(preferred[candidate_index(i, 3)] if i < 24 else preferred[0] for i in range(calls))
         current = Counter(controlled[candidate_index(i, 4)] if i < 32 else controlled[0] for i in range(calls))
         assert current == previous  # Reorder the same real cores, never add work.
+        buffered = Counter(
+            controlled[candidate_index(i - 2, 4)] if 2 <= i < 32 else controlled[0] for i in range(calls)
+        )
+        assert sum(buffered.values()) == calls
+        assert buffered[preferred[2]] == 8 and buffered[preferred[1]] == 7
+        assert sum(len(parts) * count for parts, count in buffered.items()) < sum(
+            len(parts) * count for parts, count in previous.items()
+        )
+    # R5 lost three initial double pairs to launch starvation and incorrectly
+    # preferred a weaker triple. Leading real whole layers can admit one more
+    # complete pair without lowering the six-pair confidence requirement.
+    paired = {
+        "whole_vs_three": [[1110] * 6, [1050] * 6],
+        "whole_vs_two": [[1090] * 6, [960] * 6],
+        "three_vs_two": [[1050] * 6, [960] * 6],
+    }
+    samples = [[1110] * 6, [1050] * 6, [1090] * 6, [960] * 6]
+    assert choose_three_then_two(samples, controlled, paired) == 3
+    paired["whole_vs_two"] = [[1090] * 5, [960] * 5]
+    assert choose_three_then_two(samples, controlled, paired) == 1
     for heads in range(1, 33):
         for tokens in (1024, 4096, 9216, 14040, 16384):
             choices = three_then_two_candidates(heads, tokens, 128, 4, 132, kv_tokens=tokens + 4055)

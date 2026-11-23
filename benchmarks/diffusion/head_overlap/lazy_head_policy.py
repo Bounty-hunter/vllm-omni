@@ -217,6 +217,7 @@ class Observation:
     events: list = field(default_factory=list)
     samples: list = field(default_factory=list)
     sample_calls: int = 0
+    untimed_prefix_calls: int = 0
 
 
 class LazyHeadPolicy:
@@ -396,7 +397,9 @@ class LazyHeadPolicy:
             choice = 0
         elif self.phase == "sample":
             entry.sample_calls += 1
-            if entry.index < len(entry.events):
+            if entry.sample_calls <= entry.untimed_prefix_calls:
+                choice = 0
+            elif entry.index < len(entry.events):
                 choice = candidate_index(entry.index, len(entry.choices))
                 event_pair = entry.events[entry.index]
                 entry.index += 1
@@ -472,11 +475,16 @@ class LazyHeadPolicy:
                 entry.choices = entry.choices[:2]
             if self.candidate_family == "three-then-two" and len(entry.choices) == 3:
                 whole, triple, double = entry.choices
-                # The previous 24-call prefix already ran eight whole cores
-                # after its eight trials per candidate. Interleave those same
-                # whole calls as matched controls to sustain eager launch lead.
-                # Both controls reuse one plan; no new forward or GPU work.
+                # Use the existing real-call budget for matched whole controls.
+                # Both controls share one plan; no extra forward is executed.
                 entry.choices = (whole, triple, whole, double) if slots >= 32 else (whole, double)
+                if len(entry.choices) == 4:
+                    # Allocation ends with an empty launch queue. Let two of
+                    # the existing real layers establish lead before trials.
+                    # Within 32 layers this leaves eight double pairs and seven
+                    # triple pairs, enough for six after the cold-pair discard.
+                    # No extra layer, attention call or synchronization is added.
+                    entry.untimed_prefix_calls = 2
             if slots < 7 * len(entry.choices):
                 entry.choices = entry.choices[:2]
             if slots < 7 * len(entry.choices):
@@ -518,7 +526,8 @@ class LazyHeadPolicy:
                         )
             if len(entry.choices) > 1:
                 entry.events = [
-                    (torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)) for _ in range(slots)
+                    (torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True))
+                    for _ in range(slots - entry.untimed_prefix_calls)
                 ]
                 # Realize timer handles before measured calls; no kernels/forward.
                 for pair in entry.events:
@@ -605,6 +614,7 @@ class LazyHeadPolicy:
                     discovery_calls=entry.calls,
                     sampling_pass_calls=entry.sample_calls,
                     timed_prefix_calls=entry.index,
+                    untimed_prefix_calls=entry.untimed_prefix_calls,
                     allocated_sample_pairs=len(entry.events),
                     paired_samples_max_rank_us=paired,
                 )
