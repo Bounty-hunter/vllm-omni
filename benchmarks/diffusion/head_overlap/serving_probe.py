@@ -3,8 +3,8 @@
 """Benchmark-only serving bridge preserving native compile and graph settings.
 
 Baseline installation is a no-op. The enabled arm samples actual component
-calls and freezes after normal request output completion. No graph, probe
-forward, compute stream or device wait is added.
+calls and freezes between calls once all ranks' samples have completed.
+No graph, probe forward, compute stream or device wait is added.
 """
 
 import functools
@@ -62,6 +62,18 @@ def install(pipeline):
             return False
         if str(q.dtype) != "torch.bfloat16" or not original_can_overlap(q, k, v, md, world, chunks):
             return False
+        if policy.phase == "discover" and q.shape[3] == 128:
+            joint_q = 0 if md is None or md.joint_query is None else md.joint_query.shape[1]
+            tiles = (q.shape[1] * world + joint_q + 127) // 128
+            if (q.shape[2] // world // 2) * tiles < 0.8 * policy.sms:
+                # The same conservative proxy cannot propose any split. Avoid
+                # allocating a CE experiment merely to retain whole attention.
+                # The current ordinary core completes; later layers/calls use
+                # the prepared native strategies, with no probe or GPU wait.
+                policy.phase = "native"
+                policy.stats["native_reason"] = "query-tile proxy rejected all split candidates"
+                policy._native_fallback()
+                return False
         # Unseen layouts use the original strategy after resource preparation.
         if policy.phase != "discover":
             signature = policy.signature(q, k, v, md, get_sp_group().ulysses_group)
@@ -79,6 +91,22 @@ def install(pipeline):
     head.can_overlap = can_overlap
     head._run_native_prefilled = native.run = native_run
     PrefilledPipeline.__call__ = lambda plan: scheduled(plan, "stage-local")
+
+    def finish_policy(key, policy, *, ready_only=False):
+        if not policy.finish(ready_only=ready_only):
+            return False
+        policy.stats["serving_route"] = (
+            "native-nccl"
+            if all(len(entry.choices[entry.selected]) == 1 for entry in policy.entries.values())
+            else "ce-head-overlap"
+        )
+        record(
+            kind="policy",
+            key=hashlib.sha256(repr(key).encode()).hexdigest(),
+            stats=policy.stats,
+            reports=policy.reports,
+        )
+        return True
 
     def wrap_component(original, component, module):
         # Prepare ordinary NCCL strategies once. Switching them between actual
@@ -115,6 +143,7 @@ def install(pipeline):
                     get_world_group().cpu_group, candidate_family="three-then-two", schedule="stage-local"
                 )
                 policy.begin()
+                policy._native_fallback = lambda: select_native(True)
             phase = policy.phase
             use_native = phase == "native" or (
                 phase == "frozen" and all(len(entry.choices[entry.selected]) == 1 for entry in policy.entries.values())
@@ -156,6 +185,8 @@ def install(pipeline):
                         entry.inputs, entry.joint, entry.metadata, entry.kernel = (), None, None, None
             elif phase == "sample":
                 policy.phase = "settle"
+            if policy.phase == "settle":
+                finish_policy(key, policy, ready_only=True)
             return result
 
         return forward
@@ -178,18 +209,7 @@ def install(pipeline):
             if policy.phase == "settle":
                 if any(not end.query() for entry in policy.entries.values() for _, _, end, _, _ in entry.samples):
                     raise RuntimeError("Policy finish preceded normal output completion")
-                policy.finish()
-                policy.stats["serving_route"] = (
-                    "native-nccl"
-                    if all(len(entry.choices[entry.selected]) == 1 for entry in policy.entries.values())
-                    else "ce-head-overlap"
-                )
-                record(
-                    kind="policy",
-                    key=hashlib.sha256(repr(key).encode()).hexdigest(),
-                    stats=policy.stats,
-                    reports=policy.reports,
-                )
+                finish_policy(key, policy)
         sampling = request.sampling_params
         request_key = tuple(
             getattr(sampling, field, None) for field in ("height", "width", "num_frames", "num_inference_steps")

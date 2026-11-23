@@ -4,7 +4,8 @@
 
 One call executes one complete core and returns its real output. Preparation
 never executes a probe kernel. Event results are consumed only by finish(),
-after the graph owner's existing synchronization. No timers survive freezing.
+at the owner's completion boundary or after nonblocking readiness checks.
+No timers survive freezing.
 """
 
 import hashlib
@@ -578,22 +579,36 @@ class LazyHeadPolicy:
         self.phase = "sample"
         self.stats["prepare_ms"] += (time.perf_counter() - start) * 1000
 
-    def finish(self):
-        """Caller has already synchronized at its original capture boundary."""
+    def finish(self, *, ready_only=False):
+        """Freeze at an existing boundary, optionally without waiting for GPU.
+
+        Serving checks readiness between actual component calls. A rank with
+        pending samples sends no timings; all ranks retain the same phase and
+        retry at a later component boundary. No per-layer collective or device
+        synchronization is added. Graph owners keep their existing completion
+        boundary and use the default strict path.
+        """
         import torch.distributed as dist
 
         start = time.perf_counter()
-        local = []
-        for entry in self.entries.values():
-            grouped = [[] for _ in entry.choices]
-            for choice, begin, end, queued, submit_us in entry.samples:
-                grouped[choice].append((begin.elapsed_time(end) * 1000, queued, submit_us))
-            local.append((entry.signature, entry.choices, grouped))
+        ready = not ready_only or all(
+            end.query() for entry in self.entries.values() for _, _, end, _, _ in entry.samples
+        )
+        local = [] if ready else None
+        if ready:
+            for entry in self.entries.values():
+                grouped = [[] for _ in entry.choices]
+                for choice, begin, end, queued, submit_us in entry.samples:
+                    grouped[choice].append((begin.elapsed_time(end) * 1000, queued, submit_us))
+                local.append((entry.signature, entry.choices, grouped))
         peers = [local]
         if any(len(entry.choices) > 1 for entry in self.entries.values()):
             peers = [None] * dist.get_world_size(self.group)
             dist.all_gather_object(peers, local, group=self.group)
             self.stats["control_collectives"] += 1
+        if any(peer is None for peer in peers):
+            self.stats["finish_ms"] += (time.perf_counter() - start) * 1000
+            return False
         if any(
             [(signature, choices) for signature, choices, _ in peer] != [(s, c) for s, c, _ in local] for peer in peers
         ):
@@ -678,6 +693,7 @@ class LazyHeadPolicy:
         )
         self._cache_key = hashlib.sha256(repr(key).encode()).hexdigest()
         self.stats["finish_ms"] += (time.perf_counter() - start) * 1000
+        return True
 
     @property
     def cache_key(self):
