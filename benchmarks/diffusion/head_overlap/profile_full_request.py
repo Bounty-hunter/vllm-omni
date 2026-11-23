@@ -73,7 +73,9 @@ def instrument_request(function):
     directory = Path(os.environ["HCMS_FULL_TRACE_DIR"])
     variant = os.environ["HCMS_FULL_VARIANT"]
     workload = os.environ.get("HCMS_FULL_WORKLOAD", "diffusion")
-    warmups, requests = 2, 2
+    warmups, requests = int(os.environ.get("HCMS_FULL_WARMUPS", "2")), 2
+    if warmups not in (0, 2):
+        raise ValueError("Full-request diagnostics support either startup or two warmed requests")
 
     def finish(success):
         nonlocal profiler

@@ -334,6 +334,11 @@ def qwen21_blocks(owner, hidden_states, *, block_caches, cache_branch, cache_wri
 
 
 def install(pipeline):
+    if os.environ.get("HCMS_PREFIX_CPU_PROFILE_DIR") or os.environ.get("HCMS_PREFIX_PHASE_MARKERS") == "1":
+        from lazy_head_policy import LazyHeadPolicy
+        from profile_real_prefix import install as profile_prefix
+
+        profile_prefix(PackedForward, LazyHeadPolicy, _ACTIVE)
     # Import the patched attention owner before the native probe, whose
     # microbenchmark utilities also reference that owner during import.
     head = importlib.import_module("vllm_omni.diffusion.attention.parallel.head_overlap")
@@ -508,6 +513,8 @@ def install(pipeline):
                     previous_case = case
                 schedule = extra["schedule"]
                 state = dict(
+                    label=extra["label"],
+                    case=case,
                     variant=extra["variant"],
                     mode=extra["graph_mode"],
                     schedule=schedule.removesuffix("-shared-slots"),
