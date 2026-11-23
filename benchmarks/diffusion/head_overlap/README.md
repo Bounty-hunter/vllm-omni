@@ -892,38 +892,30 @@ difference is not assigned to a specific hardware cause.
 
 ## Native serving CI experiment
 
-`serving_probe.py` adapts the existing learner to ordinary serving requests;
-it is installed only by `serving-probe.patch`, alongside `native-probe.patch`.
-The native CI request payload does not carry experimental scheduling fields.
-`--ulysses-head-chunks 1` selects original Ulysses; `2` enables the existing
-three-then-two learner. Both arms use the same real-prefix graph owner and CE
-setting. The two real component calls before capture return their actual
-outputs. Capture recording skips the optional sync probe/validation forwards.
-Each new geometry audits its first two requests, then disables audit output.
-No profiler trace or per-layer synchronization is added.
+`serving_probe.py` connects the existing learner to ordinary serving requests,
+only through `serving-probe.patch` and `native-probe.patch` in an isolated
+checkout. Baseline (`--ulysses-head-chunks 1`, the default) installation is a
+no-op. The enabled arm uses `--ulysses-a2a-permute --ulysses-head-chunks 2`.
+CE is an explicit feature dependency: a native NCCL baseline versus this arm
+measures CE plus overlap, not overlap in isolation.
 
-The native entrypoint is `tests/dfx/perf/scripts/run_benchmark.py`, using
-the request workloads in `tests/dfx/perf/tests/test_wan22_i2v_vllm_omni.json`:
-832x480/81 frames and 1280x720/121 frames, four inference steps, two client
-warmups, ten measured requests and concurrency one. For this performance
-experiment use FP8/SP4/VAE4, with HSDP disabled in both arms. The upstream
-two-card CI deployment includes HSDP for memory savings; it is not this
-experiment's deployment baseline. Record all common server overrides.
-Use identical `--ulysses-a2a-permute` settings in both arms, with outer eager
-execution delegating DiT graphs to the controlled real-prefix owner.
+Retain each native CI configuration's precision, HSDP, offload, compilation,
+graph settings and workload. No manual DiT graph is installed. The first real
+component call discovers layouts; the next real call samples at most 32 cores
+per signature. Outputs flow normally into denoising. Event readiness is checked
+without waiting at the next request after the preceding output completed; that
+request freezes the all-rank policy. No probe forward or per-layer synchronize
+is added. Subsequent calls use the frozen plan without timing records. Unknown
+layouts use the original strategy. This adapter accepts uncaptured DiT paths;
+it does not change an existing graph configuration to make learning possible.
 
-HSDP is rejected by this explicit serving adapter: its prefetched weight
-events cross the current capture boundary. An attempted native HSDP run
-failed before producing measured requests, and its zero-filled fallback
-result JSON must not be interpreted as latency data. HSDP capture adaptation
-is outside this performance comparison.
-
-Run the complete baseline benchmark first, then the complete enabled
-benchmark. Report native `mean_e2el_ms` without filtering individual requests:
-speedup = baseline mean / overlap mean; latency reduction =
-1 - overlap mean / baseline mean. Record common deployment overrides and
-the experimental integration patch separately from the original CI config.
-Serving qualification must pass before these results are called validated.
+Run the complete native baseline benchmark, then the enabled benchmark. Keep
+the native warmup and measured request counts (including H3's one warmup and
+three requests), and report arithmetic `mean_e2el_ms` over all successful
+requests. Speedup = baseline mean / overlap mean. Do not interpret fallback
+result templates with zero completed requests as performance measurements.
+Record the original configuration, source hashes, minimal feature dependency
+delta, first-request learning and all-rank decisions alongside the results.
 
 AI assistance: Codex prepared the implementation, experiment scripts and
 analysis. The branch is retained for investigation; it is not PR-ready

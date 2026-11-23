@@ -1,78 +1,161 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
-"""Opt-in bridge from the existing head learner to native serving CI.
+"""Benchmark-only serving bridge preserving native compile and graph settings.
 
-The native benchmark sends its unchanged requests. Both arms use the same
-real-prefix graph owner; chunks=1 keeps original Ulysses, chunks=2 enables
-the bounded three-then-two learner. No policy forwards or traces are added.
+Baseline installation is a no-op. The enabled arm samples actual component
+calls and freezes after normal request output completion. No graph, probe
+forward, compute stream or device wait is added.
 """
 
 import functools
+import hashlib
+import importlib
+import json
+import os
+from contextvars import ContextVar
+from pathlib import Path
+
+_ACTIVE = ContextVar("serving_head_policy", default=None)
 
 
-def request_controls(sampling, *, enabled):
-    """Describe a fixed request layout using host metadata only."""
-    geometry = tuple(
-        getattr(sampling, field, None)
-        for field in (
-            "height",
-            "width",
-            "num_frames",
-            "num_inference_steps",
-            "guidance_scale",
-            "true_cfg_scale",
-            "num_outputs_per_prompt",
-        )
-    )
-    case = "native-serving/" + repr(geometry)
-    return dict(
-        case=case,
-        label=case,
-        variant="overlap" if enabled else "baseline",
-        graph_mode="graph",
-        schedule="stage-local-shared-slots",
-        chunks=1,
-        real_prefix=True,
-        real_prefix_calls=2,
-        capture_without_probes=True,
-        autotune=enabled,
-        candidate_family="three-then-two" if enabled else None,
-        reference_whole=not enabled,
-    )
+def record(**values):
+    import torch.distributed as dist
+
+    destination = Path(os.environ["HCMS_MATRIX_AUDIT"])
+    destination.mkdir(parents=True, exist_ok=True)
+    row = dict(rank=dist.get_rank(), **values)
+    with (destination / f"rank{dist.get_rank()}.jsonl").open("a") as stream:
+        stream.write(json.dumps(row, default=str) + "\n")
 
 
 def install(pipeline):
-    """Install only through the explicit serving benchmark integration patch."""
-    from model_probe import install as install_model_probe
-
+    """Install only through serving-probe.patch in an isolated checkout."""
     chunks = pipeline.od_config.parallel_config.ulysses_head_chunks
-    if chunks not in (1, 2):
-        raise ValueError("The serving CI experiment toggles ulysses_head_chunks=1 or 2")
-    if pipeline.od_config.parallel_config.use_hsdp:
-        raise ValueError("The serving head experiment requires replicated DiT weights; disable HSDP")
-    install_model_probe(pipeline)
+    if chunks == 1:
+        return
+    if chunks != 2:
+        raise ValueError("The serving experiment enables head_chunks=2")
+    if pipeline.od_config.diffusion_use_graph:
+        raise ValueError("This serving adapter requires uncaptured DiT execution")
+
+    import native_prefilled as native
+    from lazy_head_policy import LazyHeadPolicy, metadata_spec
+    from prefilled_probe import PrefilledPipeline
+    from schedule_probe import run as scheduled
+
+    from vllm_omni.diffusion.distributed.parallel_state import get_sp_group, get_world_group
+
+    head = importlib.import_module("vllm_omni.diffusion.attention.parallel.head_overlap")
+    original_can_overlap = head.can_overlap
+    original_native = native.run
+    policies = {}
+    request_number = 0
+    request_key = None
+
+    def can_overlap(q, k, v, md, world, chunks):
+        policy = _ACTIVE.get()
+        if policy is None or q.shape != k.shape or k.shape != v.shape or q.shape[0] != 1:
+            return False
+        if str(q.dtype) != "torch.bfloat16" or not original_can_overlap(q, k, v, md, world, chunks):
+            return False
+        # Unseen layouts use the original strategy after resource preparation.
+        if policy.phase != "discover":
+            signature = policy.signature(q, k, v, md, get_sp_group().ulysses_group)
+            return signature in policy.entries
+        return True
+
+    def native_run(q, k, v, md, pg, chunks, kernel, **kwargs):
+        policy = _ACTIVE.get()
+        if policy is None:
+            return original_native(q, k, v, md, pg, chunks, kernel, **kwargs)
+        return policy.run(q, k, v, md, pg, kernel, streams=kwargs["streams"])
+
+    head.can_overlap = can_overlap
+    head._run_native_prefilled = native.run = native_run
+    PrefilledPipeline.__call__ = lambda plan: scheduled(plan, "stage-local")
+
+    def wrap_component(original, component):
+        @functools.wraps(original)
+        def forward(*args, **kwargs):
+            signature, supported = metadata_spec((args, kwargs))
+            if request_key is None or not supported:
+                return original(*args, **kwargs)
+            key = request_key, component, signature
+            policy = policies.get(key)
+            if policy is None:
+                policy = policies[key] = LazyHeadPolicy(
+                    get_world_group().cpu_group, candidate_family="three-then-two", schedule="stage-local"
+                )
+                policy.begin()
+            phase = policy.phase
+            token = _ACTIVE.set(policy)
+            try:
+                result = original(*args, **kwargs)
+            finally:
+                _ACTIVE.reset(token)
+            if phase == "discover":
+                # First real component call discovers layer layouts; candidate
+                # preparation completes before the second real call samples.
+                policy.prepare(warmup_passes=1, sample_limit=32)
+            elif phase == "sample":
+                policy.phase = "settle"
+            return result
+
+        return forward
+
+    for name in pipeline._dit_modules:
+        module = getattr(pipeline, name, None)
+        if module is not None:
+            module.forward = wrap_component(module.forward, name)
+
     original = pipeline.forward
-    observed = {}
 
     @functools.wraps(original)
     def forward(request):
+        nonlocal request_number, request_key
         if request.is_dummy_run():
             return original(request)
+        # Read only after the previous serving request's output completion.
+        # query() is nonblocking and never adds a device wait.
+        for key, policy in policies.items():
+            if policy.phase == "settle":
+                if any(not end.query() for entry in policy.entries.values() for _, _, end, _, _ in entry.samples):
+                    raise RuntimeError("Policy finish preceded normal output completion")
+                policy.finish()
+                record(
+                    kind="policy",
+                    key=hashlib.sha256(repr(key).encode()).hexdigest(),
+                    stats=policy.stats,
+                    reports=policy.reports,
+                )
         sampling = request.sampling_params
-        previous = sampling.extra_args
-        controls = request_controls(sampling, enabled=chunks == 2)
-        case = controls["case"]
-        count = observed.get(case, 0)
-        # The two native CI warmups prove capture/decisions and replay. Do not
-        # serialize audit reports in the measured ten-request benchmark.
-        controls["audit"] = count < 2
-        controls["label"] += f"/request{count}"
-        sampling.extra_args = {**(previous or {}), **controls}
+        request_key = tuple(
+            getattr(sampling, field, None) for field in ("height", "width", "num_frames", "num_inference_steps")
+        )
+        before = {key: dict(policy.stats) for key, policy in policies.items()} if request_number < 3 else {}
         try:
             result = original(request)
-            observed[case] = min(count + 1, 2)
+            if request_number < 3:
+                record(
+                    kind="request",
+                    number=request_number,
+                    geometry=request_key,
+                    policies=[
+                        dict(
+                            key=hashlib.sha256(repr(key).encode()).hexdigest(),
+                            phase=policy.phase,
+                            stats=policy.stats,
+                            previous_stats=before.get(key, {}),
+                        )
+                        for key, policy in policies.items()
+                    ],
+                    plans=len(native._PLANS),
+                    graph_capture_added=False,
+                    extra_forwards=0,
+                )
+            request_number += 1
             return result
         finally:
-            sampling.extra_args = previous
+            request_key = None
 
     pipeline.forward = forward
