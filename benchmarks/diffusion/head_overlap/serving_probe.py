@@ -38,6 +38,9 @@ def install(pipeline):
     if pipeline.od_config.diffusion_use_graph:
         raise ValueError("This serving adapter requires uncaptured DiT execution")
 
+    # The native utilities also import the attention owner. Load the patched
+    # owner first so its native bridge cannot observe a partial native module.
+    head = importlib.import_module("vllm_omni.diffusion.attention.parallel.head_overlap")
     import native_prefilled as native
     from lazy_head_policy import LazyHeadPolicy, metadata_spec
     from prefilled_probe import PrefilledPipeline
@@ -45,7 +48,6 @@ def install(pipeline):
 
     from vllm_omni.diffusion.distributed.parallel_state import get_sp_group, get_world_group
 
-    head = importlib.import_module("vllm_omni.diffusion.attention.parallel.head_overlap")
     original_can_overlap = head.can_overlap
     original_native = native.run
     policies = {}
