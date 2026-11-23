@@ -165,11 +165,14 @@ def choose_three_then_two(samples, choices, paired=None):
     three = samples[:2] if paired is None else paired["whole_vs_three"]
     if len(choices) == 2:
         return choose(three)
-    two = [samples[0], samples[2]] if paired is None else paired["whole_vs_two"]
-    direct = samples[1:] if paired is None else paired["three_vs_two"]
+    # Four-way sampling interleaves a second whole control, reusing its plan.
+    two_index = len(choices) - 1
+    control = 2 if len(choices) == 4 else 0
+    two = [samples[control], samples[two_index]] if paired is None else paired["whole_vs_two"]
+    direct = [samples[1], samples[two_index]] if paired is None else paired["three_vs_two"]
     if choose(three) == 1:
-        return 2 if choose(two) == 1 and choose(direct) == 1 else 1
-    return 2 if choose(two) == 1 else 0
+        return two_index if choose(two) == 1 and choose(direct) == 1 else 1
+    return two_index if choose(two) == 1 else 0
 
 
 def candidate_index(index, count):
@@ -451,10 +454,13 @@ class LazyHeadPolicy:
                 # A short real prefix prioritizes one promising split:
                 # more paired evidence and one fewer resident CE allocation.
                 entry.choices = entry.choices[:2]
-            if self.candidate_family == "three-then-two" and len(entry.choices) == 3 and slots < 21:
-                # Insufficient real layers for both trials: retain the double
-                # fallback instead of manufacturing a third sampling pass.
-                entry.choices = (entry.choices[0], entry.choices[2])
+            if self.candidate_family == "three-then-two" and len(entry.choices) == 3:
+                whole, triple, double = entry.choices
+                # The previous 24-call prefix already ran eight whole cores
+                # after its eight trials per candidate. Interleave those same
+                # whole calls as matched controls to sustain eager launch lead.
+                # Both controls reuse one plan; no new forward or GPU work.
+                entry.choices = (whole, triple, whole, double) if slots >= 28 else (whole, double)
             if slots < 7 * len(entry.choices):
                 entry.choices = entry.choices[:2]
             if slots < 7 * len(entry.choices):
@@ -540,12 +546,18 @@ class LazyHeadPolicy:
                 rank_rows_by_choice.append(rows)
             maximum = qualified_cycles(rank_rows_by_choice)
             paired = None
-            if self.candidate_family == "three-then-two" and len(entry.choices) == 3:
+            if self.candidate_family == "three-then-two" and len(entry.choices) in (3, 4):
                 # Keep complete all-rank paired rotations. A starved triple
                 # must not erase otherwise valid whole/double comparisons.
+                double = len(entry.choices) - 1
+                control = 2 if len(entry.choices) == 4 else 0
                 paired = {
                     name: qualified_cycles([rank_rows_by_choice[a], rank_rows_by_choice[b]])
-                    for name, a, b in (("whole_vs_three", 0, 1), ("whole_vs_two", 0, 2), ("three_vs_two", 1, 2))
+                    for name, a, b in (
+                        ("whole_vs_three", 0, 1),
+                        ("whole_vs_two", control, double),
+                        ("three_vs_two", 1, double),
+                    )
                 }
             forced = self.force_diagnostic_split and len(entry.choices) > 1
             entry.selected = (

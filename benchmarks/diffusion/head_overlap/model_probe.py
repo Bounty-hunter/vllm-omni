@@ -230,7 +230,7 @@ def real_prefix_call(original, graphs, component, *args, **kwargs):
         if graph.module.prefix_steps == 1:
             # All layouts came from step one; allocation is complete before
             # the first trial in step two, without a dummy model invocation.
-            learner.prepare(sample_limit=24)
+            learner.prepare(sample_limit=32 if learner.candidate_family == "three-then-two" else 24)
         result = graph.module(args, kwargs)
         graph.module.prefix_steps += 1
         state["real_eager_steps"][component] = state["real_eager_steps"].get(component, 0) + 1

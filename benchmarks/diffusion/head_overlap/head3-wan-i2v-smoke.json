@@ -94,7 +94,7 @@
       44
     ],
     "new_profiler_traces": false,
-    "selection": "At most24 actual same-signature cores; whole/triple/double. Prefer qualified triple unless double proves a further gain. All-rank complete pair rotations; freeze at existing capture boundary."
+    "selection": "At most32 actual same-signature cores; whole/triple/whole/double matched controls. Prefer qualified triple unless double proves a further gain. All-rank complete pair rotations; freeze at existing capture boundary."
   },
   "ci_source": "tests/dfx/perf/tests/test_wan22_i2v_vllm_omni.json",
   "deployment_changes": "Offline decoded frames (no HTTP/MP4 mux); batch1 FP8 DiT, FA3, Ulysses CE, VAE parallel; no Cache-DiT/profiler."

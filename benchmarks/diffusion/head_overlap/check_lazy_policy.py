@@ -80,7 +80,7 @@ def main():
         assert all(sum(parts) == heads and min(parts) > 0 for parts in choices)
         assert all(parts[0] == parts[-1] <= parts[1] for parts in choices[1:])
     assert Counter(candidate_index(i, 3) for i in range(24)) == {0: 8, 1: 8, 2: 8}
-    for count in (1, 2, 3):
+    for count in (1, 2, 3, 4):
         cycle = [candidate_index(i, count) for i in range(2 * count * count)]
         assert Counter(cycle) == {i: 2 * count for i in range(count)}
         for position in range(count):
@@ -103,6 +103,14 @@ def main():
         "three_vs_two": [[], []],
     }
     assert choose_three_then_two([[], [], []], preferred, paired) == 2
+    controlled = (preferred[0], preferred[1], preferred[0], preferred[2])
+    assert choose_three_then_two([[1000] * 7, [800] * 7, [1000] * 7, [795] * 7], controlled) == 1
+    assert choose_three_then_two([[1000] * 7, [1100] * 7, [1000] * 7, [800] * 7], controlled) == 3
+    assert choose_three_then_two([[], [], [], []], controlled, paired) == 3
+    for calls in (32, 40, 42):
+        previous = Counter(preferred[candidate_index(i, 3)] if i < 24 else preferred[0] for i in range(calls))
+        current = Counter(controlled[candidate_index(i, 4)] if i < 32 else controlled[0] for i in range(calls))
+        assert current == previous  # Reorder the same real cores, never add work.
     for heads in range(1, 33):
         for tokens in (1024, 4096, 9216, 14040, 16384):
             choices = three_then_two_candidates(heads, tokens, 128, 4, 132, kv_tokens=tokens + 4055)
