@@ -906,13 +906,24 @@ per signature. Outputs flow normally into denoising. Event readiness is checked
 without waiting at the next request after the preceding output completed; that
 request freezes the all-rank policy. No probe forward or per-layer synchronize
 is added. Subsequent calls use the frozen plan without timing records. Unknown
-layouts use the original strategy. This adapter accepts uncaptured DiT paths;
+layouts use the original strategy. When a component has no eligible split, or
+all of its frozen decisions retain whole attention, subsequent component calls
+restore ordinary NCCL strategies. This also restores the original compiled
+attention route instead of retaining the experimental single-group CE core.
+Strategies are prepared once and switched only between component calls; new
+signatures can restore overlap. Shared-output single-group CE controls remain
+available during qualified sampling to distinguish transport and split gains.
+The query-tile occupancy proxy filters undersized symmetric ends; it predicts
+candidates and is not proof of a kernel's actual launch grid. Initial discovery
+and compilation still cost time and must be included in first-request results.
+This adapter accepts uncaptured DiT paths;
 it does not change an existing graph configuration to make learning possible.
 
 Run the complete native baseline benchmark, then the enabled benchmark. Keep
 the native warmup and measured request counts (including H3's one warmup and
-three requests), and report arithmetic `mean_e2el_ms` over all successful
-requests. Speedup = baseline mean / overlap mean. Do not interpret fallback
+three requests), and report arithmetic `mean_e2el_ms` only after all configured
+requests complete successfully. A partial or failed run is invalid, even if it
+contains latency samples. Speedup = baseline mean / overlap mean. Do not interpret fallback
 result templates with zero completed requests as performance measurements.
 Record the original configuration, source hashes, minimal feature dependency
 delta, first-request learning and all-rank decisions alongside the results.

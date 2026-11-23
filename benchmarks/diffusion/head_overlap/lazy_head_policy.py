@@ -109,10 +109,10 @@ def three_then_two_candidates(heads, tokens, dim, world, sms, *, flops=6e14, ban
     """
     whole = (heads,)
     doubles = candidates(heads, tokens, dim, world, sms, flops=flops, bandwidth=bandwidth, kv_tokens=kv_tokens)[1:]
-    triples = [(edge, heads - 2 * edge, edge) for edge in range(1, heads // 3 + 1)]
+    tiles = math.ceil(tokens / 128)
+    triples = [(edge, heads - 2 * edge, edge) for edge in range(1, heads // 3 + 1) if edge * tiles >= 0.8 * sms]
     if not triples:
         return (whole,) + doubles[:1]
-    tiles = math.ceil(tokens / 128)
     waves = math.ceil(tiles * heads / sms)
     attention = 4 * tokens * (tokens if kv_tokens is None else kv_tokens) * heads * dim / flops
     peer_bytes = 4 * tokens * heads * dim * 2 * (world - 1) / world

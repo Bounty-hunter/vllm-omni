@@ -13,6 +13,7 @@ import importlib
 import json
 import os
 from contextvars import ContextVar
+from copy import copy
 from pathlib import Path
 
 _ACTIVE = ContextVar("serving_head_policy", default=None)
@@ -47,6 +48,7 @@ def install(pipeline):
     from schedule_probe import run as scheduled
 
     from vllm_omni.diffusion.distributed.parallel_state import get_sp_group, get_world_group
+    from vllm_omni.diffusion.envs import VLLM_OMNI_PACKED_QKV
 
     original_can_overlap = head.can_overlap
     original_native = native.run
@@ -56,7 +58,7 @@ def install(pipeline):
 
     def can_overlap(q, k, v, md, world, chunks):
         policy = _ACTIVE.get()
-        if policy is None or q.shape != k.shape or k.shape != v.shape or q.shape[0] != 1:
+        if policy is None or policy.phase == "native" or q.shape != k.shape or k.shape != v.shape or q.shape[0] != 1:
             return False
         if str(q.dtype) != "torch.bfloat16" or not original_can_overlap(q, k, v, md, world, chunks):
             return False
@@ -78,11 +80,33 @@ def install(pipeline):
     head._run_native_prefilled = native.run = native_run
     PrefilledPipeline.__call__ = lambda plan: scheduled(plan, "stage-local")
 
-    def wrap_component(original, component):
+    def wrap_component(original, component, module):
+        # Prepare ordinary NCCL strategies once. Switching them between actual
+        # component calls restores the original compiled attention path; a
+        # frozen whole decision must not retain the experimental CE core.
+        strategies = []
+        for attention in module.modules():
+            strategy = getattr(attention, "parallel_strategy", None)
+            if getattr(strategy, "name", None) == "ulysses" and strategy.head_chunks > 1:
+                baseline = copy(strategy)
+                baseline.head_chunks = 1
+                baseline._ulysses_a2a_permute = False
+                baseline._packed_qkv = VLLM_OMNI_PACKED_QKV
+                strategies.append((attention, strategy, baseline))
+        native_mode = False
+
+        def select_native(enabled):
+            nonlocal native_mode
+            if enabled != native_mode:
+                for attention, overlap, baseline in strategies:
+                    attention.parallel_strategy = baseline if enabled else overlap
+                native_mode = enabled
+
         @functools.wraps(original)
         def forward(*args, **kwargs):
             signature, supported = metadata_spec((args, kwargs))
             if request_key is None or not supported:
+                select_native(True)
                 return original(*args, **kwargs)
             key = request_key, component, signature
             policy = policies.get(key)
@@ -92,6 +116,12 @@ def install(pipeline):
                 )
                 policy.begin()
             phase = policy.phase
+            use_native = phase == "native" or (
+                phase == "frozen" and all(len(entry.choices[entry.selected]) == 1 for entry in policy.entries.values())
+            )
+            select_native(use_native)
+            if use_native:
+                return original(*args, **kwargs)
             token = _ACTIVE.set(policy)
             try:
                 result = original(*args, **kwargs)
@@ -100,7 +130,30 @@ def install(pipeline):
             if phase == "discover":
                 # First real component call discovers layer layouts; candidate
                 # preparation completes before the second real call samples.
-                policy.prepare(warmup_passes=1, sample_limit=32)
+                if any(len(entry.choices) > 1 for entry in policy.entries.values()):
+                    policy.prepare(warmup_passes=1, sample_limit=32)
+                else:
+                    # Insufficient predicted parallel work requires no split
+                    # allocation, timer, trial or control collective.
+                    policy.phase = "native"
+                    policy.stats["serving_route"] = "native-nccl"
+                    policy.reports = [
+                        dict(
+                            signature=entry.signature,
+                            choices=entry.choices,
+                            selected=entry.choices[0],
+                            reason="no qualified split candidate",
+                        )
+                        for entry in policy.entries.values()
+                    ]
+                    record(
+                        kind="policy",
+                        key=hashlib.sha256(repr(key).encode()).hexdigest(),
+                        stats=policy.stats,
+                        reports=policy.reports,
+                    )
+                    for entry in policy.entries.values():
+                        entry.inputs, entry.joint, entry.metadata, entry.kernel = (), None, None, None
             elif phase == "sample":
                 policy.phase = "settle"
             return result
@@ -110,7 +163,7 @@ def install(pipeline):
     for name in pipeline._dit_modules:
         module = getattr(pipeline, name, None)
         if module is not None:
-            module.forward = wrap_component(module.forward, name)
+            module.forward = wrap_component(module.forward, name, module)
 
     original = pipeline.forward
 
@@ -126,6 +179,11 @@ def install(pipeline):
                 if any(not end.query() for entry in policy.entries.values() for _, _, end, _, _ in entry.samples):
                     raise RuntimeError("Policy finish preceded normal output completion")
                 policy.finish()
+                policy.stats["serving_route"] = (
+                    "native-nccl"
+                    if all(len(entry.choices[entry.selected]) == 1 for entry in policy.entries.values())
+                    else "ce-head-overlap"
+                )
                 record(
                     kind="policy",
                     key=hashlib.sha256(repr(key).encode()).hexdigest(),
