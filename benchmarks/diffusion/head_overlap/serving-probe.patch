@@ -1,0 +1,11 @@
+--- a/vllm_omni/diffusion/worker/diffusion_model_runner.py
++++ b/vllm_omni/diffusion/worker/diffusion_model_runner.py
+@@ -453,6 +453,8 @@
+         self.model_memory_usage = int(m.consumed_memory)
+         logger.info("Model runner: Model loaded successfully.")
+         warn_if_denoise_graph_unsupported(self.od_config, self.pipeline)
++        from serving_probe import install as _install_head_serving_probe
++        _install_head_serving_probe(self.pipeline)
+
+         if self.od_config.streaming_output and not self.od_config.step_execution and self._supports_step_mode():
+             logger.warning("streaming_output=True enables step execution for a step-capable pipeline.")

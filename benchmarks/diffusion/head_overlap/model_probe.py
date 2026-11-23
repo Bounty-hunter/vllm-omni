@@ -539,6 +539,7 @@ def install(pipeline):
                     candidate_family=extra.get("candidate_family"),
                     real_prefix=bool(extra.get("real_prefix", False)),
                     real_prefix_calls=prefix_calls,
+                    capture_without_probes=bool(extra.get("capture_without_probes", False)),
                     eager_forwards={},
                     real_eager_steps={},
                     original_prefill_blocks=0,

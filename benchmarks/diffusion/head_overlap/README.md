@@ -890,6 +890,34 @@ other rank's later input or attention completion. GPU frequency, temperature
 and power were not sampled concurrently, so the underlying device timing
 difference is not assigned to a specific hardware cause.
 
+## Native serving CI experiment
+
+`serving_probe.py` adapts the existing learner to ordinary serving requests;
+it is installed only by `serving-probe.patch`, alongside `native-probe.patch`.
+The native CI request payload does not carry experimental scheduling fields.
+`--ulysses-head-chunks 1` selects original Ulysses; `2` enables the existing
+three-then-two learner. Both arms use the same real-prefix graph owner and CE
+setting. The two real component calls before capture return their actual
+outputs. Capture recording skips the optional sync probe/validation forwards.
+Each new geometry audits its first two requests, then disables audit output.
+No profiler trace or per-layer synchronization is added.
+
+The native entrypoint is `tests/dfx/perf/scripts/run_benchmark.py`, using
+`tests/dfx/perf/tests/test_wan22_i2v_vllm_omni.json`. Its two-card case uses
+SP2, VAE2, HSDP and VAE slicing. Keep its 832x480/81-frame and
+1280x720/121-frame workloads, four inference steps, two client warmups,
+ten measured requests and concurrency one. This CI deployment uses the
+checkpoint's default precision; it differs from the prior FP8/SP4 matrix.
+Use identical `--ulysses-a2a-permute` settings in both arms, with outer eager
+execution delegating DiT graphs to the controlled real-prefix owner.
+
+Run the complete baseline benchmark first, then the complete enabled
+benchmark. Report native `mean_e2el_ms` without filtering individual requests:
+speedup = baseline mean / overlap mean; latency reduction =
+1 - overlap mean / baseline mean. Record common deployment overrides and
+the experimental integration patch separately from the original CI config.
+Serving qualification must pass before these results are called validated.
+
 AI assistance: Codex prepared the implementation, experiment scripts and
 analysis. The branch is retained for investigation; it is not PR-ready
 production integration.
