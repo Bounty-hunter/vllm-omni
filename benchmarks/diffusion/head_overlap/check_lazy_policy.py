@@ -80,11 +80,16 @@ def main():
         assert all(sum(parts) == heads and min(parts) > 0 for parts in choices)
         assert all(parts[0] == parts[-1] <= parts[1] for parts in choices[1:])
     assert Counter(candidate_index(i, 3) for i in range(24)) == {0: 8, 1: 8, 2: 8}
-    for count in (1, 2, 3, 4):
+    for count in (1, 2, 3):
         cycle = [candidate_index(i, count) for i in range(2 * count * count)]
         assert Counter(cycle) == {i: 2 * count for i in range(count)}
         for position in range(count):
             assert Counter(cycle[position::count]) == {i: 2 for i in range(count)}
+    assert Counter(candidate_index(i, 4) for i in range(16)) == {2: 8, 3: 8}
+    assert Counter(candidate_index(i, 4) for i in range(16, 32)) == {0: 8, 1: 8}
+    for offset in (0, 16):
+        for position in (0, 1):
+            assert len(set(candidate_index(i, 4) for i in range(offset + position, offset + 16, 2))) == 2
     assert choose([[100] * 10, [99] * 10]) == 0
     assert choose([[100] * 5, [70] * 5]) == 0
     assert choose([[100] * 10, [80] * 10, [90] * 10]) == 1
@@ -106,6 +111,7 @@ def main():
     controlled = (preferred[0], preferred[1], preferred[0], preferred[2])
     assert choose_three_then_two([[1000] * 7, [800] * 7, [1000] * 7, [795] * 7], controlled) == 1
     assert choose_three_then_two([[1000] * 7, [1100] * 7, [1000] * 7, [800] * 7], controlled) == 3
+    assert choose_three_then_two([[1000] * 7, [800] * 7, [1200] * 7, [900] * 7], controlled) == 3
     assert choose_three_then_two([[], [], [], []], controlled, paired) == 3
     for calls in (32, 40, 42):
         previous = Counter(preferred[candidate_index(i, 3)] if i < 24 else preferred[0] for i in range(calls))

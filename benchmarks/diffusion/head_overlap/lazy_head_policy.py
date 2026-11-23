@@ -170,12 +170,28 @@ def choose_three_then_two(samples, choices, paired=None):
     control = 2 if len(choices) == 4 else 0
     two = [samples[control], samples[two_index]] if paired is None else paired["whole_vs_two"]
     direct = [samples[1], samples[two_index]] if paired is None else paired["three_vs_two"]
+    if len(choices) == 4:
+        # The two candidates have nearby whole controls in separate layer
+        # neighborhoods. Compare their paired gains on complete four-way
+        # cycles, removing the whole-core drift between those neighborhoods.
+        center = statistics.median(samples[0] + samples[2]) if samples[0] else 0.0
+        direct = [
+            [center + value - whole for value, whole in zip(samples[candidate], samples[baseline])]
+            for baseline, candidate in ((0, 1), (2, 3))
+        ]
     if choose(three) == 1:
         return two_index if choose(two) == 1 and choose(direct) == 1 else 1
     return two_index if choose(two) == 1 else 0
 
 
 def candidate_index(index, count):
+    if count == 4:
+        # Establish a usable double fallback before the heavier triple can
+        # drain eager launch lead. Both halves rotate/reverse their own whole
+        # control. This reorders the same 16 whole + 8 double + 8 triple calls.
+        phase, position = divmod(index % 32, 16)
+        pair = (2, 3) if phase == 0 else (0, 1)
+        return pair[candidate_index(position, 2)]
     cycle, position = divmod(index, count)
     order = list(range(count))
     offset = cycle % count
@@ -460,7 +476,7 @@ class LazyHeadPolicy:
                 # after its eight trials per candidate. Interleave those same
                 # whole calls as matched controls to sustain eager launch lead.
                 # Both controls reuse one plan; no new forward or GPU work.
-                entry.choices = (whole, triple, whole, double) if slots >= 28 else (whole, double)
+                entry.choices = (whole, triple, whole, double) if slots >= 32 else (whole, double)
             if slots < 7 * len(entry.choices):
                 entry.choices = entry.choices[:2]
             if slots < 7 * len(entry.choices):
@@ -578,7 +594,11 @@ class LazyHeadPolicy:
                     host_submission_max_rank_us=submit_times,
                     selected=entry.choices[entry.selected],
                     diagnostic_forced=forced,
-                    pairing="complete rotated cycles on every rank",
+                    pairing=(
+                        "complete rotated pairs on every rank; direct gains adjusted by matched whole controls"
+                        if len(entry.choices) == 4
+                        else "complete rotated cycles on every rank"
+                    ),
                     discovery_calls=entry.calls,
                     sampling_pass_calls=entry.sample_calls,
                     timed_prefix_calls=entry.index,
