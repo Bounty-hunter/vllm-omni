@@ -1,0 +1,4019 @@
+{
+  "metric": "Unprofiled full Omni.generate; hash and persistence excluded",
+  "sources": {
+    "wan": {
+      "source_sha": "995027332a23b7a41e5cd418d32bae7863fd219a",
+      "results_sha256": "f1d23a755efb5b8e00e11223d991ec539a3f698bcdea3c7733609225171f36df",
+      "raw_requests": 260
+    },
+    "h3": {
+      "source_sha": "9cee198a4df75f44a16cc2f17f441f3326016860",
+      "results_sha256": "b100619268db4992cc931144ca3a9cdc59ae6326d8bde2fa72b3885dff168c13",
+      "raw_requests": 104
+    },
+    "wan-confirm": {
+      "source_sha": "ba223fe8d20787b377ef56e339e0328975f971e6",
+      "results_sha256": "cc98a7fd7866cbd4ef2ad3370f95fead4ef6cc138a0090e3ff1078503b1f2039",
+      "raw_requests": 222
+    },
+    "h3-confirm": {
+      "source_sha": "ba223fe8d20787b377ef56e339e0328975f971e6",
+      "results_sha256": "bead0a6acf8dbaf1454e03784d513b1db20349a59bad2d85094daa70a98eb667",
+      "raw_requests": 111
+    }
+  },
+  "rows": [
+    {
+      "run": "wan",
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "head_sizes": [
+        12
+      ],
+      "even": true,
+      "median_ms": 745.2029539272189,
+      "reduction_vs_serial_pct": 0.0,
+      "reduction_vs_equal_pct": -1.3249603405422887,
+      "faster_vs_serial": 0,
+      "faster_vs_equal": 2,
+      "pairs": 8,
+      "median_paired_saved_vs_serial_ms": 0.0,
+      "median_paired_saved_vs_equal_ms": -10.15485730022192,
+      "seed_hashes": {
+        "42": [
+          "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+        ],
+        "43": [
+          "fc0ca535584f626208f7b298f5a9866ee240877c4300607cd564d21a8d66f055"
+        ],
+        "44": [
+          "69659a0126e6a7ee84b395ce797d175e1d239f2e861c0cfbb8ec1c150d74b6a4"
+        ]
+      },
+      "output_shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "samples_ms": [
+        739.1719203442335,
+        740.6499441713095,
+        749.7559636831284,
+        750.1480765640736,
+        761.6082690656185,
+        731.2543634325266,
+        732.8245807439089,
+        778.9799328893423
+      ],
+      "min_ms": 731.2543634325266,
+      "max_ms": 778.9799328893423,
+      "paired_saved_vs_serial_ms": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "paired_saved_vs_equal_ms": [
+        -4.678709432482719,
+        6.565611809492111,
+        -15.63100516796112,
+        -18.044857308268547,
+        -21.610340103507042,
+        -2.9201898723840714,
+        12.445729225873947,
+        -42.55630075931549
+      ],
+      "median_paired_reduction_vs_serial_pct": 0.0,
+      "median_paired_reduction_vs_equal_pct": -1.3831002885345596,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        0.0,
+        0.0
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        -21.610340103507042,
+        6.565611809492111
+      ],
+      "isolated_peer_core_fraction_pct": 55.639515986154564,
+      "estimated_peer_request_fraction_pct": 2.1935501220819456,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 480,
+        "width": 832,
+        "num_frames": 17,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1,
+        "fps": 16
+      }
+    },
+    {
+      "run": "wan",
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "head_sizes": [
+        6,
+        6
+      ],
+      "even": true,
+      "median_ms": 735.4584215208888,
+      "reduction_vs_serial_pct": 1.307634699376382,
+      "reduction_vs_equal_pct": 0.0,
+      "faster_vs_serial": 6,
+      "faster_vs_equal": 0,
+      "pairs": 8,
+      "median_paired_saved_vs_serial_ms": 10.15485730022192,
+      "median_paired_saved_vs_equal_ms": 0.0,
+      "seed_hashes": {
+        "42": [
+          "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+        ],
+        "43": [
+          "fc0ca535584f626208f7b298f5a9866ee240877c4300607cd564d21a8d66f055"
+        ],
+        "44": [
+          "69659a0126e6a7ee84b395ce797d175e1d239f2e861c0cfbb8ec1c150d74b6a4"
+        ]
+      },
+      "output_shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "samples_ms": [
+        734.4932109117508,
+        747.2155559808016,
+        734.1249585151672,
+        732.103219255805,
+        739.9979289621115,
+        728.3341735601425,
+        745.2703099697828,
+        736.4236321300268
+      ],
+      "min_ms": 728.3341735601425,
+      "max_ms": 747.2155559808016,
+      "paired_saved_vs_serial_ms": [
+        4.678709432482719,
+        -6.565611809492111,
+        15.63100516796112,
+        18.044857308268547,
+        21.610340103507042,
+        2.9201898723840714,
+        -12.445729225873947,
+        42.55630075931549
+      ],
+      "paired_saved_vs_equal_ms": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "median_paired_reduction_vs_serial_pct": 1.3588893599347074,
+      "median_paired_reduction_vs_equal_pct": 0.0,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        -6.565611809492111,
+        21.610340103507042
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        0.0,
+        0.0
+      ],
+      "isolated_peer_core_fraction_pct": 55.639515986154564,
+      "estimated_peer_request_fraction_pct": 2.1935501220819456,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 480,
+        "width": 832,
+        "num_frames": 17,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1,
+        "fps": 16
+      }
+    },
+    {
+      "run": "wan",
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "head_sizes": [
+        4,
+        8
+      ],
+      "even": true,
+      "median_ms": 732.6308935880661,
+      "reduction_vs_serial_pct": 1.687065285087514,
+      "reduction_vs_equal_pct": 0.3844578904916919,
+      "faster_vs_serial": 5,
+      "faster_vs_equal": 5,
+      "pairs": 8,
+      "median_paired_saved_vs_serial_ms": 7.118050009012222,
+      "median_paired_saved_vs_equal_ms": 8.18351749330759,
+      "seed_hashes": {
+        "42": [
+          "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+        ],
+        "43": [
+          "fc0ca535584f626208f7b298f5a9866ee240877c4300607cd564d21a8d66f055"
+        ],
+        "44": [
+          "69659a0126e6a7ee84b395ce797d175e1d239f2e861c0cfbb8ec1c150d74b6a4"
+        ]
+      },
+      "output_shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "samples_ms": [
+        735.5828937143087,
+        730.0028707832098,
+        814.1973987221718,
+        724.3465520441532,
+        731.305330991745,
+        758.4779374301434,
+        733.9564561843872,
+        727.8132643550634
+      ],
+      "min_ms": 724.3465520441532,
+      "max_ms": 814.1973987221718,
+      "paired_saved_vs_serial_ms": [
+        3.589026629924774,
+        10.64707338809967,
+        -64.44143503904343,
+        25.80152451992035,
+        30.30293807387352,
+        -27.223573997616768,
+        -1.131875440478325,
+        51.16666853427887
+      ],
+      "paired_saved_vs_equal_ms": [
+        -1.0896828025579453,
+        17.21268519759178,
+        -80.07244020700455,
+        7.756667211651802,
+        8.692597970366478,
+        -30.14376387000084,
+        11.313853785395622,
+        8.610367774963379
+      ],
+      "median_paired_reduction_vs_serial_pct": 0.9615390259297434,
+      "median_paired_reduction_vs_equal_pct": 1.1143592657294819,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        -27.223573997616768,
+        30.30293807387352
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        -30.14376387000084,
+        11.313853785395622
+      ],
+      "isolated_peer_core_fraction_pct": 55.639515986154564,
+      "estimated_peer_request_fraction_pct": 2.1935501220819456,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 480,
+        "width": 832,
+        "num_frames": 17,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1,
+        "fps": 16
+      }
+    },
+    {
+      "run": "wan",
+      "case": "wan5b-480p-f17",
+      "variant": "ratio15",
+      "head_sizes": [
+        2,
+        10
+      ],
+      "even": true,
+      "median_ms": 742.5575461238623,
+      "reduction_vs_serial_pct": 0.3549915884545748,
+      "reduction_vs_equal_pct": -0.9652652543284296,
+      "faster_vs_serial": 4,
+      "faster_vs_equal": 2,
+      "pairs": 8,
+      "median_paired_saved_vs_serial_ms": -1.2618396431207657,
+      "median_paired_saved_vs_equal_ms": -8.167087100446224,
+      "seed_hashes": {
+        "42": [
+          "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+        ],
+        "43": [
+          "fc0ca535584f626208f7b298f5a9866ee240877c4300607cd564d21a8d66f055"
+        ],
+        "44": [
+          "69659a0126e6a7ee84b395ce797d175e1d239f2e861c0cfbb8ec1c150d74b6a4"
+        ]
+      },
+      "output_shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "samples_ms": [
+        743.3599587529898,
+        736.8408273905516,
+        741.7551334947348,
+        802.5951739400625,
+        805.817449465394,
+        735.6915213167667,
+        731.1602216213942,
+        745.1276313513517
+      ],
+      "min_ms": 731.1602216213942,
+      "max_ms": 805.817449465394,
+      "paired_saved_vs_serial_ms": [
+        -4.188038408756256,
+        3.809116780757904,
+        8.000830188393593,
+        -52.44709737598896,
+        -44.209180399775505,
+        -4.4371578842401505,
+        1.6643591225147247,
+        33.85230153799057
+      ],
+      "paired_saved_vs_equal_ms": [
+        -8.866747841238976,
+        10.374728590250015,
+        -7.630174979567528,
+        -70.49195468425751,
+        -65.81952050328255,
+        -7.357347756624222,
+        14.110088348388672,
+        -8.70399922132492
+      ],
+      "median_paired_reduction_vs_serial_pct": -0.1697347678673422,
+      "median_paired_reduction_vs_equal_pct": -1.110642359864169,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        -44.209180399775505,
+        8.000830188393593
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        -65.81952050328255,
+        10.374728590250015
+      ],
+      "isolated_peer_core_fraction_pct": 55.639515986154564,
+      "estimated_peer_request_fraction_pct": 2.1935501220819456,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 480,
+        "width": 832,
+        "num_frames": 17,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1,
+        "fps": 16
+      }
+    },
+    {
+      "run": "wan",
+      "case": "wan5b-480p-f17",
+      "variant": "odd_ratio13",
+      "head_sizes": [
+        3,
+        9
+      ],
+      "even": false,
+      "median_ms": 744.5598980411887,
+      "reduction_vs_serial_pct": 0.08629271833146838,
+      "reduction_vs_equal_pct": -1.2375242779161524,
+      "faster_vs_serial": 3,
+      "faster_vs_equal": 1,
+      "pairs": 8,
+      "median_paired_saved_vs_serial_ms": -6.607034243643284,
+      "median_paired_saved_vs_equal_ms": -11.881998740136623,
+      "seed_hashes": {
+        "42": [
+          "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+        ],
+        "43": [
+          "fc0ca535584f626208f7b298f5a9866ee240877c4300607cd564d21a8d66f055"
+        ],
+        "44": [
+          "69659a0126e6a7ee84b395ce797d175e1d239f2e861c0cfbb8ec1c150d74b6a4"
+        ]
+      },
+      "output_shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "samples_ms": [
+        737.4160587787628,
+        773.5508028417826,
+        759.0015530586243,
+        748.0140868574381,
+        774.0678042173386,
+        736.1873034387827,
+        741.1057092249393,
+        737.383496016264
+      ],
+      "min_ms": 736.1873034387827,
+      "max_ms": 774.0678042173386,
+      "paired_saved_vs_serial_ms": [
+        1.7558615654706955,
+        -32.9008586704731,
+        -9.24558937549591,
+        2.133989706635475,
+        -12.459535151720047,
+        -4.9329400062561035,
+        -8.281128481030464,
+        41.596436873078346
+      ],
+      "paired_saved_vs_equal_ms": [
+        -2.922847867012024,
+        -26.335246860980988,
+        -24.87659454345703,
+        -15.910867601633072,
+        -34.06987525522709,
+        -7.853129878640175,
+        4.164600744843483,
+        -0.9598638862371445
+      ],
+      "median_paired_reduction_vs_serial_pct": -0.9023074076590101,
+      "median_paired_reduction_vs_equal_pct": -1.6257705129083524,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        -12.459535151720047,
+        2.133989706635475
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        -26.335246860980988,
+        -0.9598638862371445
+      ],
+      "isolated_peer_core_fraction_pct": 55.639515986154564,
+      "estimated_peer_request_fraction_pct": 2.1935501220819456,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 480,
+        "width": 832,
+        "num_frames": 17,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1,
+        "fps": 16
+      }
+    },
+    {
+      "run": "wan",
+      "case": "wan5b-480p-f33",
+      "variant": "serial1",
+      "head_sizes": [
+        12
+      ],
+      "even": true,
+      "median_ms": 1260.270742699504,
+      "reduction_vs_serial_pct": 0.0,
+      "reduction_vs_equal_pct": 1.8572613737344554,
+      "faster_vs_serial": 0,
+      "faster_vs_equal": 6,
+      "pairs": 8,
+      "median_paired_saved_vs_serial_ms": 0.0,
+      "median_paired_saved_vs_equal_ms": 12.810219079256058,
+      "seed_hashes": {
+        "42": [
+          "efb8ff1d291bfde750b64f7dd6ea17ff43bfb8bb1567fd1f1d993d72fe488bb0"
+        ],
+        "43": [
+          "97208d5279165ea80462e831b3838adc8e3accfb0c9435cf7a08688fdf1a223b"
+        ],
+        "44": [
+          "38b615e881152f1a0f36c188ed3ff3dcb4b2ffaf4488eb5dae22d8639ab7dc87"
+        ]
+      },
+      "output_shapes": [
+        [
+          1,
+          33,
+          480,
+          832,
+          3
+        ]
+      ],
+      "samples_ms": [
+        1260.8003951609135,
+        1260.9385773539543,
+        1259.0863015502691,
+        1254.7344248741865,
+        1251.6878508031368,
+        1331.0230746865273,
+        1259.7410902380943,
+        1299.1591524332762
+      ],
+      "min_ms": 1251.6878508031368,
+      "max_ms": 1331.0230746865273,
+      "paired_saved_vs_serial_ms": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "paired_saved_vs_equal_ms": [
+        1.839417964220047,
+        7.507927715778351,
+        41.9317502528429,
+        18.112510442733765,
+        57.05068074166775,
+        -38.78285922110081,
+        110.94189807772636,
+        -23.15894514322281
+      ],
+      "median_paired_reduction_vs_serial_pct": 0.0,
+      "median_paired_reduction_vs_equal_pct": 1.0074457332123394,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        0.0,
+        0.0
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        -23.15894514322281,
+        57.05068074166775
+      ],
+      "isolated_peer_core_fraction_pct": 44.2916519496356,
+      "estimated_peer_request_fraction_pct": 1.8707979533448598,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 480,
+        "width": 832,
+        "num_frames": 33,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1,
+        "fps": 16
+      }
+    },
+    {
+      "run": "wan",
+      "case": "wan5b-480p-f33",
+      "variant": "equal",
+      "head_sizes": [
+        6,
+        6
+      ],
+      "even": true,
+      "median_ms": 1284.12021137774,
+      "reduction_vs_serial_pct": -1.8924083429208527,
+      "reduction_vs_equal_pct": 0.0,
+      "faster_vs_serial": 2,
+      "faster_vs_equal": 0,
+      "pairs": 8,
+      "median_paired_saved_vs_serial_ms": -12.810219079256058,
+      "median_paired_saved_vs_equal_ms": 0.0,
+      "seed_hashes": {
+        "42": [
+          "efb8ff1d291bfde750b64f7dd6ea17ff43bfb8bb1567fd1f1d993d72fe488bb0"
+        ],
+        "43": [
+          "97208d5279165ea80462e831b3838adc8e3accfb0c9435cf7a08688fdf1a223b"
+        ],
+        "44": [
+          "38b615e881152f1a0f36c188ed3ff3dcb4b2ffaf4488eb5dae22d8639ab7dc87"
+        ]
+      },
+      "output_shapes": [
+        [
+          1,
+          33,
+          480,
+          832,
+          3
+        ]
+      ],
+      "samples_ms": [
+        1262.6398131251335,
+        1268.4465050697327,
+        1301.018051803112,
+        1272.8469353169203,
+        1308.7385315448046,
+        1292.2402154654264,
+        1370.6829883158207,
+        1276.0002072900534
+      ],
+      "min_ms": 1262.6398131251335,
+      "max_ms": 1370.6829883158207,
+      "paired_saved_vs_serial_ms": [
+        -1.839417964220047,
+        -7.507927715778351,
+        -41.9317502528429,
+        -18.112510442733765,
+        -57.05068074166775,
+        38.78285922110081,
+        -110.94189807772636,
+        23.15894514322281
+      ],
+      "paired_saved_vs_equal_ms": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "median_paired_reduction_vs_serial_pct": -1.0194785706926157,
+      "median_paired_reduction_vs_equal_pct": 0.0,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        -57.05068074166775,
+        23.15894514322281
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        0.0,
+        0.0
+      ],
+      "isolated_peer_core_fraction_pct": 44.2916519496356,
+      "estimated_peer_request_fraction_pct": 1.8707979533448598,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 480,
+        "width": 832,
+        "num_frames": 33,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1,
+        "fps": 16
+      }
+    },
+    {
+      "run": "wan",
+      "case": "wan5b-480p-f33",
+      "variant": "ratio12",
+      "head_sizes": [
+        4,
+        8
+      ],
+      "even": true,
+      "median_ms": 1286.5234529599547,
+      "reduction_vs_serial_pct": -2.0831008267491358,
+      "reduction_vs_equal_pct": -0.1871508259835254,
+      "faster_vs_serial": 3,
+      "faster_vs_equal": 4,
+      "pairs": 8,
+      "median_paired_saved_vs_serial_ms": -21.033884957432747,
+      "median_paired_saved_vs_equal_ms": 7.712573744356632,
+      "seed_hashes": {
+        "42": [
+          "efb8ff1d291bfde750b64f7dd6ea17ff43bfb8bb1567fd1f1d993d72fe488bb0"
+        ],
+        "43": [
+          "97208d5279165ea80462e831b3838adc8e3accfb0c9435cf7a08688fdf1a223b"
+        ],
+        "44": [
+          "38b615e881152f1a0f36c188ed3ff3dcb4b2ffaf4488eb5dae22d8639ab7dc87"
+        ]
+      },
+      "output_shapes": [
+        [
+          1,
+          33,
+          480,
+          832,
+          3
+        ]
+      ],
+      "samples_ms": [
+        1297.8247590363026,
+        1276.5615470707417,
+        1256.1000492423773,
+        1249.306745827198,
+        1354.158392176032,
+        1252.2734999656677,
+        1296.4853588491678,
+        1325.6039526313543
+      ],
+      "min_ms": 1249.306745827198,
+      "max_ms": 1354.158392176032,
+      "paired_saved_vs_serial_ms": [
+        -37.0243638753891,
+        -15.622969716787338,
+        2.9862523078918457,
+        5.427679046988487,
+        -102.47054137289524,
+        78.74957472085953,
+        -36.744268611073494,
+        -26.444800198078156
+      ],
+      "paired_saved_vs_equal_ms": [
+        -35.18494591116905,
+        -8.115042001008987,
+        44.91800256073475,
+        23.540189489722252,
+        -45.41986063122749,
+        39.96671549975872,
+        74.19762946665287,
+        -49.603745341300964
+      ],
+      "median_paired_reduction_vs_serial_pct": -1.6372636471936426,
+      "median_paired_reduction_vs_equal_pct": 0.6048250881388653,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        -37.0243638753891,
+        5.427679046988487
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        -45.41986063122749,
+        44.91800256073475
+      ],
+      "isolated_peer_core_fraction_pct": 44.2916519496356,
+      "estimated_peer_request_fraction_pct": 1.8707979533448598,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 480,
+        "width": 832,
+        "num_frames": 33,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1,
+        "fps": 16
+      }
+    },
+    {
+      "run": "wan",
+      "case": "wan5b-480p-f33",
+      "variant": "ratio15",
+      "head_sizes": [
+        2,
+        10
+      ],
+      "even": true,
+      "median_ms": 1279.3519711121917,
+      "reduction_vs_serial_pct": -1.5140578739307815,
+      "reduction_vs_equal_pct": 0.37132351187217566,
+      "faster_vs_serial": 2,
+      "faster_vs_equal": 5,
+      "pairs": 8,
+      "median_paired_saved_vs_serial_ms": -9.559163823723793,
+      "median_paired_saved_vs_equal_ms": 3.1916042789816856,
+      "seed_hashes": {
+        "42": [
+          "efb8ff1d291bfde750b64f7dd6ea17ff43bfb8bb1567fd1f1d993d72fe488bb0"
+        ],
+        "43": [
+          "97208d5279165ea80462e831b3838adc8e3accfb0c9435cf7a08688fdf1a223b"
+        ],
+        "44": [
+          "38b615e881152f1a0f36c188ed3ff3dcb4b2ffaf4488eb5dae22d8639ab7dc87"
+        ]
+      },
+      "output_shapes": [
+        [
+          1,
+          33,
+          480,
+          832,
+          3
+        ]
+      ],
+      "samples_ms": [
+        1292.17473231256,
+        1261.390956118703,
+        1260.478887706995,
+        1272.4601663649082,
+        1328.2630741596222,
+        1286.2437758594751,
+        1257.2556603699923,
+        1527.1263048052788
+      ],
+      "min_ms": 1257.2556603699923,
+      "max_ms": 1527.1263048052788,
+      "paired_saved_vs_serial_ms": [
+        -31.374337151646614,
+        -0.4523787647485733,
+        -1.3925861567258835,
+        -17.725741490721703,
+        -76.57522335648537,
+        44.779298827052116,
+        2.4854298681020737,
+        -227.9671523720026
+      ],
+      "paired_saved_vs_equal_ms": [
+        -29.534919187426567,
+        7.0555489510297775,
+        40.53916409611702,
+        0.3867689520120621,
+        -19.52454261481762,
+        5.996439605951309,
+        113.42732794582844,
+        -251.1260975152254
+      ],
+      "median_paired_reduction_vs_serial_pct": -0.7616557721721239,
+      "median_paired_reduction_vs_equal_pct": 0.24721028448255986,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        -76.57522335648537,
+        2.4854298681020737
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        -29.534919187426567,
+        40.53916409611702
+      ],
+      "isolated_peer_core_fraction_pct": 44.2916519496356,
+      "estimated_peer_request_fraction_pct": 1.8707979533448598,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 480,
+        "width": 832,
+        "num_frames": 33,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1,
+        "fps": 16
+      }
+    },
+    {
+      "run": "wan",
+      "case": "wan5b-480p-f33",
+      "variant": "odd_ratio13",
+      "head_sizes": [
+        3,
+        9
+      ],
+      "even": false,
+      "median_ms": 1264.0210716053843,
+      "reduction_vs_serial_pct": -0.2975812084510694,
+      "reduction_vs_equal_pct": 1.5652070261234403,
+      "faster_vs_serial": 6,
+      "faster_vs_equal": 6,
+      "pairs": 8,
+      "median_paired_saved_vs_serial_ms": 4.859348759055138,
+      "median_paired_saved_vs_equal_ms": 10.343857109546661,
+      "seed_hashes": {
+        "42": [
+          "efb8ff1d291bfde750b64f7dd6ea17ff43bfb8bb1567fd1f1d993d72fe488bb0"
+        ],
+        "43": [
+          "97208d5279165ea80462e831b3838adc8e3accfb0c9435cf7a08688fdf1a223b"
+        ],
+        "44": [
+          "38b615e881152f1a0f36c188ed3ff3dcb4b2ffaf4488eb5dae22d8639ab7dc87"
+        ]
+      },
+      "output_shapes": [
+        [
+          1,
+          33,
+          480,
+          832,
+          3
+        ]
+      ],
+      "samples_ms": [
+        1259.9616348743439,
+        1259.172523394227,
+        1250.8711516857147,
+        1274.4177244603634,
+        1268.0805083364248,
+        1280.8264829218388,
+        1251.7884466797113,
+        1278.1152203679085
+      ],
+      "min_ms": 1250.8711516857147,
+      "max_ms": 1280.8264829218388,
+      "paired_saved_vs_serial_ms": [
+        0.8387602865695953,
+        1.7660539597272873,
+        8.215149864554405,
+        -19.683299586176872,
+        -16.392657533288002,
+        50.19659176468849,
+        7.952643558382988,
+        21.0439320653677
+      ],
+      "paired_saved_vs_equal_ms": [
+        2.6781782507896423,
+        9.273981675505638,
+        50.14690011739731,
+        -1.5707891434431076,
+        40.658023208379745,
+        11.413732543587685,
+        118.89454163610935,
+        -2.11501307785511
+      ],
+      "median_paired_reduction_vs_serial_pct": 0.3856752950558697,
+      "median_paired_reduction_vs_equal_pct": 0.8071903626383776,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        -16.392657533288002,
+        21.0439320653677
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        -1.5707891434431076,
+        50.14690011739731
+      ],
+      "isolated_peer_core_fraction_pct": 44.2916519496356,
+      "estimated_peer_request_fraction_pct": 1.8707979533448598,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 480,
+        "width": 832,
+        "num_frames": 33,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1,
+        "fps": 16
+      }
+    },
+    {
+      "run": "wan",
+      "case": "wan5b-480p-f65",
+      "variant": "serial1",
+      "head_sizes": [
+        12
+      ],
+      "even": true,
+      "median_ms": 2417.777652852237,
+      "reduction_vs_serial_pct": 0.0,
+      "reduction_vs_equal_pct": 5.5552685767527175,
+      "faster_vs_serial": 0,
+      "faster_vs_equal": 5,
+      "pairs": 8,
+      "median_paired_saved_vs_serial_ms": 0.0,
+      "median_paired_saved_vs_equal_ms": 32.38551039248705,
+      "seed_hashes": {
+        "42": [
+          "896e17f26ae08e97a0c5c6930e566d6f115b8b2ff7c397cf53959340b26aad93"
+        ],
+        "43": [
+          "3d1a32bae2ea6e3b198380027e663e0f7eb99092d24bf8ef7b3ef2589dcb3cf3"
+        ],
+        "44": [
+          "d24e85ab573778f1777e849cd59f7c18832ea0a2a8aa64c9eb7ee3ecd3344dfc"
+        ]
+      },
+      "output_shapes": [
+        [
+          1,
+          65,
+          480,
+          832,
+          3
+        ]
+      ],
+      "samples_ms": [
+        2417.310878634453,
+        2382.7499225735664,
+        2672.9141660034657,
+        2514.2508074641228,
+        2605.2010878920555,
+        2418.2444270700216,
+        2381.86807744205,
+        2403.6077819764614
+      ],
+      "min_ms": 2381.86807744205,
+      "max_ms": 2672.9141660034657,
+      "paired_saved_vs_serial_ms": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "paired_saved_vs_equal_ms": [
+        57.15129338204861,
+        175.04460364580154,
+        -85.33517271280289,
+        7.619727402925491,
+        -34.986935555934906,
+        143.94522458314896,
+        603.7815324962139,
+        -19.491730257868767
+      ],
+      "median_paired_reduction_vs_serial_pct": 0.0,
+      "median_paired_reduction_vs_equal_pct": 1.305895461050835,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        0.0,
+        0.0
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        -34.986935555934906,
+        175.04460364580154
+      ],
+      "isolated_peer_core_fraction_pct": 28.048293588524952,
+      "estimated_peer_request_fraction_pct": 1.479560385811889,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 480,
+        "width": 832,
+        "num_frames": 65,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1,
+        "fps": 16
+      }
+    },
+    {
+      "run": "wan",
+      "case": "wan5b-480p-f65",
+      "variant": "equal",
+      "head_sizes": [
+        6,
+        6
+      ],
+      "even": true,
+      "median_ms": 2559.9920889362693,
+      "reduction_vs_serial_pct": -5.882031208132914,
+      "reduction_vs_equal_pct": 0.0,
+      "faster_vs_serial": 3,
+      "faster_vs_equal": 0,
+      "pairs": 8,
+      "median_paired_saved_vs_serial_ms": -32.38551039248705,
+      "median_paired_saved_vs_equal_ms": 0.0,
+      "seed_hashes": {
+        "42": [
+          "896e17f26ae08e97a0c5c6930e566d6f115b8b2ff7c397cf53959340b26aad93"
+        ],
+        "43": [
+          "3d1a32bae2ea6e3b198380027e663e0f7eb99092d24bf8ef7b3ef2589dcb3cf3"
+        ],
+        "44": [
+          "d24e85ab573778f1777e849cd59f7c18832ea0a2a8aa64c9eb7ee3ecd3344dfc"
+        ]
+      },
+      "output_shapes": [
+        [
+          1,
+          65,
+          480,
+          832,
+          3
+        ]
+      ],
+      "samples_ms": [
+        2474.4621720165014,
+        2557.794526219368,
+        2587.5789932906628,
+        2521.8705348670483,
+        2570.2141523361206,
+        2562.1896516531706,
+        2985.649609938264,
+        2384.1160517185926
+      ],
+      "min_ms": 2384.1160517185926,
+      "max_ms": 2985.649609938264,
+      "paired_saved_vs_serial_ms": [
+        -57.15129338204861,
+        -175.04460364580154,
+        85.33517271280289,
+        -7.619727402925491,
+        34.986935555934906,
+        -143.94522458314896,
+        -603.7815324962139,
+        19.491730257868767
+      ],
+      "paired_saved_vs_equal_ms": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "median_paired_reduction_vs_serial_pct": -1.3336562067065612,
+      "median_paired_reduction_vs_equal_pct": 0.0,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        -175.04460364580154,
+        34.986935555934906
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        0.0,
+        0.0
+      ],
+      "isolated_peer_core_fraction_pct": 28.048293588524952,
+      "estimated_peer_request_fraction_pct": 1.479560385811889,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 480,
+        "width": 832,
+        "num_frames": 65,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1,
+        "fps": 16
+      }
+    },
+    {
+      "run": "wan",
+      "case": "wan5b-480p-f65",
+      "variant": "ratio12",
+      "head_sizes": [
+        4,
+        8
+      ],
+      "even": true,
+      "median_ms": 2584.164846688509,
+      "reduction_vs_serial_pct": -6.881823630059027,
+      "reduction_vs_equal_pct": -0.9442512676780965,
+      "faster_vs_serial": 2,
+      "faster_vs_equal": 3,
+      "pairs": 8,
+      "median_paired_saved_vs_serial_ms": -70.48850785940886,
+      "median_paired_saved_vs_equal_ms": -34.33322533965111,
+      "seed_hashes": {
+        "42": [
+          "896e17f26ae08e97a0c5c6930e566d6f115b8b2ff7c397cf53959340b26aad93"
+        ],
+        "43": [
+          "3d1a32bae2ea6e3b198380027e663e0f7eb99092d24bf8ef7b3ef2589dcb3cf3"
+        ],
+        "44": [
+          "d24e85ab573778f1777e849cd59f7c18832ea0a2a8aa64c9eb7ee3ecd3344dfc"
+        ]
+      },
+      "output_shapes": [
+        [
+          1,
+          65,
+          480,
+          832,
+          3
+        ]
+      ],
+      "samples_ms": [
+        2433.9908231049776,
+        2564.4505079835653,
+        2724.2628037929535,
+        2603.8791853934526,
+        2787.128770723939,
+        2624.2001205682755,
+        2376.250246539712,
+        2365.231428295374
+      ],
+      "min_ms": 2365.231428295374,
+      "max_ms": 2787.128770723939,
+      "paired_saved_vs_serial_ms": [
+        -16.679944470524788,
+        -181.7005854099989,
+        -51.34863778948784,
+        -89.62837792932987,
+        -181.92768283188343,
+        -205.95569349825382,
+        5.617830902338028,
+        38.376353681087494
+      ],
+      "paired_saved_vs_equal_ms": [
+        40.47134891152382,
+        -6.6559817641973495,
+        -136.68381050229073,
+        -82.00865052640438,
+        -216.91461838781834,
+        -62.010468915104866,
+        609.3993633985519,
+        18.884623423218727
+      ],
+      "median_paired_reduction_vs_serial_pct": -2.7429438631388234,
+      "median_paired_reduction_vs_equal_pct": -1.3402186638109288,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        -181.92768283188343,
+        5.617830902338028
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        -136.68381050229073,
+        40.47134891152382
+      ],
+      "isolated_peer_core_fraction_pct": 28.048293588524952,
+      "estimated_peer_request_fraction_pct": 1.479560385811889,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 480,
+        "width": 832,
+        "num_frames": 65,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1,
+        "fps": 16
+      }
+    },
+    {
+      "run": "wan",
+      "case": "wan5b-480p-f65",
+      "variant": "ratio15",
+      "head_sizes": [
+        2,
+        10
+      ],
+      "even": true,
+      "median_ms": 2459.564732387662,
+      "reduction_vs_serial_pct": -1.7283259892045388,
+      "reduction_vs_equal_pct": 3.9229557381303093,
+      "faster_vs_serial": 3,
+      "faster_vs_equal": 6,
+      "pairs": 8,
+      "median_paired_saved_vs_serial_ms": -34.915403462946415,
+      "median_paired_saved_vs_equal_ms": 54.89019118249416,
+      "seed_hashes": {
+        "42": [
+          "896e17f26ae08e97a0c5c6930e566d6f115b8b2ff7c397cf53959340b26aad93"
+        ],
+        "43": [
+          "3d1a32bae2ea6e3b198380027e663e0f7eb99092d24bf8ef7b3ef2589dcb3cf3"
+        ],
+        "44": [
+          "d24e85ab573778f1777e849cd59f7c18832ea0a2a8aa64c9eb7ee3ecd3344dfc"
+        ]
+      },
+      "output_shapes": [
+        [
+          1,
+          65,
+          480,
+          832,
+          3
+        ]
+      ],
+      "samples_ms": [
+        2446.8384943902493,
+        2458.095984533429,
+        2713.217357173562,
+        2645.592888817191,
+        2497.3614681512117,
+        2461.0334802418947,
+        2357.4383966624737,
+        2347.188353538513
+      ],
+      "min_ms": 2347.188353538513,
+      "max_ms": 2713.217357173562,
+      "paired_saved_vs_serial_ms": [
+        -29.527615755796432,
+        -75.34606195986271,
+        -40.3031911700964,
+        -131.34208135306835,
+        107.83961974084377,
+        -42.78905317187309,
+        24.4296807795763,
+        56.41942843794823
+      ],
+      "paired_saved_vs_equal_ms": [
+        27.623677626252174,
+        99.69854168593884,
+        -125.63836388289928,
+        -123.72235395014286,
+        72.85268418490887,
+        101.15617141127586,
+        628.2112132757902,
+        36.92769818007946
+      ],
+      "median_paired_reduction_vs_serial_pct": -1.3646719240719363,
+      "median_paired_reduction_vs_equal_pct": 2.1917019146694074,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        -75.34606195986271,
+        56.41942843794823
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        -123.72235395014286,
+        101.15617141127586
+      ],
+      "isolated_peer_core_fraction_pct": 28.048293588524952,
+      "estimated_peer_request_fraction_pct": 1.479560385811889,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 480,
+        "width": 832,
+        "num_frames": 65,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1,
+        "fps": 16
+      }
+    },
+    {
+      "run": "wan",
+      "case": "wan5b-480p-f65",
+      "variant": "odd_ratio13",
+      "head_sizes": [
+        3,
+        9
+      ],
+      "even": false,
+      "median_ms": 2546.6477116569877,
+      "reduction_vs_serial_pct": -5.3301038105271275,
+      "reduction_vs_equal_pct": 0.5212663483201031,
+      "faster_vs_serial": 3,
+      "faster_vs_equal": 4,
+      "pairs": 8,
+      "median_paired_saved_vs_serial_ms": -25.740887969732285,
+      "median_paired_saved_vs_equal_ms": -10.606992058455944,
+      "seed_hashes": {
+        "42": [
+          "896e17f26ae08e97a0c5c6930e566d6f115b8b2ff7c397cf53959340b26aad93"
+        ],
+        "43": [
+          "3d1a32bae2ea6e3b198380027e663e0f7eb99092d24bf8ef7b3ef2589dcb3cf3"
+        ],
+        "44": [
+          "d24e85ab573778f1777e849cd59f7c18832ea0a2a8aa64c9eb7ee3ecd3344dfc"
+        ]
+      },
+      "output_shapes": [
+        [
+          1,
+          65,
+          480,
+          832,
+          3
+        ]
+      ],
+      "samples_ms": [
+        2428.201897069812,
+        2672.9871425777674,
+        2579.9467638134956,
+        2554.8415649682283,
+        2538.453858345747,
+        2591.0358652472496,
+        2377.5472678244114,
+        2536.417094990611
+      ],
+      "min_ms": 2377.5472678244114,
+      "max_ms": 2672.9871425777674,
+      "paired_saved_vs_serial_ms": [
+        -10.891018435359001,
+        -290.23722000420094,
+        92.96740218997002,
+        -40.59075750410557,
+        66.74722954630852,
+        -172.79143817722797,
+        4.320809617638588,
+        -132.80931301414967
+      ],
+      "paired_saved_vs_equal_ms": [
+        46.260274946689606,
+        -115.19261635839939,
+        7.6322294771671295,
+        -32.97103010118008,
+        31.76029399037361,
+        -28.846213594079018,
+        608.1023421138525,
+        -152.30104327201843
+      ],
+      "median_paired_reduction_vs_serial_pct": -1.0324851360800966,
+      "median_paired_reduction_vs_equal_pct": -0.41544293154952205,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        -172.79143817722797,
+        66.74722954630852
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        -115.19261635839939,
+        46.260274946689606
+      ],
+      "isolated_peer_core_fraction_pct": 28.048293588524952,
+      "estimated_peer_request_fraction_pct": 1.479560385811889,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 480,
+        "width": 832,
+        "num_frames": 65,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1,
+        "fps": 16
+      }
+    },
+    {
+      "run": "wan",
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "head_sizes": [
+        12
+      ],
+      "even": true,
+      "median_ms": 2494.2526426166296,
+      "reduction_vs_serial_pct": 0.0,
+      "reduction_vs_equal_pct": 1.8504178362335848,
+      "faster_vs_serial": 0,
+      "faster_vs_equal": 5,
+      "pairs": 8,
+      "median_paired_saved_vs_serial_ms": 0.0,
+      "median_paired_saved_vs_equal_ms": 22.234833799302578,
+      "seed_hashes": {
+        "42": [
+          "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+        ],
+        "43": [
+          "b22f55dfe1b33a91a7fe4119cc086f84944d6a9eedf37c2368ab8a54081102a3"
+        ],
+        "44": [
+          "2cbfb34f21dc05f7b2b2da09f00a1c34316bd771c513f22f2de8a26f93a21d08"
+        ]
+      },
+      "output_shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "samples_ms": [
+        2483.4030214697123,
+        2758.965529501438,
+        2818.0945850908756,
+        2477.5719344615936,
+        2487.4286744743586,
+        2516.7158264666796,
+        2496.260244399309,
+        2492.24504083395
+      ],
+      "min_ms": 2477.5719344615936,
+      "max_ms": 2818.0945850908756,
+      "paired_saved_vs_serial_ms": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "paired_saved_vs_equal_ms": [
+        259.24469344317913,
+        168.86120103299618,
+        16.338350251317024,
+        28.13131734728813,
+        -21.484974771738052,
+        -74.36307892203331,
+        -31.235359609127045,
+        84.60547402501106
+      ],
+      "median_paired_reduction_vs_serial_pct": 0.0,
+      "median_paired_reduction_vs_equal_pct": 0.8495577228717615,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        0.0,
+        0.0
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        -31.235359609127045,
+        168.86120103299618
+      ],
+      "isolated_peer_core_fraction_pct": 23.740739523577066,
+      "estimated_peer_request_fraction_pct": 1.658949814214029,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 720,
+        "width": 1280,
+        "num_frames": 33,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1,
+        "fps": 16
+      }
+    },
+    {
+      "run": "wan",
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "head_sizes": [
+        6,
+        6
+      ],
+      "even": true,
+      "median_ms": 2541.2768833339214,
+      "reduction_vs_serial_pct": -1.885303834657279,
+      "reduction_vs_equal_pct": 0.0,
+      "faster_vs_serial": 3,
+      "faster_vs_equal": 0,
+      "pairs": 8,
+      "median_paired_saved_vs_serial_ms": -22.234833799302578,
+      "median_paired_saved_vs_equal_ms": 0.0,
+      "seed_hashes": {
+        "42": [
+          "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+        ],
+        "43": [
+          "b22f55dfe1b33a91a7fe4119cc086f84944d6a9eedf37c2368ab8a54081102a3"
+        ],
+        "44": [
+          "2cbfb34f21dc05f7b2b2da09f00a1c34316bd771c513f22f2de8a26f93a21d08"
+        ]
+      },
+      "output_shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "samples_ms": [
+        2742.6477149128914,
+        2927.8267305344343,
+        2834.4329353421926,
+        2505.7032518088818,
+        2465.9436997026205,
+        2442.3527475446463,
+        2465.024884790182,
+        2576.850514858961
+      ],
+      "min_ms": 2442.3527475446463,
+      "max_ms": 2927.8267305344343,
+      "paired_saved_vs_serial_ms": [
+        -259.24469344317913,
+        -168.86120103299618,
+        -16.338350251317024,
+        -28.13131734728813,
+        21.484974771738052,
+        74.36307892203331,
+        31.235359609127045,
+        -84.60547402501106
+      ],
+      "paired_saved_vs_equal_ms": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "median_paired_reduction_vs_serial_pct": -0.8576024159039493,
+      "median_paired_reduction_vs_equal_pct": 0.0,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        -168.86120103299618,
+        31.235359609127045
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        0.0,
+        0.0
+      ],
+      "isolated_peer_core_fraction_pct": 23.740739523577066,
+      "estimated_peer_request_fraction_pct": 1.658949814214029,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 720,
+        "width": 1280,
+        "num_frames": 33,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1,
+        "fps": 16
+      }
+    },
+    {
+      "run": "wan",
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "head_sizes": [
+        4,
+        8
+      ],
+      "even": true,
+      "median_ms": 2457.3727482929826,
+      "reduction_vs_serial_pct": 1.4785949784524501,
+      "reduction_vs_equal_pct": 3.3016526294790967,
+      "faster_vs_serial": 6,
+      "faster_vs_equal": 7,
+      "pairs": 8,
+      "median_paired_saved_vs_serial_ms": 53.14104352146387,
+      "median_paired_saved_vs_equal_ms": 84.70129314810038,
+      "seed_hashes": {
+        "42": [
+          "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+        ],
+        "43": [
+          "b22f55dfe1b33a91a7fe4119cc086f84944d6a9eedf37c2368ab8a54081102a3"
+        ],
+        "44": [
+          "2cbfb34f21dc05f7b2b2da09f00a1c34316bd771c513f22f2de8a26f93a21d08"
+        ]
+      },
+      "output_shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "samples_ms": [
+        2531.0700368136168,
+        2600.559139624238,
+        2457.077631726861,
+        2993.220703676343,
+        2425.9501844644547,
+        2441.030442714691,
+        2457.667864859104,
+        2447.441443800926
+      ],
+      "min_ms": 2425.9501844644547,
+      "max_ms": 2993.220703676343,
+      "paired_saved_vs_serial_ms": [
+        -47.667015343904495,
+        158.40638987720013,
+        361.0169533640146,
+        -515.6487692147493,
+        61.47849000990391,
+        75.68538375198841,
+        38.592379540205,
+        44.803597033023834
+      ],
+      "paired_saved_vs_equal_ms": [
+        211.57767809927464,
+        327.2675909101963,
+        377.35530361533165,
+        -487.5174518674612,
+        39.993515238165855,
+        1.322304829955101,
+        7.357019931077957,
+        129.4090710580349
+      ],
+      "median_paired_reduction_vs_serial_pct": 2.1346441675502352,
+      "median_paired_reduction_vs_equal_pct": 3.321910018271783,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        -47.667015343904495,
+        158.40638987720013
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        1.322304829955101,
+        327.2675909101963
+      ],
+      "isolated_peer_core_fraction_pct": 23.740739523577066,
+      "estimated_peer_request_fraction_pct": 1.658949814214029,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 720,
+        "width": 1280,
+        "num_frames": 33,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1,
+        "fps": 16
+      }
+    },
+    {
+      "run": "wan",
+      "case": "wan5b-720p-f33",
+      "variant": "ratio15",
+      "head_sizes": [
+        2,
+        10
+      ],
+      "even": true,
+      "median_ms": 2710.001806728542,
+      "reduction_vs_serial_pct": -8.64985208096553,
+      "reduction_vs_equal_pct": -6.639375839017937,
+      "faster_vs_serial": 4,
+      "faster_vs_equal": 2,
+      "pairs": 8,
+      "median_paired_saved_vs_serial_ms": -52.82439198344946,
+      "median_paired_saved_vs_equal_ms": -62.139494344592094,
+      "seed_hashes": {
+        "42": [
+          "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+        ],
+        "43": [
+          "b22f55dfe1b33a91a7fe4119cc086f84944d6a9eedf37c2368ab8a54081102a3"
+        ],
+        "44": [
+          "2cbfb34f21dc05f7b2b2da09f00a1c34316bd771c513f22f2de8a26f93a21d08"
+        ]
+      },
+      "output_shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "samples_ms": [
+        2937.981501221657,
+        3107.8562680631876,
+        2933.750733733177,
+        3071.646997705102,
+        2449.8284962028265,
+        2467.313937842846,
+        2486.2528797239065,
+        2435.0473526865244
+      ],
+      "min_ms": 2435.0473526865244,
+      "max_ms": 3107.8562680631876,
+      "paired_saved_vs_serial_ms": [
+        -454.57847975194454,
+        -348.89073856174946,
+        -115.65614864230156,
+        -594.0750632435083,
+        37.60017827153206,
+        49.401888623833656,
+        10.007364675402641,
+        57.19768814742565
+      ],
+      "paired_saved_vs_equal_ms": [
+        -195.3337863087654,
+        -180.02953752875328,
+        -99.31779839098454,
+        -565.9437458962202,
+        16.115203499794006,
+        -24.961190298199654,
+        -21.227994933724403,
+        141.8031621724367
+      ],
+      "median_paired_reduction_vs_serial_pct": -1.8515803024822461,
+      "median_paired_reduction_vs_equal_pct": -2.262994160632607,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        -454.57847975194454,
+        49.401888623833656
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        -195.3337863087654,
+        16.115203499794006
+      ],
+      "isolated_peer_core_fraction_pct": 23.740739523577066,
+      "estimated_peer_request_fraction_pct": 1.658949814214029,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 720,
+        "width": 1280,
+        "num_frames": 33,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1,
+        "fps": 16
+      }
+    },
+    {
+      "run": "wan",
+      "case": "wan5b-720p-f33",
+      "variant": "odd_ratio13",
+      "head_sizes": [
+        3,
+        9
+      ],
+      "even": false,
+      "median_ms": 2530.471282079816,
+      "reduction_vs_serial_pct": -1.4520838364308841,
+      "reduction_vs_equal_pct": 0.4252036181090828,
+      "faster_vs_serial": 3,
+      "faster_vs_equal": 5,
+      "pairs": 8,
+      "median_paired_saved_vs_serial_ms": -4.360017366707325,
+      "median_paired_saved_vs_equal_ms": 14.60993755608797,
+      "seed_hashes": {
+        "42": [
+          "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+        ],
+        "43": [
+          "b22f55dfe1b33a91a7fe4119cc086f84944d6a9eedf37c2368ab8a54081102a3"
+        ],
+        "44": [
+          "2cbfb34f21dc05f7b2b2da09f00a1c34316bd771c513f22f2de8a26f93a21d08"
+        ]
+      },
+      "output_shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "samples_ms": [
+        2642.4527280032635,
+        2682.8620582818985,
+        2967.36198104918,
+        2486.138556152582,
+        2487.5820875167847,
+        2573.360476642847,
+        2455.3697053343058,
+        2450.675558298826
+      ],
+      "min_ms": 2450.675558298826,
+      "max_ms": 2967.36198104918,
+      "paired_saved_vs_serial_ms": [
+        -159.04970653355122,
+        76.10347121953964,
+        -149.2673959583044,
+        -8.56662169098854,
+        -0.15341304242610931,
+        -56.64465017616749,
+        40.890539065003395,
+        41.569482535123825
+      ],
+      "paired_saved_vs_equal_ms": [
+        100.19498690962791,
+        244.96467225253582,
+        -132.92904570698738,
+        19.56469565629959,
+        -21.63838781416416,
+        -131.0077290982008,
+        9.65517945587635,
+        126.17495656013489
+      ],
+      "median_paired_reduction_vs_serial_pct": -0.17596717766716108,
+      "median_paired_reduction_vs_equal_pct": 0.5862467338075585,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        -149.2673959583044,
+        41.569482535123825
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        -131.0077290982008,
+        126.17495656013489
+      ],
+      "isolated_peer_core_fraction_pct": 23.740739523577066,
+      "estimated_peer_request_fraction_pct": 1.658949814214029,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 720,
+        "width": 1280,
+        "num_frames": 33,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1,
+        "fps": 16
+      }
+    },
+    {
+      "run": "h3",
+      "case": "h3-3k",
+      "variant": "serial1",
+      "head_sizes": [
+        14
+      ],
+      "even": true,
+      "median_ms": 1406.2355617061257,
+      "reduction_vs_serial_pct": 0.0,
+      "reduction_vs_equal_pct": -3.866632487867377,
+      "faster_vs_serial": 0,
+      "faster_vs_equal": 0,
+      "pairs": 8,
+      "median_paired_saved_vs_serial_ms": 0.0,
+      "median_paired_saved_vs_equal_ms": -54.93604578077793,
+      "seed_hashes": {
+        "42": [
+          "bcff5d5d0753e952c622d13a8fb6ce4a05343cf01dacbad84520667580146e30"
+        ],
+        "43": [
+          "ad6d6033373f6b67a6f6c416c03c364113c7f47a6c1fd802b2a16a41a86759c4"
+        ],
+        "44": [
+          "160794ea4310958b81ceded01a874394a2d92a89d16c4107ae4c1eb8d4e2ffbd"
+        ]
+      },
+      "output_shapes": [
+        [
+          3072,
+          3072,
+          3
+        ]
+      ],
+      "samples_ms": [
+        1408.7695721536875,
+        1415.284849703312,
+        1400.8567035198212,
+        1401.3055115938187,
+        1404.1306469589472,
+        1408.3404764533043,
+        1419.8914151638746,
+        1401.0477717965841
+      ],
+      "min_ms": 1400.8567035198212,
+      "max_ms": 1419.8914151638746,
+      "paired_saved_vs_serial_ms": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "paired_saved_vs_equal_ms": [
+        -55.17990328371525,
+        -61.10296957194805,
+        -54.692188277840614,
+        -58.01143869757652,
+        -47.58107848465443,
+        -43.320149183273315,
+        -66.50220789015293,
+        -37.216851487755775
+      ],
+      "median_paired_reduction_vs_serial_pct": 0.0,
+      "median_paired_reduction_vs_equal_pct": -4.069688341685019,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        0.0,
+        0.0
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        -61.10296957194805,
+        -43.320149183273315
+      ],
+      "isolated_peer_core_fraction_pct": 38.05038907323846,
+      "estimated_peer_request_fraction_pct": 11.469280380840926,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 3072,
+        "width": 3072,
+        "num_inference_steps": 6,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      }
+    },
+    {
+      "run": "h3",
+      "case": "h3-3k",
+      "variant": "equal",
+      "head_sizes": [
+        7,
+        7
+      ],
+      "even": false,
+      "median_ms": 1353.885774500668,
+      "reduction_vs_serial_pct": 3.7226897563267367,
+      "reduction_vs_equal_pct": 0.0,
+      "faster_vs_serial": 8,
+      "faster_vs_equal": 0,
+      "pairs": 8,
+      "median_paired_saved_vs_serial_ms": 54.93604578077793,
+      "median_paired_saved_vs_equal_ms": 0.0,
+      "seed_hashes": {
+        "42": [
+          "bcff5d5d0753e952c622d13a8fb6ce4a05343cf01dacbad84520667580146e30"
+        ],
+        "43": [
+          "ad6d6033373f6b67a6f6c416c03c364113c7f47a6c1fd802b2a16a41a86759c4"
+        ],
+        "44": [
+          "160794ea4310958b81ceded01a874394a2d92a89d16c4107ae4c1eb8d4e2ffbd"
+        ]
+      },
+      "output_shapes": [
+        [
+          3072,
+          3072,
+          3
+        ]
+      ],
+      "samples_ms": [
+        1353.5896688699722,
+        1354.1818801313639,
+        1346.1645152419806,
+        1343.2940728962421,
+        1356.5495684742928,
+        1365.020327270031,
+        1353.3892072737217,
+        1363.8309203088284
+      ],
+      "min_ms": 1343.2940728962421,
+      "max_ms": 1365.020327270031,
+      "paired_saved_vs_serial_ms": [
+        55.17990328371525,
+        61.10296957194805,
+        54.692188277840614,
+        58.01143869757652,
+        47.58107848465443,
+        43.320149183273315,
+        66.50220789015293,
+        37.216851487755775
+      ],
+      "paired_saved_vs_equal_ms": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "median_paired_reduction_vs_serial_pct": 3.9105410715343005,
+      "median_paired_reduction_vs_equal_pct": 0.0,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        43.320149183273315,
+        61.10296957194805
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        0.0,
+        0.0
+      ],
+      "isolated_peer_core_fraction_pct": 38.05038907323846,
+      "estimated_peer_request_fraction_pct": 11.469280380840926,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 3072,
+        "width": 3072,
+        "num_inference_steps": 6,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      }
+    },
+    {
+      "run": "h3",
+      "case": "h3-3k",
+      "variant": "even68",
+      "head_sizes": [
+        6,
+        8
+      ],
+      "even": true,
+      "median_ms": 1376.38496235013,
+      "reduction_vs_serial_pct": 2.1227310821082632,
+      "reduction_vs_equal_pct": -1.6618231961082572,
+      "faster_vs_serial": 8,
+      "faster_vs_equal": 0,
+      "pairs": 8,
+      "median_paired_saved_vs_serial_ms": 28.757932595908642,
+      "median_paired_saved_vs_equal_ms": -19.655777141451836,
+      "seed_hashes": {
+        "42": [
+          "bcff5d5d0753e952c622d13a8fb6ce4a05343cf01dacbad84520667580146e30"
+        ],
+        "43": [
+          "ad6d6033373f6b67a6f6c416c03c364113c7f47a6c1fd802b2a16a41a86759c4"
+        ],
+        "44": [
+          "160794ea4310958b81ceded01a874394a2d92a89d16c4107ae4c1eb8d4e2ffbd"
+        ]
+      },
+      "output_shapes": [
+        [
+          3072,
+          3072,
+          3
+        ]
+      ],
+      "samples_ms": [
+        1386.8908062577248,
+        1386.7586553096771,
+        1377.6289485394955,
+        1364.0142194926739,
+        1375.1409761607647,
+        1381.6015403717756,
+        1363.141430541873,
+        1371.4516256004572
+      ],
+      "min_ms": 1363.141430541873,
+      "max_ms": 1386.8908062577248,
+      "paired_saved_vs_serial_ms": [
+        21.878765895962715,
+        28.526194393634796,
+        23.2277549803257,
+        37.29129210114479,
+        28.989670798182487,
+        26.738936081528664,
+        56.74998462200165,
+        29.596146196126938
+      ],
+      "paired_saved_vs_equal_ms": [
+        -33.30113738775253,
+        -32.576775178313255,
+        -31.464433297514915,
+        -20.720146596431732,
+        -18.59140768647194,
+        -16.581213101744652,
+        -9.752223268151283,
+        -7.620705291628838
+      ],
+      "median_paired_reduction_vs_serial_pct": 2.0400894841085577,
+      "median_paired_reduction_vs_equal_pct": -1.4564900390475881,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        23.2277549803257,
+        37.29129210114479
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        -32.576775178313255,
+        -12.100959196686745
+      ],
+      "isolated_peer_core_fraction_pct": 38.05038907323846,
+      "estimated_peer_request_fraction_pct": 11.469280380840926,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 3072,
+        "width": 3072,
+        "num_inference_steps": 6,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      }
+    },
+    {
+      "run": "h3",
+      "case": "h3-3k",
+      "variant": "even410",
+      "head_sizes": [
+        4,
+        10
+      ],
+      "even": true,
+      "median_ms": 1379.1740462183952,
+      "reduction_vs_serial_pct": 1.9243941928831554,
+      "reduction_vs_equal_pct": -1.8678290439275687,
+      "faster_vs_serial": 8,
+      "faster_vs_equal": 0,
+      "pairs": 8,
+      "median_paired_saved_vs_serial_ms": 26.398680172860622,
+      "median_paired_saved_vs_equal_ms": -28.261153027415276,
+      "seed_hashes": {
+        "42": [
+          "bcff5d5d0753e952c622d13a8fb6ce4a05343cf01dacbad84520667580146e30"
+        ],
+        "43": [
+          "ad6d6033373f6b67a6f6c416c03c364113c7f47a6c1fd802b2a16a41a86759c4"
+        ],
+        "44": [
+          "160794ea4310958b81ceded01a874394a2d92a89d16c4107ae4c1eb8d4e2ffbd"
+        ]
+      },
+      "output_shapes": [
+        [
+          3072,
+          3072,
+          3
+        ]
+      ],
+      "samples_ms": [
+        1383.5944030433893,
+        1384.8839811980724,
+        1374.5210617780685,
+        1373.155165463686,
+        1384.7153279930353,
+        1382.1628000587225,
+        1376.185292378068,
+        1374.5860531926155
+      ],
+      "min_ms": 1373.155165463686,
+      "max_ms": 1384.8839811980724,
+      "paired_saved_vs_serial_ms": [
+        25.175169110298157,
+        30.400868505239487,
+        26.335641741752625,
+        28.150346130132675,
+        19.415318965911865,
+        26.177676394581795,
+        43.706122785806656,
+        26.46171860396862
+      ],
+      "paired_saved_vs_equal_ms": [
+        -30.00473417341709,
+        -30.702101066708565,
+        -28.35654653608799,
+        -29.861092567443848,
+        -28.16575951874256,
+        -17.14247278869152,
+        -22.796085104346275,
+        -10.755132883787155
+      ],
+      "median_paired_reduction_vs_serial_pct": 1.8843380443156268,
+      "median_paired_reduction_vs_equal_pct": -2.0913745197644538,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        25.175169110298157,
+        30.400868505239487
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        -30.00473417341709,
+        -17.14247278869152
+      ],
+      "isolated_peer_core_fraction_pct": 38.05038907323846,
+      "estimated_peer_request_fraction_pct": 11.469280380840926,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 3072,
+        "width": 3072,
+        "num_inference_steps": 6,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      }
+    },
+    {
+      "run": "h3",
+      "case": "h3-4k",
+      "variant": "serial1",
+      "head_sizes": [
+        14
+      ],
+      "even": true,
+      "median_ms": 2738.427280448377,
+      "reduction_vs_serial_pct": 0.0,
+      "reduction_vs_equal_pct": -2.501501988418119,
+      "faster_vs_serial": 0,
+      "faster_vs_equal": 1,
+      "pairs": 8,
+      "median_paired_saved_vs_serial_ms": 0.0,
+      "median_paired_saved_vs_equal_ms": -73.88137560337782,
+      "seed_hashes": {
+        "42": [
+          "3a19bc14d6dd8a1d35d1c02c7408f0e36d5a40aa81e672fdae7b49102aeb16ea"
+        ],
+        "43": [
+          "904e819ec826f4c30a6c9fb781434cc5c3fe3892f441eb5828d8d2f6302eb60d"
+        ],
+        "44": [
+          "6af8bd08a18359ba925ab33d6f8db9bfe981e257b9a6ffaa78e8ac136a0e1bac"
+        ]
+      },
+      "output_shapes": [
+        [
+          4096,
+          4096,
+          3
+        ]
+      ],
+      "samples_ms": [
+        2766.524314880371,
+        2733.1386990845203,
+        2738.7595120817423,
+        2783.3541836589575,
+        2741.0220950841904,
+        2738.095048815012,
+        2729.9357634037733,
+        2732.125436887145
+      ],
+      "min_ms": 2729.9357634037733,
+      "max_ms": 2783.3541836589575,
+      "paired_saved_vs_serial_ms": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "paired_saved_vs_equal_ms": [
+        -87.8516361117363,
+        -47.99765534698963,
+        -67.19673611223698,
+        -128.12090665102005,
+        -80.56601509451866,
+        -84.34703759849072,
+        78.99579964578152,
+        -60.49376726150513
+      ],
+      "median_paired_reduction_vs_serial_pct": 0.0,
+      "median_paired_reduction_vs_equal_pct": -2.7717689100745995,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        0.0,
+        0.0
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        -87.8516361117363,
+        -47.99765534698963
+      ],
+      "isolated_peer_core_fraction_pct": 23.961126018104288,
+      "estimated_peer_request_fraction_pct": 10.184364067810419,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 4096,
+        "width": 4096,
+        "num_inference_steps": 6,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      }
+    },
+    {
+      "run": "h3",
+      "case": "h3-4k",
+      "variant": "equal",
+      "head_sizes": [
+        7,
+        7
+      ],
+      "even": false,
+      "median_ms": 2671.5972227975726,
+      "reduction_vs_serial_pct": 2.440453983494573,
+      "reduction_vs_equal_pct": 0.0,
+      "faster_vs_serial": 7,
+      "faster_vs_equal": 0,
+      "pairs": 8,
+      "median_paired_saved_vs_serial_ms": 73.88137560337782,
+      "median_paired_saved_vs_equal_ms": 0.0,
+      "seed_hashes": {
+        "42": [
+          "3a19bc14d6dd8a1d35d1c02c7408f0e36d5a40aa81e672fdae7b49102aeb16ea"
+        ],
+        "43": [
+          "904e819ec826f4c30a6c9fb781434cc5c3fe3892f441eb5828d8d2f6302eb60d"
+        ],
+        "44": [
+          "6af8bd08a18359ba925ab33d6f8db9bfe981e257b9a6ffaa78e8ac136a0e1bac"
+        ]
+      },
+      "output_shapes": [
+        [
+          4096,
+          4096,
+          3
+        ]
+      ],
+      "samples_ms": [
+        2678.672678768635,
+        2685.1410437375307,
+        2671.5627759695053,
+        2655.2332770079374,
+        2660.4560799896717,
+        2653.7480112165213,
+        2808.931563049555,
+        2671.63166962564
+      ],
+      "min_ms": 2653.7480112165213,
+      "max_ms": 2808.931563049555,
+      "paired_saved_vs_serial_ms": [
+        87.8516361117363,
+        47.99765534698963,
+        67.19673611223698,
+        128.12090665102005,
+        80.56601509451866,
+        84.34703759849072,
+        -78.99579964578152,
+        60.49376726150513
+      ],
+      "paired_saved_vs_equal_ms": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "median_paired_reduction_vs_serial_pct": 2.6964077560016233,
+      "median_paired_reduction_vs_equal_pct": 0.0,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        47.99765534698963,
+        87.8516361117363
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        0.0,
+        0.0
+      ],
+      "isolated_peer_core_fraction_pct": 23.961126018104288,
+      "estimated_peer_request_fraction_pct": 10.184364067810419,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 4096,
+        "width": 4096,
+        "num_inference_steps": 6,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      }
+    },
+    {
+      "run": "h3",
+      "case": "h3-4k",
+      "variant": "even68",
+      "head_sizes": [
+        6,
+        8
+      ],
+      "even": true,
+      "median_ms": 2660.717448219657,
+      "reduction_vs_serial_pct": 2.8377540927797194,
+      "reduction_vs_equal_pct": 0.4072385794189018,
+      "faster_vs_serial": 8,
+      "faster_vs_equal": 5,
+      "pairs": 8,
+      "median_paired_saved_vs_serial_ms": 77.70983222872019,
+      "median_paired_saved_vs_equal_ms": 13.806554488837719,
+      "seed_hashes": {
+        "42": [
+          "3a19bc14d6dd8a1d35d1c02c7408f0e36d5a40aa81e672fdae7b49102aeb16ea"
+        ],
+        "43": [
+          "904e819ec826f4c30a6c9fb781434cc5c3fe3892f441eb5828d8d2f6302eb60d"
+        ],
+        "44": [
+          "6af8bd08a18359ba925ab33d6f8db9bfe981e257b9a6ffaa78e8ac136a0e1bac"
+        ]
+      },
+      "output_shapes": [
+        [
+          4096,
+          4096,
+          3
+        ]
+      ],
+      "samples_ms": [
+        2707.8012116253376,
+        2670.7049794495106,
+        2658.38573127985,
+        2666.907124221325,
+        2642.425676807761,
+        2663.049165159464,
+        2655.273826792836,
+        2642.495648935437
+      ],
+      "min_ms": 2642.425676807761,
+      "max_ms": 2707.8012116253376,
+      "paired_saved_vs_serial_ms": [
+        58.72310325503349,
+        62.433719635009766,
+        80.37378080189228,
+        116.44705943763256,
+        98.59641827642918,
+        75.0458836555481,
+        74.66193661093712,
+        89.62978795170784
+      ],
+      "paired_saved_vs_equal_ms": [
+        -29.128532856702805,
+        14.436064288020134,
+        13.177044689655304,
+        -11.67384721338749,
+        18.030403181910515,
+        -9.30115394294262,
+        153.65773625671864,
+        29.136020690202713
+      ],
+      "median_paired_reduction_vs_serial_pct": 2.837742332309902,
+      "median_paired_reduction_vs_equal_pct": 0.5154306813469509,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        62.433719635009766,
+        98.59641827642918
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        -11.67384721338749,
+        29.136020690202713
+      ],
+      "isolated_peer_core_fraction_pct": 23.961126018104288,
+      "estimated_peer_request_fraction_pct": 10.184364067810419,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 4096,
+        "width": 4096,
+        "num_inference_steps": 6,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      }
+    },
+    {
+      "run": "h3",
+      "case": "h3-4k",
+      "variant": "even410",
+      "head_sizes": [
+        4,
+        10
+      ],
+      "even": true,
+      "median_ms": 2643.9140271395445,
+      "reduction_vs_serial_pct": 3.451369842231396,
+      "reduction_vs_equal_pct": 1.0362039390443583,
+      "faster_vs_serial": 8,
+      "faster_vs_equal": 8,
+      "pairs": 8,
+      "median_paired_saved_vs_serial_ms": 95.40142584592104,
+      "median_paired_saved_vs_equal_ms": 27.683195658028126,
+      "seed_hashes": {
+        "42": [
+          "3a19bc14d6dd8a1d35d1c02c7408f0e36d5a40aa81e672fdae7b49102aeb16ea"
+        ],
+        "43": [
+          "904e819ec826f4c30a6c9fb781434cc5c3fe3892f441eb5828d8d2f6302eb60d"
+        ],
+        "44": [
+          "6af8bd08a18359ba925ab33d6f8db9bfe981e257b9a6ffaa78e8ac136a0e1bac"
+        ]
+      },
+      "output_shapes": [
+        [
+          4096,
+          4096,
+          3
+        ]
+      ],
+      "samples_ms": [
+        2647.240899503231,
+        2653.373869135976,
+        2646.0853070020676,
+        2640.084056183696,
+        2639.555988833308,
+        2648.736884817481,
+        2631.807116791606,
+        2641.7427472770214
+      ],
+      "min_ms": 2631.807116791606,
+      "max_ms": 2653.373869135976,
+      "paired_saved_vs_serial_ms": [
+        119.28341537714005,
+        79.7648299485445,
+        92.67420507967472,
+        143.2701274752617,
+        101.46610625088215,
+        89.35816399753094,
+        98.12864661216736,
+        90.38268961012363
+      ],
+      "paired_saved_vs_equal_ms": [
+        31.431779265403748,
+        31.76717460155487,
+        25.477468967437744,
+        15.149220824241638,
+        20.900091156363487,
+        5.011126399040222,
+        177.12444625794888,
+        29.888922348618507
+      ],
+      "median_paired_reduction_vs_serial_pct": 3.4891713578446018,
+      "median_paired_reduction_vs_equal_pct": 1.0362028746840166,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        89.35816399753094,
+        119.28341537714005
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        15.149220824241638,
+        31.76717460155487
+      ],
+      "isolated_peer_core_fraction_pct": 23.961126018104288,
+      "estimated_peer_request_fraction_pct": 10.184364067810419,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 4096,
+        "width": 4096,
+        "num_inference_steps": 6,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      }
+    },
+    {
+      "run": "wan-confirm",
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "head_sizes": [
+        12
+      ],
+      "even": true,
+      "median_ms": 896.4669611304998,
+      "reduction_vs_serial_pct": 0.0,
+      "reduction_vs_equal_pct": 5.628314153938187,
+      "faster_vs_serial": 0,
+      "faster_vs_equal": 14,
+      "pairs": 30,
+      "median_paired_saved_vs_serial_ms": 0.0,
+      "median_paired_saved_vs_equal_ms": -4.586363211274147,
+      "seed_hashes": {
+        "42": [
+          "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+        ],
+        "43": [
+          "fc0ca535584f626208f7b298f5a9866ee240877c4300607cd564d21a8d66f055"
+        ],
+        "44": [
+          "69659a0126e6a7ee84b395ce797d175e1d239f2e861c0cfbb8ec1c150d74b6a4"
+        ]
+      },
+      "output_shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "samples_ms": [
+        888.6326998472214,
+        890.9768741577864,
+        1258.0483481287956,
+        1303.5933692008257,
+        1385.019039735198,
+        1347.3689537495375,
+        1244.679631665349,
+        1073.2651017606258,
+        794.9586864560843,
+        901.9570481032133,
+        867.2828245908022,
+        868.285508826375,
+        779.8373829573393,
+        765.2224712073803,
+        748.8476298749447,
+        806.1642870306969,
+        929.6789709478617,
+        875.4597622901201,
+        929.6659957617521,
+        1040.4726974666119,
+        1248.8583084195852,
+        788.4275522083044,
+        754.7324951738119,
+        1093.6836618930101,
+        767.787154763937,
+        1120.5340512096882,
+        1210.7427269220352,
+        975.8759327232838,
+        824.8847853392363,
+        881.7558046430349
+      ],
+      "min_ms": 748.8476298749447,
+      "max_ms": 1385.019039735198,
+      "paired_saved_vs_serial_ms": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "paired_saved_vs_equal_ms": [
+        -76.56579650938511,
+        463.99372816085815,
+        105.81209883093834,
+        -98.01498055458069,
+        -178.9200734347105,
+        7.110534235835075,
+        -246.3106494396925,
+        -302.8493747115135,
+        181.7151941359043,
+        -79.01155762374401,
+        13.123936951160431,
+        20.607277750968933,
+        -15.312645584344864,
+        -5.153320729732513,
+        -4.019405692815781,
+        224.6907614171505,
+        -113.59500326216221,
+        -31.524434685707092,
+        154.48040142655373,
+        204.6715784817934,
+        -275.0631906092167,
+        30.839953571558,
+        187.33816035091877,
+        -33.19057449698448,
+        52.71708220243454,
+        -162.7404559403658,
+        -456.9357670843601,
+        48.1045451015234,
+        -37.399861961603165,
+        147.13077619671822
+      ],
+      "median_paired_reduction_vs_serial_pct": 0.0,
+      "median_paired_reduction_vs_equal_pct": -0.6088243978491816,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        0.0,
+        0.0
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        -56.98282923549414,
+        39.4722493365407
+      ],
+      "isolated_peer_core_fraction_pct": 55.639515986154564,
+      "estimated_peer_request_fraction_pct": 1.8234247344726418,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 480,
+        "width": 832,
+        "num_frames": 17,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1,
+        "fps": 16
+      }
+    },
+    {
+      "run": "wan-confirm",
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "head_sizes": [
+        6,
+        6
+      ],
+      "even": true,
+      "median_ms": 949.9321253970265,
+      "reduction_vs_serial_pct": -5.96398602343402,
+      "reduction_vs_equal_pct": 0.0,
+      "faster_vs_serial": 16,
+      "faster_vs_equal": 0,
+      "pairs": 30,
+      "median_paired_saved_vs_serial_ms": 4.586363211274147,
+      "median_paired_saved_vs_equal_ms": 0.0,
+      "seed_hashes": {
+        "42": [
+          "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+        ],
+        "43": [
+          "fc0ca535584f626208f7b298f5a9866ee240877c4300607cd564d21a8d66f055"
+        ],
+        "44": [
+          "69659a0126e6a7ee84b395ce797d175e1d239f2e861c0cfbb8ec1c150d74b6a4"
+        ]
+      },
+      "output_shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "samples_ms": [
+        812.0669033378363,
+        1354.9706023186445,
+        1363.860446959734,
+        1205.578388646245,
+        1206.0989663004875,
+        1354.4794879853725,
+        998.3689822256565,
+        770.4157270491123,
+        976.6738805919886,
+        822.9454904794693,
+        880.4067615419626,
+        888.8927865773439,
+        764.5247373729944,
+        760.0691504776478,
+        744.8282241821289,
+        1030.8550484478474,
+        816.0839676856995,
+        843.935327604413,
+        1084.1463971883059,
+        1245.1442759484053,
+        973.7951178103685,
+        819.2675057798624,
+        942.0706555247307,
+        1060.4930873960257,
+        820.5042369663715,
+        957.7935952693224,
+        753.8069598376751,
+        1023.9804778248072,
+        787.4849233776331,
+        1028.8865808397532
+      ],
+      "min_ms": 744.8282241821289,
+      "max_ms": 1363.860446959734,
+      "paired_saved_vs_serial_ms": [
+        76.56579650938511,
+        -463.99372816085815,
+        -105.81209883093834,
+        98.01498055458069,
+        178.9200734347105,
+        -7.110534235835075,
+        246.3106494396925,
+        302.8493747115135,
+        -181.7151941359043,
+        79.01155762374401,
+        -13.123936951160431,
+        -20.607277750968933,
+        15.312645584344864,
+        5.153320729732513,
+        4.019405692815781,
+        -224.6907614171505,
+        113.59500326216221,
+        31.524434685707092,
+        -154.48040142655373,
+        -204.6715784817934,
+        275.0631906092167,
+        -30.839953571558,
+        -187.33816035091877,
+        33.19057449698448,
+        -52.71708220243454,
+        162.7404559403658,
+        456.9357670843601,
+        -48.1045451015234,
+        37.399861961603165,
+        -147.13077619671822
+      ],
+      "paired_saved_vs_equal_ms": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "median_paired_reduction_vs_serial_pct": 0.6050931584760586,
+      "median_paired_reduction_vs_equal_pct": 0.0,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        -39.4722493365407,
+        56.98282923549414
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        0.0,
+        0.0
+      ],
+      "isolated_peer_core_fraction_pct": 55.639515986154564,
+      "estimated_peer_request_fraction_pct": 1.8234247344726418,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 480,
+        "width": 832,
+        "num_frames": 17,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1,
+        "fps": 16
+      }
+    },
+    {
+      "run": "wan-confirm",
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "head_sizes": [
+        4,
+        8
+      ],
+      "even": true,
+      "median_ms": 1010.4452846571803,
+      "reduction_vs_serial_pct": -12.714168895075264,
+      "reduction_vs_equal_pct": -6.370261373659949,
+      "faster_vs_serial": 16,
+      "faster_vs_equal": 13,
+      "pairs": 30,
+      "median_paired_saved_vs_serial_ms": 3.5575293004512787,
+      "median_paired_saved_vs_equal_ms": -6.907317787408829,
+      "seed_hashes": {
+        "42": [
+          "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+        ],
+        "43": [
+          "fc0ca535584f626208f7b298f5a9866ee240877c4300607cd564d21a8d66f055"
+        ],
+        "44": [
+          "69659a0126e6a7ee84b395ce797d175e1d239f2e861c0cfbb8ec1c150d74b6a4"
+        ]
+      },
+      "output_shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "samples_ms": [
+        1055.693794041872,
+        1275.0328201800585,
+        1012.9497461020947,
+        1240.8093195408583,
+        1328.7817351520061,
+        1100.856238976121,
+        1040.604779496789,
+        920.4706884920597,
+        746.5226706117392,
+        831.8372517824173,
+        885.3296358138323,
+        914.4805744290352,
+        935.9829034656286,
+        764.5037360489368,
+        742.4513064324856,
+        745.9335085004568,
+        1143.9962610602379,
+        1103.4294348210096,
+        935.3536572307348,
+        923.0603538453579,
+        744.0928667783737,
+        1122.4505472928286,
+        852.2956967353821,
+        1023.9320751279593,
+        1086.5732822567225,
+        852.4785451591015,
+        1073.1532014906406,
+        1007.940823212266,
+        1192.7508171647787,
+        1048.3224652707577
+      ],
+      "min_ms": 742.4513064324856,
+      "max_ms": 1328.7817351520061,
+      "paired_saved_vs_serial_ms": [
+        -167.06109419465065,
+        -384.0559460222721,
+        245.09860202670097,
+        62.78404965996742,
+        56.23730458319187,
+        246.51271477341652,
+        204.07485216856003,
+        152.79441326856613,
+        48.43601584434509,
+        70.11979632079601,
+        -18.04681122303009,
+        -46.19506560266018,
+        -156.14552050828934,
+        0.7187351584434509,
+        6.3963234424591064,
+        60.23077853024006,
+        -214.3172901123762,
+        -227.9696725308895,
+        -5.6876614689826965,
+        117.41234362125397,
+        504.7654416412115,
+        -334.02299508452415,
+        -97.56320156157017,
+        69.75158676505089,
+        -318.78612749278545,
+        268.0555060505867,
+        137.58952543139458,
+        -32.0648904889822,
+        -367.86603182554245,
+        -166.56666062772274
+      ],
+      "paired_saved_vs_equal_ms": [
+        -243.62689070403576,
+        79.93778213858604,
+        350.9107008576393,
+        -35.230930894613266,
+        -122.68276885151863,
+        253.6232490092516,
+        -42.23579727113247,
+        -150.0549614429474,
+        230.1512099802494,
+        -8.891761302947998,
+        -4.922874271869659,
+        -25.587787851691246,
+        -171.4581660926342,
+        -4.4345855712890625,
+        2.376917749643326,
+        284.92153994739056,
+        -327.9122933745384,
+        -259.4941072165966,
+        148.79273995757103,
+        322.08392210304737,
+        229.70225103199482,
+        -303.18304151296616,
+        89.7749587893486,
+        36.561012268066406,
+        -266.0690452903509,
+        105.31505011022091,
+        -319.34624165296555,
+        16.0396546125412,
+        -405.2658937871456,
+        -19.435884431004524
+      ],
+      "median_paired_reduction_vs_serial_pct": 0.47404026192792315,
+      "median_paired_reduction_vs_equal_pct": -0.8319624995941272,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        -71.87913358211517,
+        66.26781821250916
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        -92.64294616878033,
+        58.249397203326225
+      ],
+      "isolated_peer_core_fraction_pct": 55.639515986154564,
+      "estimated_peer_request_fraction_pct": 1.8234247344726418,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 480,
+        "width": 832,
+        "num_frames": 17,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1,
+        "fps": 16
+      }
+    },
+    {
+      "run": "wan-confirm",
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "head_sizes": [
+        12
+      ],
+      "even": true,
+      "median_ms": 3336.5819193422794,
+      "reduction_vs_serial_pct": 0.0,
+      "reduction_vs_equal_pct": -14.325148504500449,
+      "faster_vs_serial": 0,
+      "faster_vs_equal": 10,
+      "pairs": 30,
+      "median_paired_saved_vs_serial_ms": 0.0,
+      "median_paired_saved_vs_equal_ms": -52.23548412322998,
+      "seed_hashes": {
+        "42": [
+          "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+        ],
+        "43": [
+          "b22f55dfe1b33a91a7fe4119cc086f84944d6a9eedf37c2368ab8a54081102a3"
+        ],
+        "44": [
+          "2cbfb34f21dc05f7b2b2da09f00a1c34316bd771c513f22f2de8a26f93a21d08"
+        ]
+      },
+      "output_shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "samples_ms": [
+        3903.437888249755,
+        3956.3041757792234,
+        3251.2729428708553,
+        2596.524642780423,
+        2589.3171578645706,
+        2494.342729449272,
+        2518.3732248842716,
+        2873.604102060199,
+        3663.938943296671,
+        3078.914673998952,
+        3272.624222561717,
+        2546.6908998787403,
+        3054.227204993367,
+        3695.047330111265,
+        3753.580143675208,
+        3755.3450725972652,
+        4152.365239337087,
+        3654.1849840432405,
+        3400.539616122842,
+        2678.2376132905483,
+        4410.063561052084,
+        4199.720868840814,
+        4590.306190773845,
+        3563.617393374443,
+        3724.464401602745,
+        2472.1813928335905,
+        3635.722618550062,
+        2513.852059841156,
+        2509.2198103666306,
+        2500.9222757071257
+      ],
+      "min_ms": 2472.1813928335905,
+      "max_ms": 4590.306190773845,
+      "paired_saved_vs_serial_ms": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "paired_saved_vs_equal_ms": [
+        152.13129296898842,
+        -132.82821886241436,
+        -731.3633691519499,
+        -27.181511744856834,
+        -54.435474798083305,
+        31.361784785985947,
+        -7.012711837887764,
+        -316.56335294246674,
+        -332.42345973849297,
+        -340.843141078949,
+        -139.2737291753292,
+        1439.6117888391018,
+        753.7232879549265,
+        -686.6648942232132,
+        330.96402138471603,
+        -977.9740050435066,
+        -6.805015727877617,
+        -1005.2640493959188,
+        742.1594019979239,
+        150.38425475358963,
+        -1125.0111795961857,
+        612.1064219623804,
+        -1562.1803812682629,
+        -194.64934803545475,
+        -234.5789298415184,
+        9.718682616949081,
+        -1092.8489957004786,
+        0.24557672441005707,
+        -23.040981963276863,
+        -50.035493448376656
+      ],
+      "median_paired_reduction_vs_serial_pct": 0.0,
+      "median_paired_reduction_vs_equal_pct": -2.094491170576754,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        0.0,
+        0.0
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        -275.57114139199257,
+        0.24557672441005707
+      ],
+      "isolated_peer_core_fraction_pct": 23.740739523577066,
+      "estimated_peer_request_fraction_pct": 1.2401433736976482,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 720,
+        "width": 1280,
+        "num_frames": 33,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1,
+        "fps": 16
+      }
+    },
+    {
+      "run": "wan-confirm",
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "head_sizes": [
+        6,
+        6
+      ],
+      "even": true,
+      "median_ms": 2918.502151966095,
+      "reduction_vs_serial_pct": 12.530181409680422,
+      "reduction_vs_equal_pct": 0.0,
+      "faster_vs_serial": 20,
+      "faster_vs_equal": 0,
+      "pairs": 30,
+      "median_paired_saved_vs_serial_ms": 52.23548412322998,
+      "median_paired_saved_vs_equal_ms": 0.0,
+      "seed_hashes": {
+        "42": [
+          "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+        ],
+        "43": [
+          "b22f55dfe1b33a91a7fe4119cc086f84944d6a9eedf37c2368ab8a54081102a3"
+        ],
+        "44": [
+          "2cbfb34f21dc05f7b2b2da09f00a1c34316bd771c513f22f2de8a26f93a21d08"
+        ]
+      },
+      "output_shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "samples_ms": [
+        4055.5691812187433,
+        3823.475956916809,
+        2519.9095737189054,
+        2569.3431310355663,
+        2534.8816830664873,
+        2525.704514235258,
+        2511.360513046384,
+        2557.040749117732,
+        3331.515483558178,
+        2738.071532920003,
+        3133.350493386388,
+        3986.302688717842,
+        3807.9504929482937,
+        3008.382435888052,
+        4084.544165059924,
+        2777.3710675537586,
+        4145.560223609209,
+        2648.9209346473217,
+        4142.699018120766,
+        2828.621868044138,
+        3285.0523814558983,
+        4811.827290803194,
+        3028.125809505582,
+        3368.9680453389883,
+        3489.8854717612267,
+        2481.9000754505396,
+        2542.8736228495836,
+        2514.097636565566,
+        2486.1788284033537,
+        2450.886782258749
+      ],
+      "min_ms": 2450.886782258749,
+      "max_ms": 4811.827290803194,
+      "paired_saved_vs_serial_ms": [
+        -152.13129296898842,
+        132.82821886241436,
+        731.3633691519499,
+        27.181511744856834,
+        54.435474798083305,
+        -31.361784785985947,
+        7.012711837887764,
+        316.56335294246674,
+        332.42345973849297,
+        340.843141078949,
+        139.2737291753292,
+        -1439.6117888391018,
+        -753.7232879549265,
+        686.6648942232132,
+        -330.96402138471603,
+        977.9740050435066,
+        6.805015727877617,
+        1005.2640493959188,
+        -742.1594019979239,
+        -150.38425475358963,
+        1125.0111795961857,
+        -612.1064219623804,
+        1562.1803812682629,
+        194.64934803545475,
+        234.5789298415184,
+        -9.718682616949081,
+        1092.8489957004786,
+        -0.24557672441005707,
+        23.040981963276863,
+        50.035493448376656
+      ],
+      "paired_saved_vs_equal_ms": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "median_paired_reduction_vs_serial_pct": 2.0514958572126147,
+      "median_paired_reduction_vs_equal_pct": 0.0,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        -0.24557672441005707,
+        275.57114139199257
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        0.0,
+        0.0
+      ],
+      "isolated_peer_core_fraction_pct": 23.740739523577066,
+      "estimated_peer_request_fraction_pct": 1.2401433736976482,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 720,
+        "width": 1280,
+        "num_frames": 33,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1,
+        "fps": 16
+      }
+    },
+    {
+      "run": "wan-confirm",
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "head_sizes": [
+        4,
+        8
+      ],
+      "even": true,
+      "median_ms": 2844.7851883247495,
+      "reduction_vs_serial_pct": 14.739537134292057,
+      "reduction_vs_equal_pct": 2.5258492131549364,
+      "faster_vs_serial": 21,
+      "faster_vs_equal": 18,
+      "pairs": 30,
+      "median_paired_saved_vs_serial_ms": 44.93312910199165,
+      "median_paired_saved_vs_equal_ms": 44.144390150904655,
+      "seed_hashes": {
+        "42": [
+          "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+        ],
+        "43": [
+          "b22f55dfe1b33a91a7fe4119cc086f84944d6a9eedf37c2368ab8a54081102a3"
+        ],
+        "44": [
+          "2cbfb34f21dc05f7b2b2da09f00a1c34316bd771c513f22f2de8a26f93a21d08"
+        ]
+      },
+      "output_shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "samples_ms": [
+        2914.4754242151976,
+        3472.495773807168,
+        3728.8567572832108,
+        2903.5263396799564,
+        2554.703989997506,
+        2485.86380854249,
+        2533.8884592056274,
+        2691.763238981366,
+        3818.1822765618563,
+        3992.993749678135,
+        2530.598131939769,
+        3064.5917300134897,
+        4056.6241443157196,
+        2527.290975674987,
+        3832.2700150310993,
+        2674.4334530085325,
+        4097.112149000168,
+        2786.0440369695425,
+        2646.8344442546368,
+        2668.6913147568703,
+        2987.9676550626755,
+        3002.3566149175167,
+        4165.308719500899,
+        3171.0497215390205,
+        2932.378873229027,
+        2448.9700496196747,
+        2475.577713921666,
+        2638.850439339876,
+        2475.113846361637,
+        2477.280754595995
+      ],
+      "min_ms": 2448.9700496196747,
+      "max_ms": 4165.308719500899,
+      "paired_saved_vs_serial_ms": [
+        988.9624640345573,
+        483.80840197205544,
+        -477.5838144123554,
+        -307.0016968995333,
+        34.613167867064476,
+        8.47892090678215,
+        -15.51523432135582,
+        181.84086307883263,
+        -154.24333326518536,
+        -914.079075679183,
+        742.0260906219482,
+        -517.9008301347494,
+        -1002.3969393223524,
+        1167.7563544362783,
+        -78.68987135589123,
+        1080.9116195887327,
+        55.25309033691883,
+        868.140947073698,
+        753.7051718682051,
+        9.546298533678055,
+        1422.0959059894085,
+        1197.364253923297,
+        424.9974712729454,
+        392.5676718354225,
+        792.0855283737183,
+        23.211343213915825,
+        1160.144904628396,
+        -124.99837949872017,
+        34.10596400499344,
+        23.641521111130714
+      ],
+      "paired_saved_vs_equal_ms": [
+        1141.0937570035458,
+        350.9801831096411,
+        -1208.9471835643053,
+        -334.1832086443901,
+        -19.82230693101883,
+        39.8407056927681,
+        -22.527946159243584,
+        -134.7224898636341,
+        -486.6667930036783,
+        -1254.922216758132,
+        602.752361446619,
+        921.7109587043524,
+        -248.67365136742592,
+        481.09146021306515,
+        252.2741500288248,
+        102.9376145452261,
+        48.448074609041214,
+        -137.1231023222208,
+        1495.864573866129,
+        159.93055328726768,
+        297.0847263932228,
+        1809.4706758856773,
+        -1137.1829099953175,
+        197.91832379996777,
+        557.5065985321999,
+        32.930025830864906,
+        67.29590892791748,
+        -124.75280277431011,
+        11.064982041716576,
+        -26.39397233724594
+      ],
+      "median_paired_reduction_vs_serial_pct": 1.3479970096189688,
+      "median_paired_reduction_vs_equal_pct": 1.45210834251976,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        9.012609720230103,
+        612.9172462970018
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        -24.460959248244762,
+        225.0962369143963
+      ],
+      "isolated_peer_core_fraction_pct": 23.740739523577066,
+      "estimated_peer_request_fraction_pct": 1.2401433736976482,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 720,
+        "width": 1280,
+        "num_frames": 33,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1,
+        "fps": 16
+      }
+    },
+    {
+      "run": "h3-confirm",
+      "case": "h3-4k",
+      "variant": "serial1",
+      "head_sizes": [
+        14
+      ],
+      "even": true,
+      "median_ms": 2735.7343919575214,
+      "reduction_vs_serial_pct": 0.0,
+      "reduction_vs_equal_pct": -2.9708110717567138,
+      "faster_vs_serial": 0,
+      "faster_vs_equal": 0,
+      "pairs": 30,
+      "median_paired_saved_vs_serial_ms": 0.0,
+      "median_paired_saved_vs_equal_ms": -79.46244906634092,
+      "seed_hashes": {
+        "42": [
+          "3a19bc14d6dd8a1d35d1c02c7408f0e36d5a40aa81e672fdae7b49102aeb16ea"
+        ],
+        "43": [
+          "904e819ec826f4c30a6c9fb781434cc5c3fe3892f441eb5828d8d2f6302eb60d"
+        ],
+        "44": [
+          "6af8bd08a18359ba925ab33d6f8db9bfe981e257b9a6ffaa78e8ac136a0e1bac"
+        ]
+      },
+      "output_shapes": [
+        [
+          4096,
+          4096,
+          3
+        ]
+      ],
+      "samples_ms": [
+        2743.3404102921486,
+        2730.157418176532,
+        2737.614383921027,
+        2742.297038435936,
+        2734.38754491508,
+        2736.6976737976074,
+        2744.4534488022327,
+        2737.2990529984236,
+        2736.1744083464146,
+        2726.21095739305,
+        2812.906699255109,
+        2729.7379840165377,
+        2729.2390614748,
+        2727.328175678849,
+        2720.510369166732,
+        2733.0044768750668,
+        2748.5578767955303,
+        2742.601493373513,
+        2743.0037520825863,
+        2731.341239064932,
+        2741.0741951316595,
+        2730.800572782755,
+        2728.119123727083,
+        2734.401436522603,
+        2735.2943755686283,
+        2728.464152663946,
+        2732.2796918451786,
+        2783.0458264797926,
+        2738.433115184307,
+        2752.770947292447
+      ],
+      "min_ms": 2720.510369166732,
+      "max_ms": 2812.906699255109,
+      "paired_saved_vs_serial_ms": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "paired_saved_vs_equal_ms": [
+        -86.80999465286732,
+        -72.29547202587128,
+        -88.20525743067265,
+        -86.84185892343521,
+        -80.54550364613533,
+        -74.19504970312119,
+        -93.06333214044571,
+        -79.59355786442757,
+        -73.50277341902256,
+        -79.33134026825428,
+        -164.09675031900406,
+        -74.55957122147083,
+        -83.18998478353024,
+        -75.92425681650639,
+        -63.07133845984936,
+        -39.409708231687546,
+        -44.85890455543995,
+        -71.08473032712936,
+        -81.3742857426405,
+        -59.182023629546165,
+        -87.23875880241394,
+        -67.71470047533512,
+        -79.74349334836006,
+        -81.09715953469276,
+        -85.53736284375191,
+        -72.43049517273903,
+        -75.19868016242981,
+        -114.4330445677042,
+        -64.16250392794609,
+        -85.81606484949589
+      ],
+      "median_paired_reduction_vs_serial_pct": 0.0,
+      "median_paired_reduction_vs_equal_pct": -2.9959934953896132,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        0.0,
+        0.0
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        -82.28213526308537,
+        -73.84891156107187
+      ],
+      "isolated_peer_core_fraction_pct": 23.961126018104288,
+      "estimated_peer_request_fraction_pct": 10.194388928727296,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 4096,
+        "width": 4096,
+        "num_inference_steps": 6,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      }
+    },
+    {
+      "run": "h3-confirm",
+      "case": "h3-4k",
+      "variant": "equal",
+      "head_sizes": [
+        7,
+        7
+      ],
+      "even": false,
+      "median_ms": 2656.805713661015,
+      "reduction_vs_serial_pct": 2.885100195711249,
+      "reduction_vs_equal_pct": 0.0,
+      "faster_vs_serial": 30,
+      "faster_vs_equal": 0,
+      "pairs": 30,
+      "median_paired_saved_vs_serial_ms": 79.46244906634092,
+      "median_paired_saved_vs_equal_ms": 0.0,
+      "seed_hashes": {
+        "42": [
+          "3a19bc14d6dd8a1d35d1c02c7408f0e36d5a40aa81e672fdae7b49102aeb16ea"
+        ],
+        "43": [
+          "904e819ec826f4c30a6c9fb781434cc5c3fe3892f441eb5828d8d2f6302eb60d"
+        ],
+        "44": [
+          "6af8bd08a18359ba925ab33d6f8db9bfe981e257b9a6ffaa78e8ac136a0e1bac"
+        ]
+      },
+      "output_shapes": [
+        [
+          4096,
+          4096,
+          3
+        ]
+      ],
+      "samples_ms": [
+        2656.5304156392813,
+        2657.8619461506605,
+        2649.4091264903545,
+        2655.4551795125008,
+        2653.8420412689447,
+        2662.5026240944862,
+        2651.390116661787,
+        2657.705495133996,
+        2662.671634927392,
+        2646.879617124796,
+        2648.809948936105,
+        2655.178412795067,
+        2646.04907669127,
+        2651.403918862343,
+        2657.4390307068825,
+        2693.594768643379,
+        2703.6989722400904,
+        2671.516763046384,
+        2661.629466339946,
+        2672.1592154353857,
+        2653.8354363292456,
+        2663.08587230742,
+        2648.375630378723,
+        2653.3042769879103,
+        2649.7570127248764,
+        2656.033657491207,
+        2657.081011682749,
+        2668.6127819120884,
+        2674.270611256361,
+        2666.954882442951
+      ],
+      "min_ms": 2646.04907669127,
+      "max_ms": 2703.6989722400904,
+      "paired_saved_vs_serial_ms": [
+        86.80999465286732,
+        72.29547202587128,
+        88.20525743067265,
+        86.84185892343521,
+        80.54550364613533,
+        74.19504970312119,
+        93.06333214044571,
+        79.59355786442757,
+        73.50277341902256,
+        79.33134026825428,
+        164.09675031900406,
+        74.55957122147083,
+        83.18998478353024,
+        75.92425681650639,
+        63.07133845984936,
+        39.409708231687546,
+        44.85890455543995,
+        71.08473032712936,
+        81.3742857426405,
+        59.182023629546165,
+        87.23875880241394,
+        67.71470047533512,
+        79.74349334836006,
+        81.09715953469276,
+        85.53736284375191,
+        72.43049517273903,
+        75.19868016242981,
+        114.4330445677042,
+        64.16250392794609,
+        85.81606484949589
+      ],
+      "paired_saved_vs_equal_ms": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "median_paired_reduction_vs_serial_pct": 2.9088446849090253,
+      "median_paired_reduction_vs_equal_pct": 0.0,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        73.84891156107187,
+        82.28213526308537
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        0.0,
+        0.0
+      ],
+      "isolated_peer_core_fraction_pct": 23.961126018104288,
+      "estimated_peer_request_fraction_pct": 10.194388928727296,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 4096,
+        "width": 4096,
+        "num_inference_steps": 6,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      }
+    },
+    {
+      "run": "h3-confirm",
+      "case": "h3-4k",
+      "variant": "even410",
+      "head_sizes": [
+        4,
+        10
+      ],
+      "even": true,
+      "median_ms": 2637.438823468983,
+      "reduction_vs_serial_pct": 3.5930230938173815,
+      "reduction_vs_equal_pct": 0.7289539499425701,
+      "faster_vs_serial": 30,
+      "faster_vs_equal": 30,
+      "pairs": 30,
+      "median_paired_saved_vs_serial_ms": 99.14196562021971,
+      "median_paired_saved_vs_equal_ms": 19.847450777888298,
+      "seed_hashes": {
+        "42": [
+          "3a19bc14d6dd8a1d35d1c02c7408f0e36d5a40aa81e672fdae7b49102aeb16ea"
+        ],
+        "43": [
+          "904e819ec826f4c30a6c9fb781434cc5c3fe3892f441eb5828d8d2f6302eb60d"
+        ],
+        "44": [
+          "6af8bd08a18359ba925ab33d6f8db9bfe981e257b9a6ffaa78e8ac136a0e1bac"
+        ]
+      },
+      "output_shapes": [
+        [
+          4096,
+          4096,
+          3
+        ]
+      ],
+      "samples_ms": [
+        2633.9814085513353,
+        2631.3622687011957,
+        2641.789959743619,
+        2635.4461945593357,
+        2642.2151681035757,
+        2637.5689301639795,
+        2637.8425378352404,
+        2636.4913135766983,
+        2640.682799741626,
+        2640.1996184140444,
+        2635.939845815301,
+        2627.137016505003,
+        2629.4891890138388,
+        2635.5343516916037,
+        2637.76832818985,
+        2626.1170618236065,
+        2641.919443383813,
+        2653.69263663888,
+        2639.7515665739775,
+        2653.405275195837,
+        2640.1548124849796,
+        2643.163265660405,
+        2628.9639361202717,
+        2624.0291129797697,
+        2640.8882029354572,
+        2629.7269351780415,
+        2637.308716773987,
+        2633.788585662842,
+        2658.7408632040024,
+        2634.913107380271
+      ],
+      "min_ms": 2624.0291129797697,
+      "max_ms": 2658.7408632040024,
+      "paired_saved_vs_serial_ms": [
+        109.35900174081326,
+        98.79514947533607,
+        95.82442417740822,
+        106.85084387660027,
+        92.17237681150436,
+        99.12874363362789,
+        106.61091096699238,
+        100.80773942172527,
+        95.49160860478878,
+        86.01133897900581,
+        176.9668534398079,
+        102.60096751153469,
+        99.74987246096134,
+        91.79382398724556,
+        82.74204097688198,
+        106.88741505146027,
+        106.63843341171741,
+        88.90885673463345,
+        103.25218550860882,
+        77.93596386909485,
+        100.91938264667988,
+        87.63730712234974,
+        99.15518760681152,
+        110.37232354283333,
+        94.40617263317108,
+        98.7372174859047,
+        94.97097507119179,
+        149.2572408169508,
+        79.69225198030472,
+        117.85783991217613
+      ],
+      "paired_saved_vs_equal_ms": [
+        22.549007087945938,
+        26.499677449464798,
+        7.619166746735573,
+        20.008984953165054,
+        11.626873165369034,
+        24.933693930506706,
+        13.547578826546669,
+        21.214181557297707,
+        21.98883518576622,
+        6.6799987107515335,
+        12.870103120803833,
+        28.041396290063858,
+        16.559887677431107,
+        15.869567170739174,
+        19.670702517032623,
+        67.47770681977272,
+        61.779528856277466,
+        17.82412640750408,
+        21.877899765968323,
+        18.753940239548683,
+        13.680623844265938,
+        19.922606647014618,
+        19.411694258451462,
+        29.275164008140564,
+        8.868809789419174,
+        26.306722313165665,
+        19.772294908761978,
+        34.8241962492466,
+        15.529748052358627,
+        32.041775062680244
+      ],
+      "median_paired_reduction_vs_serial_pct": 3.628382591977911,
+      "median_paired_reduction_vs_equal_pct": 0.7461191224699271,
+      "paired_saved_vs_serial_bootstrap95_ms": [
+        94.97097507119179,
+        102.92657651007175
+      ],
+      "paired_saved_vs_equal_bootstrap95_ms": [
+        17.192007042467594,
+        22.26892113685608
+      ],
+      "isolated_peer_core_fraction_pct": 23.961126018104288,
+      "estimated_peer_request_fraction_pct": 10.194388928727296,
+      "communication_fraction_note": "Isolated peer control / (whole attention + peer control); request estimate uses isolated peer time * calls / this run's serial E2E. Neither is a measured request communication fraction.",
+      "sampling": {
+        "height": 4096,
+        "width": 4096,
+        "num_inference_steps": 6,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      }
+    }
+  ],
+  "paired_interval_method": "Descriptive percentile bootstrap of paired-round median savings: 10000 resamples, seed 10448, indexes 249 and 9749. Resampling does not establish stationarity or remove host/device interference.",
+  "new_profiler_traces": false,
+  "scope": "Offline batch-one CUDA graphs, FP8 DiT linears, BF16 FA3/CE, VAE parallel enabled. No production default changed.",
+  "baseline_note": "Whole serial owns its output; equal and unequal two-group variants borrow graph-scoped outputs. Versus equal isolates partition selection; versus serial includes the existing output-ownership/schedule improvements.",
+  "communication_budget_source": "evidence/core-budget-summary.json; isolated control timings from the earlier budget run",
+  "acceptance": {
+    "h3-4k-4+10": "Validated improvement over 7+7 in this offline fixed-canvas experiment: 30/30 paired wins. No default service claim.",
+    "h3-3k-even-groups": "Not selected: both even alternatives lose to 7+7 in all eight screening rounds.",
+    "wan-4+8": "Additional E2E improvement over 6+6 is not established: paired intervals include zero in both 30-round confirmations. Large within-stage timing variance prevents accepting the apparent 14.74% ratio-of-medians gain over whole in the higher-resolution case."
+  }
+}

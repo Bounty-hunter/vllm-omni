@@ -1,0 +1,22 @@
+--- a/vllm_omni/diffusion/attention/parallel/head_overlap.py
++++ b/vllm_omni/diffusion/attention/parallel/head_overlap.py
+@@ -40,7 +40,7 @@
+         return False
+     if q.shape[2] % (world * chunks) or k.shape[2] % (world * chunks) or q.shape[2] % k.shape[2]:
+         return False
+-    if q.shape[2] // (world * chunks) < 4 or q.shape[1] * world < 2048:
++    if q.shape[2] // (world * chunks) < 4 or q.shape[1] == 0:
+         return False
+     if md is None:
+         return True
+--- a/vllm_omni/diffusion/worker/diffusion_model_runner.py
++++ b/vllm_omni/diffusion/worker/diffusion_model_runner.py
+@@ -453,6 +453,8 @@
+         self.model_memory_usage = int(m.consumed_memory)
+         logger.info("Model runner: Model loaded successfully.")
+         warn_if_denoise_graph_unsupported(self.od_config, self.pipeline)
++        from model_probe import install as _install_head_matrix_probe
++        _install_head_matrix_probe(self.pipeline)
+ 
+         if self.od_config.streaming_output and not self.od_config.step_execution and self._supports_step_mode():
+             logger.warning("streaming_output=True enables step execution for a step-capable pipeline.")

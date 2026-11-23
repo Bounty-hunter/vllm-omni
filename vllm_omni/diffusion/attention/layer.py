@@ -50,6 +50,7 @@ from vllm_omni.diffusion.attention.capabilities import (
 from vllm_omni.diffusion.attention.parallel import build_parallel_attention_strategy
 from vllm_omni.diffusion.attention.parallel.base import NoParallelAttention
 from vllm_omni.diffusion.attention.parallel.ring import RingParallelAttention
+from vllm_omni.diffusion.attention.parallel.ulysses import UlyssesParallelAttention
 from vllm_omni.diffusion.attention.selector import get_attn_backend_for_role
 from vllm_omni.diffusion.config import get_current_diffusion_config_or_none
 from vllm_omni.diffusion.diffusion_kv.config import DiffusionKVCacheMode
@@ -1262,6 +1263,31 @@ class Attention(nn.Module):
             if not isinstance(isolation, tuple) or len(isolation) != 2:
                 raise TypeError("reference isolation metadata must be a (state, compact) tuple")
             isolated_dense = self._reference_isolation_dense_impl()
+
+        if (
+            isinstance(strategy, UlyssesParallelAttention)
+            and strategy.head_chunks > 1
+            and not use_paged_attention
+            and isolation is None
+            and not torch.compiler.is_compiling()
+        ):
+            from vllm_omni.diffusion.attention.parallel.head_overlap import can_overlap, head_overlap
+
+            _, backend, _ = self.effective_attention()
+            metadata = self._with_kv_cache_dtype(attn_metadata)
+            if (
+                backend is not None
+                and backend.get_name() in ("FLASH_ATTN", "FLASH_ATTN_HUB", "FLASH_ATTN_3_HUB", "TORCH_SDPA")
+                and not self.use_ring
+                and not strategy._use_sync
+                and get_ulysses_mode(default="strict") == "strict"
+                and can_overlap(
+                    query, key, value, metadata, strategy._sp_group.ulysses_world_size, strategy.head_chunks
+                )
+            ):
+                return head_overlap(
+                    query, key, value, metadata, strategy._ulysses_pg, strategy.head_chunks, self._run_local_attention
+                )
 
         # 1. Prepare inputs (Communication / Resharding)
         # For Ulysses: AllToAll Q/K/V; Slicing joint_q/k/v

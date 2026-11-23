@@ -1,0 +1,7448 @@
+{
+  "engine": {
+    "dtype": "bfloat16",
+    "quantization_config": {
+      "transformer": {
+        "method": "fp8"
+      }
+    },
+    "diffusion_attention_config": {
+      "default": "FLASH_ATTN"
+    },
+    "enable_diffusion_pipeline_profiler": false,
+    "enforce_eager": true,
+    "log_stats": false,
+    "init_timeout": 900,
+    "stage_init_timeout": 900,
+    "ulysses_degree": 2,
+    "ulysses_a2a_permute": true,
+    "ulysses_head_chunks": 2,
+    "text_encoder_tp_size": 1,
+    "tensor_parallel_size": 1,
+    "vae_patch_parallel_size": 2,
+    "num_gpus": 2,
+    "devices": "0,1",
+    "distributed_executor_backend": "mp",
+    "max_num_seqs": 1,
+    "model": "/data/models/hub/models--Wan-AI--Wan2.2-TI2V-5B-Diffusers/snapshots/b8fff7315c768468a5333511427288870b2e9635"
+  },
+  "config": {
+    "engine": {
+      "dtype": "bfloat16",
+      "quantization_config": {
+        "transformer": {
+          "method": "fp8"
+        }
+      },
+      "diffusion_attention_config": {
+        "default": "FLASH_ATTN"
+      },
+      "enable_diffusion_pipeline_profiler": false,
+      "enforce_eager": true,
+      "log_stats": false,
+      "init_timeout": 900,
+      "stage_init_timeout": 900,
+      "ulysses_degree": 2,
+      "ulysses_a2a_permute": true,
+      "ulysses_head_chunks": 2,
+      "text_encoder_tp_size": 1,
+      "tensor_parallel_size": 1,
+      "vae_patch_parallel_size": 2,
+      "num_gpus": 2,
+      "devices": "0,1",
+      "distributed_executor_backend": "mp",
+      "max_num_seqs": 1
+    },
+    "prompt": {
+      "prompt": "Two anthropomorphic cats in boxing gear on a spotlighted stage.",
+      "negative_prompt": "low quality, blurry, watermark, text",
+      "modalities": [
+        "video"
+      ]
+    },
+    "variants": {
+      "serial1": {
+        "graph_mode": "graph",
+        "chunks": 1,
+        "schedule": "old"
+      },
+      "equal": {
+        "graph_mode": "graph",
+        "chunks": 2,
+        "schedule": "stage-local-shared-slots"
+      },
+      "ratio12": {
+        "graph_mode": "graph",
+        "chunks": 2,
+        "schedule": "stage-local-shared-slots",
+        "head_partition": [
+          1,
+          2
+        ]
+      }
+    },
+    "cases": [
+      {
+        "id": "wan5b-480p-f17",
+        "sampling": {
+          "height": 480,
+          "width": 832,
+          "num_frames": 17,
+          "num_inference_steps": 8,
+          "guidance_scale": 1.0,
+          "true_cfg_scale": 1.0,
+          "num_outputs_per_prompt": 1,
+          "fps": 16
+        }
+      },
+      {
+        "id": "wan5b-720p-f33",
+        "sampling": {
+          "height": 720,
+          "width": 1280,
+          "num_frames": 33,
+          "num_inference_steps": 8,
+          "guidance_scale": 1.0,
+          "true_cfg_scale": 1.0,
+          "num_outputs_per_prompt": 1,
+          "fps": 16
+        }
+      }
+    ],
+    "partition_policy": "Primary partitions have even per-rank head counts: 6+6, 4+8, 2+10. Odd 3+9 is a control.",
+    "confirmation": {
+      "selection": "Frozen after the eight-round screen; retain both whole and equal controls.",
+      "rounds": 30,
+      "warmups": 5,
+      "new_profiler_traces": false
+    }
+  },
+  "records": [
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "warm",
+      "index": 0,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3178.348943591118,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.6918851286172867,
+          "stage_0_gen_ms": 3176.2475967407227
+        }
+      ],
+      "peak_memory_mb": [
+        18486.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "warm",
+      "index": 1,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 773.3764927834272,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5027931183576584,
+          "stage_0_gen_ms": 771.0039615631104
+        }
+      ],
+      "peak_memory_mb": [
+        18486.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "warm",
+      "index": 2,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 899.121193215251,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.524815171957016,
+          "stage_0_gen_ms": 897.4857330322266
+        }
+      ],
+      "peak_memory_mb": [
+        18422.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "warm",
+      "index": 3,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 992.4565218389034,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.40018558502197266,
+          "stage_0_gen_ms": 991.0929203033447
+        }
+      ],
+      "peak_memory_mb": [
+        18422.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "warm",
+      "index": 4,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1009.5901601016521,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4180166870355606,
+          "stage_0_gen_ms": 1006.6053867340088
+        }
+      ],
+      "peak_memory_mb": [
+        18422.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "warm",
+      "index": 0,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1875.1645404845476,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.48354826867580414,
+          "stage_0_gen_ms": 1873.781442642212
+        }
+      ],
+      "peak_memory_mb": [
+        18478.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "warm",
+      "index": 1,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1055.80541677773,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.48464350402355194,
+          "stage_0_gen_ms": 1053.8849830627441
+        }
+      ],
+      "peak_memory_mb": [
+        18478.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "warm",
+      "index": 2,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1205.2580025047064,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4344731569290161,
+          "stage_0_gen_ms": 1203.8757801055908
+        }
+      ],
+      "peak_memory_mb": [
+        18478.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "warm",
+      "index": 3,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 950.4034221172333,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4332680255174637,
+          "stage_0_gen_ms": 949.1426944732666
+        }
+      ],
+      "peak_memory_mb": [
+        18478.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "warm",
+      "index": 4,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1035.7266552746296,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5411058664321899,
+          "stage_0_gen_ms": 1033.8513851165771
+        }
+      ],
+      "peak_memory_mb": [
+        18478.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "warm",
+      "index": 0,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2116.9323325157166,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.44567324221134186,
+          "stage_0_gen_ms": 2115.3807640075684
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "warm",
+      "index": 1,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1058.5777088999748,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4381537437438965,
+          "stage_0_gen_ms": 1056.6415786743164
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "warm",
+      "index": 2,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 996.1790479719639,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.929730013012886,
+          "stage_0_gen_ms": 994.1496849060059
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "warm",
+      "index": 3,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 895.4267203807831,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.522589311003685,
+          "stage_0_gen_ms": 893.7849998474121
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "warm",
+      "index": 4,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 744.3502992391586,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5098097026348114,
+          "stage_0_gen_ms": 742.9103851318359
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 0,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 888.6326998472214,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.49848295748233795,
+          "stage_0_gen_ms": 886.9020938873291
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 0,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 812.0669033378363,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.665515661239624,
+          "stage_0_gen_ms": 810.3442192077637
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 0,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1055.693794041872,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5518216639757156,
+          "stage_0_gen_ms": 1054.2166233062744
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 1,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 890.9768741577864,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5447994917631149,
+          "stage_0_gen_ms": 888.9491558074951
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 1,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1275.0328201800585,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.7135961204767227,
+          "stage_0_gen_ms": 1272.4494934082031
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 1,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1354.9706023186445,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.6453990936279297,
+          "stage_0_gen_ms": 1353.2054424285889
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 2,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1012.9497461020947,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4832744598388672,
+          "stage_0_gen_ms": 1011.5773677825928
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 2,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1258.0483481287956,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.378509983420372,
+          "stage_0_gen_ms": 1256.5674781799316
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 2,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1363.860446959734,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4564393311738968,
+          "stage_0_gen_ms": 1362.04195022583
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 3,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1240.8093195408583,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4060175269842148,
+          "stage_0_gen_ms": 1239.2003536224365
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 3,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1205.578388646245,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4079323261976242,
+          "stage_0_gen_ms": 1204.3507099151611
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 3,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1303.5933692008257,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.45031309127807617,
+          "stage_0_gen_ms": 1301.5484809875488
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 4,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1206.0989663004875,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.9458288550376892,
+          "stage_0_gen_ms": 1203.8965225219727
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 4,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1328.7817351520061,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.6264708936214447,
+          "stage_0_gen_ms": 1327.0831108093262
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 4,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1385.019039735198,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5148500204086304,
+          "stage_0_gen_ms": 1383.4123611450195
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 5,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1354.4794879853725,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4918314516544342,
+          "stage_0_gen_ms": 1352.7729511260986
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 5,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1347.3689537495375,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5864128470420837,
+          "stage_0_gen_ms": 1345.7136154174805
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 5,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1100.856238976121,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.7145609706640244,
+          "stage_0_gen_ms": 1098.8335609436035
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 6,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1244.679631665349,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5697812885046005,
+          "stage_0_gen_ms": 1241.7848110198975
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 6,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 998.3689822256565,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.7948875427246094,
+          "stage_0_gen_ms": 995.3145980834961
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 6,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1040.604779496789,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.545823946595192,
+          "stage_0_gen_ms": 1038.586139678955
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 7,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1073.2651017606258,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.7745511829853058,
+          "stage_0_gen_ms": 1071.2063312530518
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 7,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 920.4706884920597,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5341600626707077,
+          "stage_0_gen_ms": 918.9188480377197
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 7,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 770.4157270491123,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.48687681555747986,
+          "stage_0_gen_ms": 768.6300277709961
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 8,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 746.5226706117392,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.49324706196784973,
+          "stage_0_gen_ms": 745.0153827667236
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 8,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 794.9586864560843,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.6089750677347183,
+          "stage_0_gen_ms": 793.3011054992676
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 8,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 976.6738805919886,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4603136330842972,
+          "stage_0_gen_ms": 975.2230644226074
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 9,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 831.8372517824173,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 4.151754081249237,
+          "stage_0_gen_ms": 826.589822769165
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 9,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 822.9454904794693,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5603842437267303,
+          "stage_0_gen_ms": 821.3491439819336
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 9,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 901.9570481032133,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5599353462457657,
+          "stage_0_gen_ms": 900.0833034515381
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 10,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 880.4067615419626,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.8827485144138336,
+          "stage_0_gen_ms": 878.0412673950195
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 10,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 885.3296358138323,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.6332080811262131,
+          "stage_0_gen_ms": 883.5632801055908
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 10,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 867.2828245908022,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5818959325551987,
+          "stage_0_gen_ms": 865.3233051300049
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 11,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 888.8927865773439,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5765445530414581,
+          "stage_0_gen_ms": 887.2871398925781
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 11,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 868.285508826375,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5213283002376556,
+          "stage_0_gen_ms": 866.7731285095215
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 11,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 914.4805744290352,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.622013583779335,
+          "stage_0_gen_ms": 912.5106334686279
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 12,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 779.8373829573393,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5995631217956543,
+          "stage_0_gen_ms": 777.9593467712402
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 12,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 764.5247373729944,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.9024031460285187,
+          "stage_0_gen_ms": 762.5095844268799
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 12,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 935.9829034656286,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.6052367389202118,
+          "stage_0_gen_ms": 934.2477321624756
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 13,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 765.2224712073803,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5212277173995972,
+          "stage_0_gen_ms": 763.580322265625
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 13,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 764.5037360489368,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5352925509214401,
+          "stage_0_gen_ms": 763.024091720581
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 13,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 760.0691504776478,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4840102046728134,
+          "stage_0_gen_ms": 758.6185932159424
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 14,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 742.4513064324856,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5286913365125656,
+          "stage_0_gen_ms": 740.9324645996094
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 14,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 748.8476298749447,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4565231502056122,
+          "stage_0_gen_ms": 747.4381923675537
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 14,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 744.8282241821289,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.48156827688217163,
+          "stage_0_gen_ms": 743.3915138244629
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 15,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 745.9335085004568,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.49507617950439453,
+          "stage_0_gen_ms": 743.9565658569336
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 15,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1030.8550484478474,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5940292030572891,
+          "stage_0_gen_ms": 1028.8724899291992
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 15,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 806.1642870306969,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5499497056007385,
+          "stage_0_gen_ms": 804.6395778656006
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 16,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 816.0839676856995,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4899483174085617,
+          "stage_0_gen_ms": 814.7003650665283
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 16,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1143.9962610602379,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4888474941253662,
+          "stage_0_gen_ms": 1142.4033641815186
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 16,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 929.6789709478617,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5245748907327652,
+          "stage_0_gen_ms": 928.1222820281982
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 17,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 843.935327604413,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.500015914440155,
+          "stage_0_gen_ms": 842.4375057220459
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 17,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 875.4597622901201,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.44341571629047394,
+          "stage_0_gen_ms": 873.7874031066895
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 17,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1103.4294348210096,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.48536062240600586,
+          "stage_0_gen_ms": 1101.4189720153809
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 18,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 929.6659957617521,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.7389597594738007,
+          "stage_0_gen_ms": 927.4194240570068
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 18,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1084.1463971883059,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4864763468503952,
+          "stage_0_gen_ms": 1082.7281475067139
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 18,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 935.3536572307348,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5148537456989288,
+          "stage_0_gen_ms": 933.8648319244385
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 19,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1040.4726974666119,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.506160780787468,
+          "stage_0_gen_ms": 1038.9583110809326
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 19,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 923.0603538453579,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5123987793922424,
+          "stage_0_gen_ms": 921.5576648712158
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 19,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1245.1442759484053,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4742033779621124,
+          "stage_0_gen_ms": 1243.3557510375977
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 20,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 744.0928667783737,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5669500678777695,
+          "stage_0_gen_ms": 742.5210475921631
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 20,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1248.8583084195852,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5329102277755737,
+          "stage_0_gen_ms": 1246.9279766082764
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 20,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 973.7951178103685,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.6987918168306351,
+          "stage_0_gen_ms": 971.8434810638428
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 21,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1122.4505472928286,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4636123776435852,
+          "stage_0_gen_ms": 1120.9313869476318
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 21,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 819.2675057798624,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5328170955181122,
+          "stage_0_gen_ms": 817.7464008331299
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 21,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 788.4275522083044,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.46782009303569794,
+          "stage_0_gen_ms": 787.0321273803711
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 22,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 942.0706555247307,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.48948824405670166,
+          "stage_0_gen_ms": 940.570592880249
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 22,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 852.2956967353821,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.44352002441883087,
+          "stage_0_gen_ms": 850.8896827697754
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 22,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 754.7324951738119,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5673300474882126,
+          "stage_0_gen_ms": 753.0572414398193
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 23,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1060.4930873960257,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4993714392185211,
+          "stage_0_gen_ms": 1058.5474967956543
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 23,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1093.6836618930101,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.7536206394433975,
+          "stage_0_gen_ms": 1091.7854309082031
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 23,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1023.9320751279593,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.6568282842636108,
+          "stage_0_gen_ms": 1022.209882736206
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 24,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 767.787154763937,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4680659621953964,
+          "stage_0_gen_ms": 765.9592628479004
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 24,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 820.5042369663715,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.6450992077589035,
+          "stage_0_gen_ms": 818.915605545044
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 24,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1086.5732822567225,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5542375147342682,
+          "stage_0_gen_ms": 1085.0839614868164
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 25,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1120.5340512096882,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4150327295064926,
+          "stage_0_gen_ms": 1119.0834045410156
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 25,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 852.4785451591015,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.45126117765903473,
+          "stage_0_gen_ms": 850.7363796234131
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 25,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 957.7935952693224,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5508828908205032,
+          "stage_0_gen_ms": 955.7595252990723
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 26,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1073.1532014906406,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.6692409515380859,
+          "stage_0_gen_ms": 1071.3403224945068
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 26,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1210.7427269220352,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4261098802089691,
+          "stage_0_gen_ms": 1209.428310394287
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 26,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 753.8069598376751,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4940647631883621,
+          "stage_0_gen_ms": 752.3000240325928
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 27,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1007.940823212266,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4917643964290619,
+          "stage_0_gen_ms": 1006.5476894378662
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 27,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1023.9804778248072,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4795864224433899,
+          "stage_0_gen_ms": 1022.620677947998
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 27,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 975.8759327232838,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5585271865129471,
+          "stage_0_gen_ms": 974.2305278778076
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 28,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 787.4849233776331,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5104653537273407,
+          "stage_0_gen_ms": 785.491943359375
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 28,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1192.7508171647787,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.6153304129838943,
+          "stage_0_gen_ms": 1190.1276111602783
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 28,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 824.8847853392363,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5797185003757477,
+          "stage_0_gen_ms": 823.1306076049805
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 29,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1028.8865808397532,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4463866353034973,
+          "stage_0_gen_ms": 1027.5399684906006
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 29,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 881.7558046430349,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5118437111377716,
+          "stage_0_gen_ms": 880.0764083862305
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 29,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 1048.3224652707577,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.46957097947597504,
+          "stage_0_gen_ms": 1046.5092658996582
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "correctness",
+      "index": 0,
+      "seed": 43,
+      "profile": false,
+      "e2e_ms": 876.210005953908,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "fc0ca535584f626208f7b298f5a9866ee240877c4300607cd564d21a8d66f055"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.89309923350811,
+          "stage_0_gen_ms": 873.9731311798096
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "correctness",
+      "index": 0,
+      "seed": 43,
+      "profile": false,
+      "e2e_ms": 1062.66525760293,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "fc0ca535584f626208f7b298f5a9866ee240877c4300607cd564d21a8d66f055"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.6319563835859299,
+          "stage_0_gen_ms": 1060.772180557251
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "correctness",
+      "index": 0,
+      "seed": 43,
+      "profile": false,
+      "e2e_ms": 816.2076901644468,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "fc0ca535584f626208f7b298f5a9866ee240877c4300607cd564d21a8d66f055"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5005188286304474,
+          "stage_0_gen_ms": 814.6631717681885
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "serial1",
+      "phase": "correctness",
+      "index": 1,
+      "seed": 44,
+      "profile": false,
+      "e2e_ms": 940.1074219495058,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "69659a0126e6a7ee84b395ce797d175e1d239f2e861c0cfbb8ec1c150d74b6a4"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5943775177001953,
+          "stage_0_gen_ms": 938.5013580322266
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "equal",
+      "phase": "correctness",
+      "index": 1,
+      "seed": 44,
+      "profile": false,
+      "e2e_ms": 1025.1205991953611,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "69659a0126e6a7ee84b395ce797d175e1d239f2e861c0cfbb8ec1c150d74b6a4"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5632154643535614,
+          "stage_0_gen_ms": 1023.4603881835938
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-480p-f17",
+      "variant": "ratio12",
+      "phase": "correctness",
+      "index": 1,
+      "seed": 44,
+      "profile": false,
+      "e2e_ms": 1061.0378980636597,
+      "shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "69659a0126e6a7ee84b395ce797d175e1d239f2e861c0cfbb8ec1c150d74b6a4"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5092620849609375,
+          "stage_0_gen_ms": 1059.398889541626
+        }
+      ],
+      "peak_memory_mb": [
+        18808.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "warm",
+      "index": 0,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 6324.894867837429,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.48653222620487213,
+          "stage_0_gen_ms": 6322.63708114624
+        }
+      ],
+      "peak_memory_mb": [
+        19798.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "warm",
+      "index": 1,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3959.4720415771008,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.7415525615215302,
+          "stage_0_gen_ms": 3957.2713375091553
+        }
+      ],
+      "peak_memory_mb": [
+        19798.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "warm",
+      "index": 2,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 4012.6370806246996,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4857797175645828,
+          "stage_0_gen_ms": 4011.035442352295
+        }
+      ],
+      "peak_memory_mb": [
+        19794.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "warm",
+      "index": 3,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3735.8837500214577,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 7.160220295190811,
+          "stage_0_gen_ms": 3726.6299724578857
+        }
+      ],
+      "peak_memory_mb": [
+        19696.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "warm",
+      "index": 4,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2603.7932597100735,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.6440021097660065,
+          "stage_0_gen_ms": 2602.1554470062256
+        }
+      ],
+      "peak_memory_mb": [
+        19696.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "warm",
+      "index": 0,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 4064.817227423191,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 4.556823521852493,
+          "stage_0_gen_ms": 4059.2715740203857
+        }
+      ],
+      "peak_memory_mb": [
+        20388.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "warm",
+      "index": 1,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3915.096651762724,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.47933124005794525,
+          "stage_0_gen_ms": 3913.4206771850586
+        }
+      ],
+      "peak_memory_mb": [
+        20388.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "warm",
+      "index": 2,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 4199.913114309311,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.6717778742313385,
+          "stage_0_gen_ms": 4197.239875793457
+        }
+      ],
+      "peak_memory_mb": [
+        20524.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "warm",
+      "index": 3,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3851.7653793096542,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5198344588279724,
+          "stage_0_gen_ms": 3850.259304046631
+        }
+      ],
+      "peak_memory_mb": [
+        20524.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "warm",
+      "index": 4,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3805.0198685377836,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.6374605000019073,
+          "stage_0_gen_ms": 3803.123950958252
+        }
+      ],
+      "peak_memory_mb": [
+        20388.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "warm",
+      "index": 0,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 4740.842379629612,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5865171551704407,
+          "stage_0_gen_ms": 4739.191055297852
+        }
+      ],
+      "peak_memory_mb": [
+        21150.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "warm",
+      "index": 1,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2579.563669860363,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5098246037960052,
+          "stage_0_gen_ms": 2577.845811843872
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "warm",
+      "index": 2,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2581.6602278500795,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5254857242107391,
+          "stage_0_gen_ms": 2580.1374912261963
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "warm",
+      "index": 3,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 4013.835107907653,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.45769102871418,
+          "stage_0_gen_ms": 4011.7201805114746
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "warm",
+      "index": 4,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3705.4805867373943,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.6854049861431122,
+          "stage_0_gen_ms": 3703.479766845703
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 0,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3903.437888249755,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4783216863870621,
+          "stage_0_gen_ms": 3901.898145675659
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 0,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 4055.5691812187433,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4750490188598633,
+          "stage_0_gen_ms": 4054.11696434021
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 0,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2914.4754242151976,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5313549190759659,
+          "stage_0_gen_ms": 2912.8897190093994
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 1,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3956.3041757792234,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.43829530477523804,
+          "stage_0_gen_ms": 3954.8752307891846
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 1,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3472.495773807168,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4928242415189743,
+          "stage_0_gen_ms": 3470.6645011901855
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 1,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3823.475956916809,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.43600425124168396,
+          "stage_0_gen_ms": 3822.1182823181152
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 2,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3728.8567572832108,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4575047641992569,
+          "stage_0_gen_ms": 3727.497339248657
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 2,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3251.2729428708553,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4599671810865402,
+          "stage_0_gen_ms": 3249.5458126068115
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 2,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2519.9095737189054,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4268381744623184,
+          "stage_0_gen_ms": 2518.5017585754395
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 3,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2903.5263396799564,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4358682781457901,
+          "stage_0_gen_ms": 2902.1315574645996
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 3,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2569.3431310355663,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.963456928730011,
+          "stage_0_gen_ms": 2566.920042037964
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 3,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2596.524642780423,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5122106522321701,
+          "stage_0_gen_ms": 2594.604015350342
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 4,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2534.8816830664873,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.49388036131858826,
+          "stage_0_gen_ms": 2533.007860183716
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 4,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2554.703989997506,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4896111786365509,
+          "stage_0_gen_ms": 2553.218126296997
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 4,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2589.3171578645706,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.47617964446544647,
+          "stage_0_gen_ms": 2587.8546237945557
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 5,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2525.704514235258,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.47704577445983887,
+          "stage_0_gen_ms": 2524.2340564727783
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 5,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2494.342729449272,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.44812075793743134,
+          "stage_0_gen_ms": 2492.6953315734863
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 5,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2485.86380854249,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.43359026312828064,
+          "stage_0_gen_ms": 2484.2886924743652
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 6,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2518.3732248842716,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.49544498324394226,
+          "stage_0_gen_ms": 2516.852378845215
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 6,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2511.360513046384,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.45570358633995056,
+          "stage_0_gen_ms": 2509.9642276763916
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 6,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2533.8884592056274,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.46370550990104675,
+          "stage_0_gen_ms": 2532.463788986206
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 7,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2873.604102060199,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.40943361818790436,
+          "stage_0_gen_ms": 2872.0126152038574
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 7,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2691.763238981366,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 5.116838961839676,
+          "stage_0_gen_ms": 2685.640573501587
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 7,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2557.040749117732,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5877874791622162,
+          "stage_0_gen_ms": 2554.9135208129883
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 8,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3818.1822765618563,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.8181650191545486,
+          "stage_0_gen_ms": 3816.0150051116943
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 8,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3663.938943296671,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5001239478588104,
+          "stage_0_gen_ms": 3662.288188934326
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 8,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3331.515483558178,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 4.415711387991905,
+          "stage_0_gen_ms": 3326.129674911499
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 9,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3992.993749678135,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4994440823793411,
+          "stage_0_gen_ms": 3991.4472103118896
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 9,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2738.071532920003,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.48693642020225525,
+          "stage_0_gen_ms": 2736.1559867858887
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 9,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3078.914673998952,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.9321402758359909,
+          "stage_0_gen_ms": 3076.4527320861816
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 10,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3133.350493386388,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4624146968126297,
+          "stage_0_gen_ms": 3131.753444671631
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 10,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2530.598131939769,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5121566355228424,
+          "stage_0_gen_ms": 2529.099464416504
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 10,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3272.624222561717,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4729572683572769,
+          "stage_0_gen_ms": 3270.9009647369385
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 11,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3986.302688717842,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5913656204938889,
+          "stage_0_gen_ms": 3984.653949737549
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 11,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2546.6908998787403,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.7534157484769821,
+          "stage_0_gen_ms": 2544.468879699707
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 11,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3064.5917300134897,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.47336332499980927,
+          "stage_0_gen_ms": 3063.089609146118
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 12,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3054.227204993367,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5352851003408432,
+          "stage_0_gen_ms": 3052.3128509521484
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 12,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3807.9504929482937,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5332678556442261,
+          "stage_0_gen_ms": 3805.494546890259
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 12,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 4056.6241443157196,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 4.508651793003082,
+          "stage_0_gen_ms": 4050.6668090820312
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 13,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3695.047330111265,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5600973963737488,
+          "stage_0_gen_ms": 3692.943811416626
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 13,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2527.290975674987,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.693807378411293,
+          "stage_0_gen_ms": 2525.4011154174805
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 13,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3008.382435888052,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5320664495229721,
+          "stage_0_gen_ms": 3006.5908432006836
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 14,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3832.2700150310993,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4687216132879257,
+          "stage_0_gen_ms": 3830.862283706665
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 14,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3753.580143675208,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.8252989500761032,
+          "stage_0_gen_ms": 3751.0366439819336
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 14,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 4084.544165059924,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4720352590084076,
+          "stage_0_gen_ms": 4082.977533340454
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 15,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2674.4334530085325,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 14.083314687013626,
+          "stage_0_gen_ms": 2659.322500228882
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 15,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2777.3710675537586,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.7349755614995956,
+          "stage_0_gen_ms": 2774.8918533325195
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 15,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3755.3450725972652,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5237944424152374,
+          "stage_0_gen_ms": 3753.0500888824463
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 16,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 4145.560223609209,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.8615944534540176,
+          "stage_0_gen_ms": 4143.382549285889
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 16,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 4097.112149000168,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.48526935279369354,
+          "stage_0_gen_ms": 4095.640182495117
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 16,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 4152.365239337087,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 1.0512638837099075,
+          "stage_0_gen_ms": 4149.60789680481
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 17,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2648.9209346473217,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5416963249444962,
+          "stage_0_gen_ms": 2647.3331451416016
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 17,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3654.1849840432405,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5303286015987396,
+          "stage_0_gen_ms": 3651.9625186920166
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 17,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2786.0440369695425,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.6769951432943344,
+          "stage_0_gen_ms": 2784.0845584869385
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 18,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3400.539616122842,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.44697709381580353,
+          "stage_0_gen_ms": 3398.951768875122
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 18,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 4142.699018120766,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4357416182756424,
+          "stage_0_gen_ms": 4140.516996383667
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 18,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2646.8344442546368,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.6916504353284836,
+          "stage_0_gen_ms": 2644.9532508850098
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 19,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2678.2376132905483,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5267374217510223,
+          "stage_0_gen_ms": 2676.454782485962
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 19,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2668.6913147568703,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5296897143125534,
+          "stage_0_gen_ms": 2666.9840812683105
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 19,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2828.621868044138,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.8178222924470901,
+          "stage_0_gen_ms": 2826.335906982422
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 20,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2987.9676550626755,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.505032017827034,
+          "stage_0_gen_ms": 2986.4418506622314
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 20,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 4410.063561052084,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.44282712042331696,
+          "stage_0_gen_ms": 4408.229827880859
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 20,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3285.0523814558983,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 1.1785347014665604,
+          "stage_0_gen_ms": 3282.1574211120605
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 21,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3002.3566149175167,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5364660173654556,
+          "stage_0_gen_ms": 3000.828742980957
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 21,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 4811.827290803194,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4753824323415756,
+          "stage_0_gen_ms": 4809.490919113159
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 21,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 4199.720868840814,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.8057057857513428,
+          "stage_0_gen_ms": 4197.4005699157715
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 22,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3028.125809505582,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.48812292516231537,
+          "stage_0_gen_ms": 3026.5800952911377
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 22,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 4165.308719500899,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5873460322618484,
+          "stage_0_gen_ms": 4162.966728210449
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 22,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 4590.306190773845,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.7826946675777435,
+          "stage_0_gen_ms": 4587.818384170532
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 23,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3368.9680453389883,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.6515644490718842,
+          "stage_0_gen_ms": 3366.654396057129
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 23,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3563.617393374443,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.6661154329776764,
+          "stage_0_gen_ms": 3561.7706775665283
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 23,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3171.0497215390205,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.49568526446819305,
+          "stage_0_gen_ms": 3169.1603660583496
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 24,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3724.464401602745,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.670434907078743,
+          "stage_0_gen_ms": 3722.193479537964
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 24,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3489.8854717612267,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5070306360721588,
+          "stage_0_gen_ms": 3488.2748126983643
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 24,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2932.378873229027,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5600526928901672,
+          "stage_0_gen_ms": 2930.4096698760986
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 25,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2472.1813928335905,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.8043795824050903,
+          "stage_0_gen_ms": 2470.041513442993
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 25,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2448.9700496196747,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5867555737495422,
+          "stage_0_gen_ms": 2447.3750591278076
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 25,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2481.9000754505396,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4698224365711212,
+          "stage_0_gen_ms": 2480.321168899536
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 26,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2475.577713921666,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 1.0446999222040176,
+          "stage_0_gen_ms": 2472.8572368621826
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 26,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 3635.722618550062,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.42292848229408264,
+          "stage_0_gen_ms": 3633.7664127349854
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 26,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2542.8736228495836,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4469752311706543,
+          "stage_0_gen_ms": 2541.025400161743
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 27,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2638.850439339876,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.9788516908884048,
+          "stage_0_gen_ms": 2635.6594562530518
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 27,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2514.097636565566,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.4308260977268219,
+          "stage_0_gen_ms": 2512.5937461853027
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 27,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2513.852059841156,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.46147406101226807,
+          "stage_0_gen_ms": 2511.9330883026123
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 28,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2486.1788284033537,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.712323933839798,
+          "stage_0_gen_ms": 2483.9744567871094
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 28,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2475.113846361637,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.7350090891122818,
+          "stage_0_gen_ms": 2473.3219146728516
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 28,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2509.2198103666306,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.9167995303869247,
+          "stage_0_gen_ms": 2506.6308975219727
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "paired",
+      "index": 29,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2450.886782258749,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.45266374945640564,
+          "stage_0_gen_ms": 2449.514865875244
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "paired",
+      "index": 29,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2500.9222757071257,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.6055440753698349,
+          "stage_0_gen_ms": 2498.9140033721924
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "paired",
+      "index": 29,
+      "seed": 42,
+      "profile": false,
+      "e2e_ms": 2477.280754595995,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.7138196378946304,
+          "stage_0_gen_ms": 2475.060224533081
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "correctness",
+      "index": 0,
+      "seed": 43,
+      "profile": false,
+      "e2e_ms": 2545.257579535246,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "b22f55dfe1b33a91a7fe4119cc086f84944d6a9eedf37c2368ab8a54081102a3"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.5676597356796265,
+          "stage_0_gen_ms": 2543.548583984375
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "correctness",
+      "index": 0,
+      "seed": 43,
+      "profile": false,
+      "e2e_ms": 2482.0880237966776,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "b22f55dfe1b33a91a7fe4119cc086f84944d6a9eedf37c2368ab8a54081102a3"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 3.3657029271125793,
+          "stage_0_gen_ms": 2477.7536392211914
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "correctness",
+      "index": 0,
+      "seed": 43,
+      "profile": false,
+      "e2e_ms": 2467.3941992223263,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "b22f55dfe1b33a91a7fe4119cc086f84944d6a9eedf37c2368ab8a54081102a3"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.8709356188774109,
+          "stage_0_gen_ms": 2464.8494720458984
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "serial1",
+      "phase": "correctness",
+      "index": 1,
+      "seed": 44,
+      "profile": false,
+      "e2e_ms": 2578.5591546446085,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "2cbfb34f21dc05f7b2b2da09f00a1c34316bd771c513f22f2de8a26f93a21d08"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.46368688344955444,
+          "stage_0_gen_ms": 2577.059745788574
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "equal",
+      "phase": "correctness",
+      "index": 1,
+      "seed": 44,
+      "profile": false,
+      "e2e_ms": 2475.4201993346214,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "2cbfb34f21dc05f7b2b2da09f00a1c34316bd771c513f22f2de8a26f93a21d08"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.8091703057289124,
+          "stage_0_gen_ms": 2473.0615615844727
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    },
+    {
+      "case": "wan5b-720p-f33",
+      "variant": "ratio12",
+      "phase": "correctness",
+      "index": 1,
+      "seed": 44,
+      "profile": false,
+      "e2e_ms": 2435.708176344633,
+      "shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "dtypes": [
+        "float32"
+      ],
+      "hashes": [
+        "2cbfb34f21dc05f7b2b2da09f00a1c34316bd771c513f22f2de8a26f93a21d08"
+      ],
+      "stage_durations": [
+        {
+          "queue_wait_ms": 0.48700347542762756,
+          "stage_0_gen_ms": 2434.297561645508
+        }
+      ],
+      "peak_memory_mb": [
+        21248.0
+      ]
+    }
+  ]
+}

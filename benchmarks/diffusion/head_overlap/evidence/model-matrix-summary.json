@@ -1,0 +1,2669 @@
+{
+  "metric": "Unprofiled Omni.generate wall latency; extraction, hashing, saving excluded",
+  "baseline": "Optimized direct CE, one head group, owned output",
+  "candidate": "Two overlapping head groups, staged local prefill, graph-shared borrowed output",
+  "sources": {
+    "h3-sp2-fp8": {
+      "source_sha": "dabac068d70a74a561beeb124bcbd90490fa1aa0",
+      "run_exit_code": "0",
+      "results_sha256": "32b4eca41d5afb49cccf5a39bfa3784c6ab1ddcfdaaf732fae01fb41224c3522",
+      "raw_requests": 130,
+      "model_audit": {
+        "kind": "model",
+        "rank": 0,
+        "fp8_modules": 260,
+        "vae_world": 2,
+        "vae_graph": true,
+        "min_generation_area": null,
+        "torch": "2.14.0+cu130",
+        "pid": 3105847,
+        "gpu": "NVIDIA L20X"
+      },
+      "measured_source_hashes": {
+        "analyze_edges.py": "4d83cafc20bf8f49074e92f5b954dc9775ff7aeaea6571528ddf3515c9865f8a",
+        "analyze_probe.py": "87637884f7d2ce9f2f12bcfaa20cbf65db29731b5688fb9ffbe65d5ef4aeaaa6",
+        "e2e.py": "56caf06ed66240a5a3f3b0367a48d104ce624c6303e322dfdb3febdf27b4e819",
+        "export_rich_request.py": "3986fca7e1064fef336de3b371fcb0c70adef991bdfe22ce6f01aebe23a2c138",
+        "full_request_driver.py": "b1387c0cbc46ad662320f1e75f51baa4bed0bdf3f9ccc046e2ac86c0c12482f7",
+        "graph_slot_stress.py": "ff115a7d97ffd3243fb6fd8bbdf2e5a5bb875348f98f10cede4c49ac51bab440",
+        "h3_graph_probe.py": "481c2ca7f1b9e4aabf5216b0057c28b4e651024048867d23d9d41b3b11eb134d",
+        "model_matrix.py": "6269133bf8c6736503ca17b4713fb564286e2f58d68242ca1f821f6dbf90819a",
+        "native_prefilled.py": "2bc8cf612ba11a741cb8914f3997f448239f538c137178a3a427c4fd03045b72",
+        "overlap_probe.py": "b92ba88a4d17d1fc5219614835a1d634870805bdc14c4833236163f8aa981559",
+        "prefilled_probe.py": "ce26d909d0c29f2ccf05be57b011ca8084944caea609fcb16012d2b82aa57ff8",
+        "prefilled_runner.py": "950025d765daed8b26c6d521f4df3a1e5bc2788cb40e474a3795b39df695c833",
+        "profile_full_request.py": "9cb297e1e8eb3695c32706d7d2e1be3931076ff3a1a79800ce3cc858cb8514c2",
+        "schedule_probe.py": "8c7fb72aafc80bae66775a2e9c7b4f4d115d039609f79d2769c329f5e92ee017",
+        "split_full_request.py": "2f473c9316837ca0fbd640545f5d709e79356e3f7408efa822d790909de88dcb",
+        "stress_fences.py": "ea73be1793f64fbdd43a3c8e68b4d823c3390132d86d880e9155d0962b068321",
+        "h3-matrix.json": "5a2adc11791df4493d6d84708089d3960a00c774599acb49e1ef4c54a97fd4fc",
+        "source-provenance.json": "bae41da207c160256f0efcb9fdd2eb95925f4bf65232f177ff10fe606d011bcd"
+      }
+    },
+    "h3-sp4-fp8": {
+      "source_sha": "03eac9d0e9d620c188e1f19c41256483cb3700b3",
+      "run_exit_code": "0",
+      "results_sha256": "7921fe4c324ac0a18ed45236640233a851da8ca3bc84ba2f856a50bfaf489a7c",
+      "raw_requests": 78,
+      "model_audit": {
+        "kind": "model",
+        "rank": 0,
+        "fp8_modules": 260,
+        "vae_world": 4,
+        "vae_graph": true,
+        "min_generation_area": null,
+        "torch": "2.14.0+cu130",
+        "pid": 3205334,
+        "gpu": "NVIDIA L20X"
+      },
+      "measured_source_hashes": {
+        "analyze_edges.py": "4d83cafc20bf8f49074e92f5b954dc9775ff7aeaea6571528ddf3515c9865f8a",
+        "analyze_probe.py": "87637884f7d2ce9f2f12bcfaa20cbf65db29731b5688fb9ffbe65d5ef4aeaaa6",
+        "e2e.py": "56caf06ed66240a5a3f3b0367a48d104ce624c6303e322dfdb3febdf27b4e819",
+        "export_rich_request.py": "3986fca7e1064fef336de3b371fcb0c70adef991bdfe22ce6f01aebe23a2c138",
+        "full_request_driver.py": "b1387c0cbc46ad662320f1e75f51baa4bed0bdf3f9ccc046e2ac86c0c12482f7",
+        "graph_slot_stress.py": "ff115a7d97ffd3243fb6fd8bbdf2e5a5bb875348f98f10cede4c49ac51bab440",
+        "h3_graph_probe.py": "481c2ca7f1b9e4aabf5216b0057c28b4e651024048867d23d9d41b3b11eb134d",
+        "layout_graph_stress.py": "50fc8ac20a4a0004e20d3759c5a7d9420685822fa5b9c4d4b0694932fde99292",
+        "model_matrix.py": "9ecd6d1ba6b9a6c330fd9850359c2b4ba47349cbdddf8a17493541d11d7496b0",
+        "model_probe.py": "56662fa2a076e48001035737c655193e2389d7d576131147ebb2505b3aef2c94",
+        "native_prefilled.py": "949ec1cd6387c4b0f05496ecbb619afb3667284ca1f138adb2a15ac2eb6207cf",
+        "overlap_probe.py": "b92ba88a4d17d1fc5219614835a1d634870805bdc14c4833236163f8aa981559",
+        "prefilled_probe.py": "ce26d909d0c29f2ccf05be57b011ca8084944caea609fcb16012d2b82aa57ff8",
+        "prefilled_runner.py": "950025d765daed8b26c6d521f4df3a1e5bc2788cb40e474a3795b39df695c833",
+        "profile_full_request.py": "9cb297e1e8eb3695c32706d7d2e1be3931076ff3a1a79800ce3cc858cb8514c2",
+        "schedule_probe.py": "8c7fb72aafc80bae66775a2e9c7b4f4d115d039609f79d2769c329f5e92ee017",
+        "split_full_request.py": "2f473c9316837ca0fbd640545f5d709e79356e3f7408efa822d790909de88dcb",
+        "stress_fences.py": "ea73be1793f64fbdd43a3c8e68b4d823c3390132d86d880e9155d0962b068321",
+        "flux-matrix.json": "a78a33ecd81d2554687981d4e1965baeafbd1ac868b43524f29e91b244c02cf1",
+        "h3-matrix.json": "5a2adc11791df4493d6d84708089d3960a00c774599acb49e1ef4c54a97fd4fc",
+        "qwen-edit-matrix.json": "bef9db3e7e4f307292d591ccec6cebed7671b5aea130ee87435b38bf51716673",
+        "source-provenance.json": "bae41da207c160256f0efcb9fdd2eb95925f4bf65232f177ff10fe606d011bcd",
+        "wan-matrix.json": "c72fb011f733b39423a5c6a131bd3091baaaffba19370f7fbdaef3289973e202"
+      }
+    },
+    "h3-sp4-confirm": {
+      "source_sha": "847b1087e0c879fe89912b52b25abe0371a6d66a",
+      "run_exit_code": "0",
+      "results_sha256": "c02b18a571408273d02aa76ff2b2a78087eca217d22374665cbb8198895ba468",
+      "raw_requests": 148,
+      "model_audit": {
+        "kind": "model",
+        "rank": 0,
+        "fp8_modules": 260,
+        "vae_world": 4,
+        "vae_graph": true,
+        "min_generation_area": null,
+        "torch": "2.14.0+cu130",
+        "pid": 3339399,
+        "gpu": "NVIDIA L20X"
+      },
+      "measured_source_hashes": {
+        "analyze_edges.py": "4d83cafc20bf8f49074e92f5b954dc9775ff7aeaea6571528ddf3515c9865f8a",
+        "analyze_probe.py": "87637884f7d2ce9f2f12bcfaa20cbf65db29731b5688fb9ffbe65d5ef4aeaaa6",
+        "e2e.py": "56caf06ed66240a5a3f3b0367a48d104ce624c6303e322dfdb3febdf27b4e819",
+        "export_rich_request.py": "3986fca7e1064fef336de3b371fcb0c70adef991bdfe22ce6f01aebe23a2c138",
+        "full_request_driver.py": "b1387c0cbc46ad662320f1e75f51baa4bed0bdf3f9ccc046e2ac86c0c12482f7",
+        "graph_slot_stress.py": "ff115a7d97ffd3243fb6fd8bbdf2e5a5bb875348f98f10cede4c49ac51bab440",
+        "h3_graph_probe.py": "481c2ca7f1b9e4aabf5216b0057c28b4e651024048867d23d9d41b3b11eb134d",
+        "layout_graph_stress.py": "50fc8ac20a4a0004e20d3759c5a7d9420685822fa5b9c4d4b0694932fde99292",
+        "model_matrix.py": "9ecd6d1ba6b9a6c330fd9850359c2b4ba47349cbdddf8a17493541d11d7496b0",
+        "model_probe.py": "0204d427b42be4b3d0e534f757999d0fec9dc58d5e974b3a989e319e624d256c",
+        "native_prefilled.py": "949ec1cd6387c4b0f05496ecbb619afb3667284ca1f138adb2a15ac2eb6207cf",
+        "overlap_probe.py": "b92ba88a4d17d1fc5219614835a1d634870805bdc14c4833236163f8aa981559",
+        "prefilled_probe.py": "ce26d909d0c29f2ccf05be57b011ca8084944caea609fcb16012d2b82aa57ff8",
+        "prefilled_runner.py": "950025d765daed8b26c6d521f4df3a1e5bc2788cb40e474a3795b39df695c833",
+        "profile_full_request.py": "9cb297e1e8eb3695c32706d7d2e1be3931076ff3a1a79800ce3cc858cb8514c2",
+        "schedule_probe.py": "8c7fb72aafc80bae66775a2e9c7b4f4d115d039609f79d2769c329f5e92ee017",
+        "split_full_request.py": "2f473c9316837ca0fbd640545f5d709e79356e3f7408efa822d790909de88dcb",
+        "stress_fences.py": "ea73be1793f64fbdd43a3c8e68b4d823c3390132d86d880e9155d0962b068321",
+        "flux-bf16-matrix.json": "e2153b0ec20f9ff975ae129cc407f9e9f32608c231b26eea7fad1dd4fa3c6e0e",
+        "flux-matrix.json": "a78a33ecd81d2554687981d4e1965baeafbd1ac868b43524f29e91b244c02cf1",
+        "h3-matrix.json": "5a2adc11791df4493d6d84708089d3960a00c774599acb49e1ef4c54a97fd4fc",
+        "qwen-edit-matrix.json": "bef9db3e7e4f307292d591ccec6cebed7671b5aea130ee87435b38bf51716673",
+        "source-provenance.json": "bae41da207c160256f0efcb9fdd2eb95925f4bf65232f177ff10fe606d011bcd",
+        "wan-matrix.json": "c72fb011f733b39423a5c6a131bd3091baaaffba19370f7fbdaef3289973e202"
+      }
+    },
+    "h3-sp2-bf16": {
+      "source_sha": "5c2ffde4a4cdba09e6377e0b79ffe37d00fd2146",
+      "run_exit_code": "0",
+      "results_sha256": "bd611fb5773ce3de9ed9c8f3fb746f675b70f4e43d92b39a02a374c31acfd5dc",
+      "raw_requests": 54,
+      "model_audit": {
+        "kind": "model",
+        "rank": 0,
+        "fp8_modules": 0,
+        "vae_world": 2,
+        "vae_graph": true,
+        "min_generation_area": null,
+        "torch": "2.14.0+cu130",
+        "pid": 3304713,
+        "gpu": "NVIDIA L20X"
+      },
+      "measured_source_hashes": {
+        "analyze_edges.py": "4d83cafc20bf8f49074e92f5b954dc9775ff7aeaea6571528ddf3515c9865f8a",
+        "analyze_probe.py": "87637884f7d2ce9f2f12bcfaa20cbf65db29731b5688fb9ffbe65d5ef4aeaaa6",
+        "e2e.py": "56caf06ed66240a5a3f3b0367a48d104ce624c6303e322dfdb3febdf27b4e819",
+        "export_rich_request.py": "3986fca7e1064fef336de3b371fcb0c70adef991bdfe22ce6f01aebe23a2c138",
+        "full_request_driver.py": "b1387c0cbc46ad662320f1e75f51baa4bed0bdf3f9ccc046e2ac86c0c12482f7",
+        "graph_slot_stress.py": "ff115a7d97ffd3243fb6fd8bbdf2e5a5bb875348f98f10cede4c49ac51bab440",
+        "h3_graph_probe.py": "481c2ca7f1b9e4aabf5216b0057c28b4e651024048867d23d9d41b3b11eb134d",
+        "layout_graph_stress.py": "50fc8ac20a4a0004e20d3759c5a7d9420685822fa5b9c4d4b0694932fde99292",
+        "model_matrix.py": "9ecd6d1ba6b9a6c330fd9850359c2b4ba47349cbdddf8a17493541d11d7496b0",
+        "model_probe.py": "22501c83287ef325ef416fe62920949c9553267c33d1b4876c76bb0e442c2135",
+        "native_prefilled.py": "949ec1cd6387c4b0f05496ecbb619afb3667284ca1f138adb2a15ac2eb6207cf",
+        "overlap_probe.py": "b92ba88a4d17d1fc5219614835a1d634870805bdc14c4833236163f8aa981559",
+        "prefilled_probe.py": "ce26d909d0c29f2ccf05be57b011ca8084944caea609fcb16012d2b82aa57ff8",
+        "prefilled_runner.py": "950025d765daed8b26c6d521f4df3a1e5bc2788cb40e474a3795b39df695c833",
+        "profile_full_request.py": "9cb297e1e8eb3695c32706d7d2e1be3931076ff3a1a79800ce3cc858cb8514c2",
+        "schedule_probe.py": "8c7fb72aafc80bae66775a2e9c7b4f4d115d039609f79d2769c329f5e92ee017",
+        "split_full_request.py": "2f473c9316837ca0fbd640545f5d709e79356e3f7408efa822d790909de88dcb",
+        "stress_fences.py": "ea73be1793f64fbdd43a3c8e68b4d823c3390132d86d880e9155d0962b068321",
+        "flux-matrix.json": "a78a33ecd81d2554687981d4e1965baeafbd1ac868b43524f29e91b244c02cf1",
+        "h3-matrix.json": "5a2adc11791df4493d6d84708089d3960a00c774599acb49e1ef4c54a97fd4fc",
+        "qwen-edit-matrix.json": "bef9db3e7e4f307292d591ccec6cebed7671b5aea130ee87435b38bf51716673",
+        "source-provenance.json": "bae41da207c160256f0efcb9fdd2eb95925f4bf65232f177ff10fe606d011bcd",
+        "wan-matrix.json": "c72fb011f733b39423a5c6a131bd3091baaaffba19370f7fbdaef3289973e202"
+      }
+    },
+    "qwen-edit-sp2-fp8": {
+      "source_sha": "5c2ffde4a4cdba09e6377e0b79ffe37d00fd2146",
+      "run_exit_code": "0",
+      "results_sha256": "e34fcda29f1edd73266796a260c41fb8570a9f60b0ec5dfeda5774773ce7d2b1",
+      "raw_requests": 72,
+      "model_audit": {
+        "rank": 0,
+        "pid": 3227122,
+        "kind": "model",
+        "pipeline": "QwenImageEditPlusPipeline",
+        "fp8_modules": {
+          "transformer": 480
+        },
+        "gpu": "NVIDIA L20X",
+        "torch": "2.14.0+cu130"
+      },
+      "measured_source_hashes": {
+        "analyze_edges.py": "4d83cafc20bf8f49074e92f5b954dc9775ff7aeaea6571528ddf3515c9865f8a",
+        "analyze_probe.py": "87637884f7d2ce9f2f12bcfaa20cbf65db29731b5688fb9ffbe65d5ef4aeaaa6",
+        "e2e.py": "56caf06ed66240a5a3f3b0367a48d104ce624c6303e322dfdb3febdf27b4e819",
+        "export_rich_request.py": "3986fca7e1064fef336de3b371fcb0c70adef991bdfe22ce6f01aebe23a2c138",
+        "full_request_driver.py": "b1387c0cbc46ad662320f1e75f51baa4bed0bdf3f9ccc046e2ac86c0c12482f7",
+        "graph_slot_stress.py": "ff115a7d97ffd3243fb6fd8bbdf2e5a5bb875348f98f10cede4c49ac51bab440",
+        "h3_graph_probe.py": "481c2ca7f1b9e4aabf5216b0057c28b4e651024048867d23d9d41b3b11eb134d",
+        "layout_graph_stress.py": "50fc8ac20a4a0004e20d3759c5a7d9420685822fa5b9c4d4b0694932fde99292",
+        "model_matrix.py": "9ecd6d1ba6b9a6c330fd9850359c2b4ba47349cbdddf8a17493541d11d7496b0",
+        "model_probe.py": "22501c83287ef325ef416fe62920949c9553267c33d1b4876c76bb0e442c2135",
+        "native_prefilled.py": "949ec1cd6387c4b0f05496ecbb619afb3667284ca1f138adb2a15ac2eb6207cf",
+        "overlap_probe.py": "b92ba88a4d17d1fc5219614835a1d634870805bdc14c4833236163f8aa981559",
+        "prefilled_probe.py": "ce26d909d0c29f2ccf05be57b011ca8084944caea609fcb16012d2b82aa57ff8",
+        "prefilled_runner.py": "950025d765daed8b26c6d521f4df3a1e5bc2788cb40e474a3795b39df695c833",
+        "profile_full_request.py": "9cb297e1e8eb3695c32706d7d2e1be3931076ff3a1a79800ce3cc858cb8514c2",
+        "schedule_probe.py": "8c7fb72aafc80bae66775a2e9c7b4f4d115d039609f79d2769c329f5e92ee017",
+        "split_full_request.py": "2f473c9316837ca0fbd640545f5d709e79356e3f7408efa822d790909de88dcb",
+        "stress_fences.py": "ea73be1793f64fbdd43a3c8e68b4d823c3390132d86d880e9155d0962b068321",
+        "flux-matrix.json": "a78a33ecd81d2554687981d4e1965baeafbd1ac868b43524f29e91b244c02cf1",
+        "h3-matrix.json": "5a2adc11791df4493d6d84708089d3960a00c774599acb49e1ef4c54a97fd4fc",
+        "qwen-edit-matrix.json": "bef9db3e7e4f307292d591ccec6cebed7671b5aea130ee87435b38bf51716673",
+        "source-provenance.json": "bae41da207c160256f0efcb9fdd2eb95925f4bf65232f177ff10fe606d011bcd",
+        "wan-matrix.json": "c72fb011f733b39423a5c6a131bd3091baaaffba19370f7fbdaef3289973e202"
+      }
+    },
+    "flux-bf16": {
+      "source_sha": "847b1087e0c879fe89912b52b25abe0371a6d66a",
+      "run_exit_code": "1",
+      "results_sha256": "4f9d208790ad60179d77b68936fbff7c9fa999f54c821b33ad7c319d90178f3e",
+      "raw_requests": 36,
+      "model_audit": {
+        "rank": 0,
+        "pid": 3336088,
+        "kind": "model",
+        "pipeline": "Flux2KleinPipeline",
+        "fp8_modules": {
+          "transformer": 0
+        },
+        "gpu": "NVIDIA L20X",
+        "torch": "2.14.0+cu130"
+      },
+      "measured_source_hashes": {
+        "analyze_edges.py": "4d83cafc20bf8f49074e92f5b954dc9775ff7aeaea6571528ddf3515c9865f8a",
+        "analyze_probe.py": "87637884f7d2ce9f2f12bcfaa20cbf65db29731b5688fb9ffbe65d5ef4aeaaa6",
+        "e2e.py": "56caf06ed66240a5a3f3b0367a48d104ce624c6303e322dfdb3febdf27b4e819",
+        "export_rich_request.py": "3986fca7e1064fef336de3b371fcb0c70adef991bdfe22ce6f01aebe23a2c138",
+        "full_request_driver.py": "b1387c0cbc46ad662320f1e75f51baa4bed0bdf3f9ccc046e2ac86c0c12482f7",
+        "graph_slot_stress.py": "ff115a7d97ffd3243fb6fd8bbdf2e5a5bb875348f98f10cede4c49ac51bab440",
+        "h3_graph_probe.py": "481c2ca7f1b9e4aabf5216b0057c28b4e651024048867d23d9d41b3b11eb134d",
+        "layout_graph_stress.py": "50fc8ac20a4a0004e20d3759c5a7d9420685822fa5b9c4d4b0694932fde99292",
+        "model_matrix.py": "9ecd6d1ba6b9a6c330fd9850359c2b4ba47349cbdddf8a17493541d11d7496b0",
+        "model_probe.py": "0204d427b42be4b3d0e534f757999d0fec9dc58d5e974b3a989e319e624d256c",
+        "native_prefilled.py": "949ec1cd6387c4b0f05496ecbb619afb3667284ca1f138adb2a15ac2eb6207cf",
+        "overlap_probe.py": "b92ba88a4d17d1fc5219614835a1d634870805bdc14c4833236163f8aa981559",
+        "prefilled_probe.py": "ce26d909d0c29f2ccf05be57b011ca8084944caea609fcb16012d2b82aa57ff8",
+        "prefilled_runner.py": "950025d765daed8b26c6d521f4df3a1e5bc2788cb40e474a3795b39df695c833",
+        "profile_full_request.py": "9cb297e1e8eb3695c32706d7d2e1be3931076ff3a1a79800ce3cc858cb8514c2",
+        "schedule_probe.py": "8c7fb72aafc80bae66775a2e9c7b4f4d115d039609f79d2769c329f5e92ee017",
+        "split_full_request.py": "2f473c9316837ca0fbd640545f5d709e79356e3f7408efa822d790909de88dcb",
+        "stress_fences.py": "ea73be1793f64fbdd43a3c8e68b4d823c3390132d86d880e9155d0962b068321",
+        "flux-bf16-matrix.json": "e2153b0ec20f9ff975ae129cc407f9e9f32608c231b26eea7fad1dd4fa3c6e0e",
+        "flux-matrix.json": "a78a33ecd81d2554687981d4e1965baeafbd1ac868b43524f29e91b244c02cf1",
+        "h3-matrix.json": "5a2adc11791df4493d6d84708089d3960a00c774599acb49e1ef4c54a97fd4fc",
+        "qwen-edit-matrix.json": "bef9db3e7e4f307292d591ccec6cebed7671b5aea130ee87435b38bf51716673",
+        "source-provenance.json": "bae41da207c160256f0efcb9fdd2eb95925f4bf65232f177ff10fe606d011bcd",
+        "wan-matrix.json": "c72fb011f733b39423a5c6a131bd3091baaaffba19370f7fbdaef3289973e202"
+      }
+    },
+    "flux-bf16-large": {
+      "source_sha": "4978d601401d3cf3974561547f4381f2765f379b",
+      "run_exit_code": "0",
+      "results_sha256": "46b36e1853badfb2341020bdb18ef3a9e9577bbda5447e35512e27ab592721ad",
+      "raw_requests": 54,
+      "model_audit": {
+        "rank": 0,
+        "pid": 3419318,
+        "kind": "model",
+        "pipeline": "Flux2KleinPipeline",
+        "fp8_modules": {
+          "transformer": 0
+        },
+        "gpu": "NVIDIA L20X",
+        "torch": "2.14.0+cu130"
+      },
+      "measured_source_hashes": {
+        "analyze_edges.py": "4d83cafc20bf8f49074e92f5b954dc9775ff7aeaea6571528ddf3515c9865f8a",
+        "analyze_probe.py": "87637884f7d2ce9f2f12bcfaa20cbf65db29731b5688fb9ffbe65d5ef4aeaaa6",
+        "e2e.py": "56caf06ed66240a5a3f3b0367a48d104ce624c6303e322dfdb3febdf27b4e819",
+        "export_rich_request.py": "3986fca7e1064fef336de3b371fcb0c70adef991bdfe22ce6f01aebe23a2c138",
+        "full_request_driver.py": "b1387c0cbc46ad662320f1e75f51baa4bed0bdf3f9ccc046e2ac86c0c12482f7",
+        "graph_slot_stress.py": "ff115a7d97ffd3243fb6fd8bbdf2e5a5bb875348f98f10cede4c49ac51bab440",
+        "h3_graph_probe.py": "481c2ca7f1b9e4aabf5216b0057c28b4e651024048867d23d9d41b3b11eb134d",
+        "layout_graph_stress.py": "1724451d79f47c8c6f92335d5147771eb1e02e03c27c06234dd294194736a3e7",
+        "model_matrix.py": "9ecd6d1ba6b9a6c330fd9850359c2b4ba47349cbdddf8a17493541d11d7496b0",
+        "model_probe.py": "0c366cc66d2034f3ff24f2eaff7fcf05e379bf0318b26210ecf3126b281b7f3d",
+        "native_prefilled.py": "949ec1cd6387c4b0f05496ecbb619afb3667284ca1f138adb2a15ac2eb6207cf",
+        "overlap_probe.py": "b92ba88a4d17d1fc5219614835a1d634870805bdc14c4833236163f8aa981559",
+        "prefilled_probe.py": "ce26d909d0c29f2ccf05be57b011ca8084944caea609fcb16012d2b82aa57ff8",
+        "prefilled_runner.py": "950025d765daed8b26c6d521f4df3a1e5bc2788cb40e474a3795b39df695c833",
+        "profile_full_request.py": "9cb297e1e8eb3695c32706d7d2e1be3931076ff3a1a79800ce3cc858cb8514c2",
+        "schedule_probe.py": "8c7fb72aafc80bae66775a2e9c7b4f4d115d039609f79d2769c329f5e92ee017",
+        "split_full_request.py": "2f473c9316837ca0fbd640545f5d709e79356e3f7408efa822d790909de88dcb",
+        "stress_fences.py": "ea73be1793f64fbdd43a3c8e68b4d823c3390132d86d880e9155d0962b068321",
+        "flux-bf16-large-matrix.json": "91afcf3c5c5150e6666f7fa75c9579ed63d67260b98e0032ac02957cf6216389",
+        "flux-bf16-matrix.json": "e2153b0ec20f9ff975ae129cc407f9e9f32608c231b26eea7fad1dd4fa3c6e0e",
+        "flux-matrix.json": "a78a33ecd81d2554687981d4e1965baeafbd1ac868b43524f29e91b244c02cf1",
+        "h3-matrix.json": "5a2adc11791df4493d6d84708089d3960a00c774599acb49e1ef4c54a97fd4fc",
+        "qwen-edit-matrix.json": "bef9db3e7e4f307292d591ccec6cebed7671b5aea130ee87435b38bf51716673",
+        "source-provenance.json": "bae41da207c160256f0efcb9fdd2eb95925f4bf65232f177ff10fe606d011bcd",
+        "wan-matrix.json": "3d03712e1a7058b7ee6ff529b94423cdc7c3a93aa56d0c64249cead4cbc218c1"
+      }
+    },
+    "flux-confirm": {
+      "source_sha": "68435746aa25b83453751a0d1952921d0b53e010",
+      "run_exit_code": "0",
+      "results_sha256": "408eb60e52d59ba22f24c4cd9694e2b0c4f9167a6066b54fa7174d5f6901ce95",
+      "raw_requests": 74,
+      "model_audit": {
+        "rank": 0,
+        "pid": 3452215,
+        "kind": "model",
+        "pipeline": "Flux2KleinPipeline",
+        "fp8_modules": {
+          "transformer": 0
+        },
+        "gpu": "NVIDIA L20X",
+        "torch": "2.14.0+cu130"
+      },
+      "measured_source_hashes": {
+        "analyze_edges.py": "4d83cafc20bf8f49074e92f5b954dc9775ff7aeaea6571528ddf3515c9865f8a",
+        "analyze_probe.py": "87637884f7d2ce9f2f12bcfaa20cbf65db29731b5688fb9ffbe65d5ef4aeaaa6",
+        "e2e.py": "56caf06ed66240a5a3f3b0367a48d104ce624c6303e322dfdb3febdf27b4e819",
+        "export_rich_request.py": "3986fca7e1064fef336de3b371fcb0c70adef991bdfe22ce6f01aebe23a2c138",
+        "full_request_driver.py": "b1387c0cbc46ad662320f1e75f51baa4bed0bdf3f9ccc046e2ac86c0c12482f7",
+        "graph_slot_stress.py": "ff115a7d97ffd3243fb6fd8bbdf2e5a5bb875348f98f10cede4c49ac51bab440",
+        "h3_graph_probe.py": "481c2ca7f1b9e4aabf5216b0057c28b4e651024048867d23d9d41b3b11eb134d",
+        "layout_graph_stress.py": "1724451d79f47c8c6f92335d5147771eb1e02e03c27c06234dd294194736a3e7",
+        "model_matrix.py": "9ecd6d1ba6b9a6c330fd9850359c2b4ba47349cbdddf8a17493541d11d7496b0",
+        "model_probe.py": "0c366cc66d2034f3ff24f2eaff7fcf05e379bf0318b26210ecf3126b281b7f3d",
+        "native_prefilled.py": "949ec1cd6387c4b0f05496ecbb619afb3667284ca1f138adb2a15ac2eb6207cf",
+        "overlap_probe.py": "b92ba88a4d17d1fc5219614835a1d634870805bdc14c4833236163f8aa981559",
+        "prefilled_probe.py": "ce26d909d0c29f2ccf05be57b011ca8084944caea609fcb16012d2b82aa57ff8",
+        "prefilled_runner.py": "950025d765daed8b26c6d521f4df3a1e5bc2788cb40e474a3795b39df695c833",
+        "profile_full_request.py": "9cb297e1e8eb3695c32706d7d2e1be3931076ff3a1a79800ce3cc858cb8514c2",
+        "schedule_probe.py": "8c7fb72aafc80bae66775a2e9c7b4f4d115d039609f79d2769c329f5e92ee017",
+        "split_full_request.py": "2f473c9316837ca0fbd640545f5d709e79356e3f7408efa822d790909de88dcb",
+        "stress_fences.py": "ea73be1793f64fbdd43a3c8e68b4d823c3390132d86d880e9155d0962b068321",
+        "flux-bf16-confirm.json": "81c9f037b1c1f040d9bce2a27adc7cd89d9915fac5f1a8be8e32c648781b5492",
+        "flux-bf16-large-matrix.json": "91afcf3c5c5150e6666f7fa75c9579ed63d67260b98e0032ac02957cf6216389",
+        "flux-bf16-matrix.json": "e2153b0ec20f9ff975ae129cc407f9e9f32608c231b26eea7fad1dd4fa3c6e0e",
+        "flux-matrix.json": "a78a33ecd81d2554687981d4e1965baeafbd1ac868b43524f29e91b244c02cf1",
+        "h3-matrix.json": "5a2adc11791df4493d6d84708089d3960a00c774599acb49e1ef4c54a97fd4fc",
+        "qwen-edit-matrix.json": "bef9db3e7e4f307292d591ccec6cebed7671b5aea130ee87435b38bf51716673",
+        "source-provenance.json": "bae41da207c160256f0efcb9fdd2eb95925f4bf65232f177ff10fe606d011bcd",
+        "wan-matrix.json": "3d03712e1a7058b7ee6ff529b94423cdc7c3a93aa56d0c64249cead4cbc218c1"
+      }
+    },
+    "wan-sp2-fp8": {
+      "source_sha": "30db6b8bb6d294b3ea78061e9501225d60e431e0",
+      "run_exit_code": "0",
+      "results_sha256": "4ca917001889c800bbd8c0e5519493259f5f46b534ccbd424c0f11fe0fe445d0",
+      "raw_requests": 72,
+      "model_audit": {
+        "rank": 0,
+        "pid": 3479275,
+        "kind": "model",
+        "pipeline": "Wan22Pipeline",
+        "fp8_modules": {
+          "transformer": 240
+        },
+        "gpu": "NVIDIA L20X",
+        "torch": "2.14.0+cu130"
+      },
+      "measured_source_hashes": {
+        "analyze_edges.py": "4d83cafc20bf8f49074e92f5b954dc9775ff7aeaea6571528ddf3515c9865f8a",
+        "analyze_probe.py": "87637884f7d2ce9f2f12bcfaa20cbf65db29731b5688fb9ffbe65d5ef4aeaaa6",
+        "e2e.py": "56caf06ed66240a5a3f3b0367a48d104ce624c6303e322dfdb3febdf27b4e819",
+        "export_rich_request.py": "3986fca7e1064fef336de3b371fcb0c70adef991bdfe22ce6f01aebe23a2c138",
+        "full_request_driver.py": "b1387c0cbc46ad662320f1e75f51baa4bed0bdf3f9ccc046e2ac86c0c12482f7",
+        "graph_slot_stress.py": "ff115a7d97ffd3243fb6fd8bbdf2e5a5bb875348f98f10cede4c49ac51bab440",
+        "h3_graph_probe.py": "481c2ca7f1b9e4aabf5216b0057c28b4e651024048867d23d9d41b3b11eb134d",
+        "layout_graph_stress.py": "1724451d79f47c8c6f92335d5147771eb1e02e03c27c06234dd294194736a3e7",
+        "model_matrix.py": "9ecd6d1ba6b9a6c330fd9850359c2b4ba47349cbdddf8a17493541d11d7496b0",
+        "model_probe.py": "0c366cc66d2034f3ff24f2eaff7fcf05e379bf0318b26210ecf3126b281b7f3d",
+        "native_prefilled.py": "949ec1cd6387c4b0f05496ecbb619afb3667284ca1f138adb2a15ac2eb6207cf",
+        "overlap_probe.py": "b92ba88a4d17d1fc5219614835a1d634870805bdc14c4833236163f8aa981559",
+        "prefilled_probe.py": "ce26d909d0c29f2ccf05be57b011ca8084944caea609fcb16012d2b82aa57ff8",
+        "prefilled_runner.py": "950025d765daed8b26c6d521f4df3a1e5bc2788cb40e474a3795b39df695c833",
+        "profile_full_request.py": "9cb297e1e8eb3695c32706d7d2e1be3931076ff3a1a79800ce3cc858cb8514c2",
+        "schedule_probe.py": "8c7fb72aafc80bae66775a2e9c7b4f4d115d039609f79d2769c329f5e92ee017",
+        "split_full_request.py": "2f473c9316837ca0fbd640545f5d709e79356e3f7408efa822d790909de88dcb",
+        "stress_fences.py": "ea73be1793f64fbdd43a3c8e68b4d823c3390132d86d880e9155d0962b068321",
+        "flux-bf16-confirm.json": "81c9f037b1c1f040d9bce2a27adc7cd89d9915fac5f1a8be8e32c648781b5492",
+        "flux-bf16-large-matrix.json": "91afcf3c5c5150e6666f7fa75c9579ed63d67260b98e0032ac02957cf6216389",
+        "flux-bf16-matrix.json": "e2153b0ec20f9ff975ae129cc407f9e9f32608c231b26eea7fad1dd4fa3c6e0e",
+        "flux-matrix.json": "a78a33ecd81d2554687981d4e1965baeafbd1ac868b43524f29e91b244c02cf1",
+        "h3-matrix.json": "5a2adc11791df4493d6d84708089d3960a00c774599acb49e1ef4c54a97fd4fc",
+        "qwen-edit-matrix.json": "bef9db3e7e4f307292d591ccec6cebed7671b5aea130ee87435b38bf51716673",
+        "source-provenance.json": "bae41da207c160256f0efcb9fdd2eb95925f4bf65232f177ff10fe606d011bcd",
+        "wan-matrix.json": "3d03712e1a7058b7ee6ff529b94423cdc7c3a93aa56d0c64249cead4cbc218c1"
+      }
+    }
+  },
+  "cases": [
+    {
+      "run": "h3-sp2-fp8",
+      "case": "h3-1k",
+      "sampling": {
+        "height": 1024,
+        "width": 1024,
+        "num_inference_steps": 6,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      },
+      "reference_images": 0,
+      "source_sha": "dabac068d70a74a561beeb124bcbd90490fa1aa0",
+      "run_exit_code": "0",
+      "sp": 2,
+      "vae_parallel": 2,
+      "quantization": "FP8 DiT / BF16 attention",
+      "serial_ms": 393.5695290565491,
+      "overlap_ms": 388.043362647295,
+      "latency_reduction_pct": 1.4041143943488725,
+      "paired_faster": 7,
+      "pairs": 8,
+      "median_paired_saving_ms": 3.8138991221785545,
+      "peak_memory_mb": 59558.0,
+      "qkv_audit": [
+        [
+          1,
+          528,
+          56,
+          128
+        ]
+      ],
+      "output_shapes": [
+        [
+          1024,
+          1024,
+          3
+        ]
+      ],
+      "exact_seeds": [
+        42,
+        43,
+        44
+      ],
+      "seed_hashes": {
+        "42": [
+          "86bcb47f837cfbe157f397e70fc97f71fd50a1ea30c035660efc76fbff5dcf59"
+        ],
+        "43": [
+          "2c5dd5387a22297b68cbaa09beaaff1456ac07a523868c669e0f9eb98e209f44"
+        ],
+        "44": [
+          "8eb8be4a589745146776672784be3fcbc0a3bcaecbc88f185210830ec5460534"
+        ]
+      },
+      "new_profile": false,
+      "communication_share": null,
+      "serial_samples_ms": [
+        396.9316314905882,
+        393.7429077923298,
+        394.41428892314434,
+        390.8303678035736,
+        387.0594669133425,
+        393.39615032076836,
+        396.9894237816334,
+        390.3660159558058
+      ],
+      "overlap_samples_ms": [
+        397.94307574629784,
+        393.100468441844,
+        387.62188889086246,
+        386.80918887257576,
+        386.6423424333334,
+        388.46483640372753,
+        389.7221349179745,
+        386.7593966424465
+      ]
+    },
+    {
+      "run": "h3-sp2-fp8",
+      "case": "h3-2k",
+      "sampling": {
+        "height": 2048,
+        "width": 2048,
+        "num_inference_steps": 6,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      },
+      "reference_images": 0,
+      "source_sha": "dabac068d70a74a561beeb124bcbd90490fa1aa0",
+      "run_exit_code": "0",
+      "sp": 2,
+      "vae_parallel": 2,
+      "quantization": "FP8 DiT / BF16 attention",
+      "serial_ms": 1027.3387357592583,
+      "overlap_ms": 1021.1687060073018,
+      "latency_reduction_pct": 0.6005837740943819,
+      "paired_faster": 7,
+      "pairs": 8,
+      "median_paired_saving_ms": 4.328837618231773,
+      "peak_memory_mb": 60734.0,
+      "qkv_audit": [
+        [
+          1,
+          2064,
+          56,
+          128
+        ]
+      ],
+      "output_shapes": [
+        [
+          2048,
+          2048,
+          3
+        ]
+      ],
+      "exact_seeds": [
+        42,
+        43,
+        44
+      ],
+      "seed_hashes": {
+        "42": [
+          "065fc9c944752cec432c9cb5dcdb803b3044d0d3b11635d9127c5e1c926bd2cb"
+        ],
+        "43": [
+          "1832543b31176533439004ab4ad72eb7c11a0d2d5714dc197e3face44ce0eb7c"
+        ],
+        "44": [
+          "3faa15eb3a6139791e3bbdde23c65fd843001a0465b8d2c81825b08e5588b33e"
+        ]
+      },
+      "new_profile": false,
+      "communication_share": null,
+      "serial_samples_ms": [
+        1027.1111521869898,
+        1027.8868395835161,
+        1028.3243656158447,
+        1027.5663193315268,
+        1026.712391525507,
+        1024.82820302248,
+        1024.2826957255602,
+        1027.8437193483114
+      ],
+      "overlap_samples_ms": [
+        1025.9043667465448,
+        1029.9565363675356,
+        1016.1622036248446,
+        1018.250834196806,
+        1021.4134752750397,
+        1016.6000388562679,
+        1020.9239367395639,
+        1026.9460659474134
+      ]
+    },
+    {
+      "run": "h3-sp2-fp8",
+      "case": "h3-landscape",
+      "sampling": {
+        "height": 1440,
+        "width": 2560,
+        "num_inference_steps": 6,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      },
+      "reference_images": 0,
+      "source_sha": "dabac068d70a74a561beeb124bcbd90490fa1aa0",
+      "run_exit_code": "0",
+      "sp": 2,
+      "vae_parallel": 2,
+      "quantization": "FP8 DiT / BF16 attention",
+      "serial_ms": 902.5709750130773,
+      "overlap_ms": 902.2454358637333,
+      "latency_reduction_pct": 0.036067983389256535,
+      "paired_faster": 5,
+      "pairs": 8,
+      "median_paired_saving_ms": 2.9104240238666534,
+      "peak_memory_mb": 60934.0,
+      "qkv_audit": [
+        [
+          1,
+          1816,
+          56,
+          128
+        ]
+      ],
+      "output_shapes": [
+        [
+          1440,
+          2560,
+          3
+        ]
+      ],
+      "exact_seeds": [
+        42,
+        43,
+        44
+      ],
+      "seed_hashes": {
+        "42": [
+          "97ba315e8d05ad44ab155ce13a67bedef213f2ecc989aa899eb3bfde37118c13"
+        ],
+        "43": [
+          "ab1b3a2c461bdc34ee9287183add9a05857a80304c41eb4d4e5520a295c0c8c8"
+        ],
+        "44": [
+          "f510c7fff8f1dc9b1de5b4b04785f0284012faa50b66206a0507ad24270cba84"
+        ]
+      },
+      "new_profile": false,
+      "communication_share": null,
+      "serial_samples_ms": [
+        912.1927488595247,
+        903.962692245841,
+        904.5208860188723,
+        902.1112266927958,
+        901.2303836643696,
+        899.9389931559563,
+        899.8633399605751,
+        903.0307233333588
+      ],
+      "overlap_samples_ms": [
+        907.3293060064316,
+        906.9086350500584,
+        904.7548174858093,
+        898.9795166999102,
+        897.60472625494,
+        895.6495560705662,
+        904.1492864489555,
+        900.341585278511
+      ]
+    },
+    {
+      "run": "h3-sp2-fp8",
+      "case": "h3-3k",
+      "sampling": {
+        "height": 3072,
+        "width": 3072,
+        "num_inference_steps": 6,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      },
+      "reference_images": 0,
+      "source_sha": "dabac068d70a74a561beeb124bcbd90490fa1aa0",
+      "run_exit_code": "0",
+      "sp": 2,
+      "vae_parallel": 2,
+      "quantization": "FP8 DiT / BF16 attention",
+      "serial_ms": 2380.912447348237,
+      "overlap_ms": 2334.717148914933,
+      "latency_reduction_pct": 1.9402350760421396,
+      "paired_faster": 8,
+      "pairs": 8,
+      "median_paired_saving_ms": 51.0956235229969,
+      "peak_memory_mb": 62688.0,
+      "qkv_audit": [
+        [
+          1,
+          4624,
+          56,
+          128
+        ]
+      ],
+      "output_shapes": [
+        [
+          3072,
+          3072,
+          3
+        ]
+      ],
+      "exact_seeds": [
+        42,
+        43,
+        44
+      ],
+      "seed_hashes": {
+        "42": [
+          "610b9a639ef3e8670fdc8db02541abd62581f604014b7899b0e7e35cc964b46c"
+        ],
+        "43": [
+          "082dd19830e3a350702361e75fc7b297690fadc9756100e98d765f677ea65a1a"
+        ],
+        "44": [
+          "d7e58a1630fa5907733ed6510a514bf6f126bfcc8f9145d10d2e4f57491e3307"
+        ]
+      },
+      "new_profile": false,
+      "communication_share": null,
+      "serial_samples_ms": [
+        2389.228194952011,
+        2375.0332444906235,
+        2381.297867745161,
+        2382.3308926075697,
+        2385.6796119362116,
+        2366.2073146551847,
+        2380.527026951313,
+        2375.250307843089
+      ],
+      "overlap_samples_ms": [
+        2336.8628099560738,
+        2333.5805479437113,
+        2313.494434580207,
+        2318.8400249928236,
+        2335.853749886155,
+        2339.633719995618,
+        2327.5198601186275,
+        2336.8515968322754
+      ]
+    },
+    {
+      "run": "h3-sp2-fp8",
+      "case": "h3-4k",
+      "sampling": {
+        "height": 4096,
+        "width": 4096,
+        "num_inference_steps": 6,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      },
+      "reference_images": 0,
+      "source_sha": "dabac068d70a74a561beeb124bcbd90490fa1aa0",
+      "run_exit_code": "0",
+      "sp": 2,
+      "vae_parallel": 2,
+      "quantization": "FP8 DiT / BF16 attention",
+      "serial_ms": 5019.972575828433,
+      "overlap_ms": 4924.153616651893,
+      "latency_reduction_pct": 1.9087546341969333,
+      "paired_faster": 8,
+      "pairs": 8,
+      "median_paired_saving_ms": 94.3927951157093,
+      "peak_memory_mb": 65710.0,
+      "qkv_audit": [
+        [
+          1,
+          8208,
+          56,
+          128
+        ]
+      ],
+      "output_shapes": [
+        [
+          4096,
+          4096,
+          3
+        ]
+      ],
+      "exact_seeds": [
+        42,
+        43,
+        44
+      ],
+      "seed_hashes": {
+        "42": [
+          "84a68da91afe9e61d5f1b47b95308958930d7156f2818a1734d36a9576ce49d8"
+        ],
+        "43": [
+          "3296e0fc58216b2af31f0919e3ccf4ebb5c6e803af1a1e423602dc61d11bfa34"
+        ],
+        "44": [
+          "0b6b0ab26de68bc80feb581e60663481464cc433c560511e30c35769e111e8fb"
+        ]
+      },
+      "new_profile": false,
+      "communication_share": null,
+      "serial_samples_ms": [
+        5020.537966862321,
+        5013.674160465598,
+        5025.488901883364,
+        5019.407184794545,
+        5021.000560373068,
+        5015.971774235368,
+        5024.283757433295,
+        5002.3696925491095
+      ],
+      "overlap_samples_ms": [
+        4926.599591970444,
+        4926.077116280794,
+        4927.937323227525,
+        4915.978591889143,
+        4929.059617221355,
+        4921.124558895826,
+        4922.230117022991,
+        4909.263057634234
+      ]
+    },
+    {
+      "run": "h3-sp4-fp8",
+      "case": "h3-2k",
+      "sampling": {
+        "height": 2048,
+        "width": 2048,
+        "num_inference_steps": 6,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      },
+      "reference_images": 0,
+      "source_sha": "03eac9d0e9d620c188e1f19c41256483cb3700b3",
+      "run_exit_code": "0",
+      "sp": 4,
+      "vae_parallel": 4,
+      "quantization": "FP8 DiT / BF16 attention",
+      "serial_ms": 683.1133868545294,
+      "overlap_ms": 657.200607471168,
+      "latency_reduction_pct": 3.793335027831848,
+      "paired_faster": 7,
+      "pairs": 8,
+      "median_paired_saving_ms": 22.906429134309292,
+      "peak_memory_mb": 48132.0,
+      "qkv_audit": [
+        [
+          1,
+          1032,
+          56,
+          128
+        ]
+      ],
+      "output_shapes": [
+        [
+          2048,
+          2048,
+          3
+        ]
+      ],
+      "exact_seeds": [
+        42,
+        43,
+        44
+      ],
+      "seed_hashes": {
+        "42": [
+          "e90ed7e31e9f2f2239400cb6c7086df6b3c830f65f41a4d91c293683b5b78207"
+        ],
+        "43": [
+          "2531b76bc4ac003c1332ed224279bfe27ffdf0a29b34590204f07b146fffb806"
+        ],
+        "44": [
+          "31a333999bf230bc00e45714b172cfc93a9cff111a2a6d30d7ef6f15aab7e445"
+        ]
+      },
+      "new_profile": false,
+      "communication_share": null,
+      "serial_samples_ms": [
+        684.7738549113274,
+        681.4529187977314,
+        687.0615668594837,
+        685.9130002558231,
+        687.2811205685139,
+        679.6279605478048,
+        676.9225839525461,
+        677.2954687476158
+      ],
+      "overlap_samples_ms": [
+        668.7666662037373,
+        667.6567252725363,
+        691.0749115049839,
+        658.4657412022352,
+        651.6111381351948,
+        655.9354737401009,
+        649.0383800119162,
+        655.1750972867012
+      ]
+    },
+    {
+      "run": "h3-sp4-fp8",
+      "case": "h3-3k",
+      "sampling": {
+        "height": 3072,
+        "width": 3072,
+        "num_inference_steps": 6,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      },
+      "reference_images": 0,
+      "source_sha": "03eac9d0e9d620c188e1f19c41256483cb3700b3",
+      "run_exit_code": "0",
+      "sp": 4,
+      "vae_parallel": 4,
+      "quantization": "FP8 DiT / BF16 attention",
+      "serial_ms": 1410.212742164731,
+      "overlap_ms": 1349.7469257563353,
+      "latency_reduction_pct": 4.287708839985264,
+      "paired_faster": 8,
+      "pairs": 8,
+      "median_paired_saving_ms": 52.58219130337238,
+      "peak_memory_mb": 49202.0,
+      "qkv_audit": [
+        [
+          1,
+          2312,
+          56,
+          128
+        ]
+      ],
+      "output_shapes": [
+        [
+          3072,
+          3072,
+          3
+        ]
+      ],
+      "exact_seeds": [
+        42,
+        43,
+        44
+      ],
+      "seed_hashes": {
+        "42": [
+          "bcff5d5d0753e952c622d13a8fb6ce4a05343cf01dacbad84520667580146e30"
+        ],
+        "43": [
+          "ad6d6033373f6b67a6f6c416c03c364113c7f47a6c1fd802b2a16a41a86759c4"
+        ],
+        "44": [
+          "160794ea4310958b81ceded01a874394a2d92a89d16c4107ae4c1eb8d4e2ffbd"
+        ]
+      },
+      "new_profile": false,
+      "communication_share": null,
+      "serial_samples_ms": [
+        1415.7152250409126,
+        1410.2316685020924,
+        1420.1107136905193,
+        1397.476851940155,
+        1410.1938158273697,
+        1405.6884665042162,
+        1411.6016943007708,
+        1401.2156929820776
+      ],
+      "overlap_samples_ms": [
+        1363.311842083931,
+        1366.2634417414665,
+        1346.735592931509,
+        1348.3939245343208,
+        1347.808726131916,
+        1358.5959002375603,
+        1351.039158180356,
+        1348.4546933323145
+      ]
+    },
+    {
+      "run": "h3-sp4-fp8",
+      "case": "h3-4k",
+      "sampling": {
+        "height": 4096,
+        "width": 4096,
+        "num_inference_steps": 6,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      },
+      "reference_images": 0,
+      "source_sha": "03eac9d0e9d620c188e1f19c41256483cb3700b3",
+      "run_exit_code": "0",
+      "sp": 4,
+      "vae_parallel": 4,
+      "quantization": "FP8 DiT / BF16 attention",
+      "serial_ms": 2742.7436504513025,
+      "overlap_ms": 2655.525133945048,
+      "latency_reduction_pct": 3.17997332677822,
+      "paired_faster": 8,
+      "pairs": 8,
+      "median_paired_saving_ms": 87.34247926622629,
+      "peak_memory_mb": 50870.0,
+      "qkv_audit": [
+        [
+          1,
+          4104,
+          56,
+          128
+        ]
+      ],
+      "output_shapes": [
+        [
+          4096,
+          4096,
+          3
+        ]
+      ],
+      "exact_seeds": [
+        42,
+        43,
+        44
+      ],
+      "seed_hashes": {
+        "42": [
+          "3a19bc14d6dd8a1d35d1c02c7408f0e36d5a40aa81e672fdae7b49102aeb16ea"
+        ],
+        "43": [
+          "904e819ec826f4c30a6c9fb781434cc5c3fe3892f441eb5828d8d2f6302eb60d"
+        ],
+        "44": [
+          "6af8bd08a18359ba925ab33d6f8db9bfe981e257b9a6ffaa78e8ac136a0e1bac"
+        ]
+      },
+      "new_profile": false,
+      "communication_share": null,
+      "serial_samples_ms": [
+        2749.1871900856495,
+        2742.385309189558,
+        2743.8114397227764,
+        2737.9970513284206,
+        2728.1674966216087,
+        2737.4120354652405,
+        2743.101991713047,
+        2770.718863233924
+      ],
+      "overlap_samples_ms": [
+        2666.2107333540916,
+        2653.7862084805965,
+        2655.869908630848,
+        2644.3590316921473,
+        2653.534211218357,
+        2655.180359259248,
+        2656.358564272523,
+        2660.240175202489
+      ]
+    },
+    {
+      "run": "h3-sp4-confirm",
+      "case": "h3-3k",
+      "sampling": {
+        "height": 3072,
+        "width": 3072,
+        "num_inference_steps": 6,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      },
+      "reference_images": 0,
+      "source_sha": "847b1087e0c879fe89912b52b25abe0371a6d66a",
+      "run_exit_code": "0",
+      "sp": 4,
+      "vae_parallel": 4,
+      "quantization": "FP8 DiT / BF16 attention",
+      "serial_ms": 1398.3193738386035,
+      "overlap_ms": 1337.13542483747,
+      "latency_reduction_pct": 4.37553467010716,
+      "paired_faster": 30,
+      "pairs": 30,
+      "median_paired_saving_ms": 63.78889083862305,
+      "peak_memory_mb": 49328.0,
+      "qkv_audit": [
+        [
+          1,
+          2312,
+          56,
+          128
+        ]
+      ],
+      "output_shapes": [
+        [
+          3072,
+          3072,
+          3
+        ]
+      ],
+      "exact_seeds": [
+        42,
+        43,
+        44
+      ],
+      "seed_hashes": {
+        "42": [
+          "bcff5d5d0753e952c622d13a8fb6ce4a05343cf01dacbad84520667580146e30"
+        ],
+        "43": [
+          "ad6d6033373f6b67a6f6c416c03c364113c7f47a6c1fd802b2a16a41a86759c4"
+        ],
+        "44": [
+          "160794ea4310958b81ceded01a874394a2d92a89d16c4107ae4c1eb8d4e2ffbd"
+        ]
+      },
+      "new_profile": false,
+      "communication_share": null,
+      "serial_samples_ms": [
+        1418.6540208756924,
+        1387.8101520240307,
+        1400.7203727960587,
+        1398.423571139574,
+        1397.10015617311,
+        1401.7002880573273,
+        1398.215176537633,
+        1417.9251864552498,
+        1404.1619393974543,
+        1395.802291110158,
+        1399.8917862772942,
+        1385.1037099957466,
+        1395.796151831746,
+        1399.620708078146,
+        1395.6523314118385,
+        1394.4420106709003,
+        1399.7227996587753,
+        1396.5752497315407,
+        1400.0112898647785,
+        1401.5232473611832,
+        1390.3944958001375,
+        1408.533539623022,
+        1397.8714067488909,
+        1395.6895153969526,
+        1402.5648050010204,
+        1396.278029307723,
+        1398.6405432224274,
+        1396.323636174202,
+        1397.6791203022003,
+        1405.3763896226883
+      ],
+      "overlap_samples_ms": [
+        1345.9508419036865,
+        1337.0310366153717,
+        1337.136609479785,
+        1337.4255262315273,
+        1337.5182915478945,
+        1337.462890893221,
+        1339.4292742013931,
+        1339.6196123212576,
+        1335.5581853538752,
+        1341.0116843879223,
+        1334.372015669942,
+        1338.7952633202076,
+        1331.946987658739,
+        1328.7923317402601,
+        1331.9237139075994,
+        1347.8845320641994,
+        1333.7966427206993,
+        1326.4291901141405,
+        1335.8018286526203,
+        1330.98728582263,
+        1336.8991874158382,
+        1337.1342401951551,
+        1325.4553936421871,
+        1340.8106248825788,
+        1340.657513588667,
+        1327.3462690412998,
+        1344.7363935410976,
+        1349.8606234788895,
+        1334.9452875554562,
+        1340.208563953638
+      ]
+    },
+    {
+      "run": "h3-sp4-confirm",
+      "case": "h3-4k",
+      "sampling": {
+        "height": 4096,
+        "width": 4096,
+        "num_inference_steps": 6,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      },
+      "reference_images": 0,
+      "source_sha": "847b1087e0c879fe89912b52b25abe0371a6d66a",
+      "run_exit_code": "0",
+      "sp": 4,
+      "vae_parallel": 4,
+      "quantization": "FP8 DiT / BF16 attention",
+      "serial_ms": 2727.9167752712965,
+      "overlap_ms": 2645.914025604725,
+      "latency_reduction_pct": 3.006057604466921,
+      "paired_faster": 30,
+      "pairs": 30,
+      "median_paired_saving_ms": 82.10290502756834,
+      "peak_memory_mb": 50672.0,
+      "qkv_audit": [
+        [
+          1,
+          4104,
+          56,
+          128
+        ]
+      ],
+      "output_shapes": [
+        [
+          4096,
+          4096,
+          3
+        ]
+      ],
+      "exact_seeds": [
+        42,
+        43,
+        44
+      ],
+      "seed_hashes": {
+        "42": [
+          "3a19bc14d6dd8a1d35d1c02c7408f0e36d5a40aa81e672fdae7b49102aeb16ea"
+        ],
+        "43": [
+          "904e819ec826f4c30a6c9fb781434cc5c3fe3892f441eb5828d8d2f6302eb60d"
+        ],
+        "44": [
+          "6af8bd08a18359ba925ab33d6f8db9bfe981e257b9a6ffaa78e8ac136a0e1bac"
+        ]
+      },
+      "new_profile": false,
+      "communication_share": null,
+      "serial_samples_ms": [
+        2724.37990270555,
+        2721.300147473812,
+        2722.7735593914986,
+        2708.3127833902836,
+        2719.822758808732,
+        2731.3842941075563,
+        2720.833783969283,
+        2736.4243790507317,
+        2721.2753891944885,
+        2728.5497337579727,
+        2752.5130286812782,
+        2722.3880868405104,
+        2736.7564234882593,
+        2727.9348708689213,
+        2730.588272213936,
+        2727.8986796736717,
+        2735.11204123497,
+        2741.3635198026896,
+        2733.5828468203545,
+        2732.4224431067705,
+        2733.377268537879,
+        2730.303332209587,
+        2727.6795487850904,
+        2720.7186352461576,
+        2713.8003762811422,
+        2731.4768750220537,
+        2717.5978422164917,
+        2717.1429358422756,
+        2724.938590079546,
+        2731.618059799075
+      ],
+      "overlap_samples_ms": [
+        2651.699213311076,
+        2645.1381072402,
+        2635.978890582919,
+        2635.7302516698837,
+        2652.809351682663,
+        2644.276211038232,
+        2638.826861977577,
+        2644.635308533907,
+        2634.4275269657373,
+        2637.279663234949,
+        2661.959795281291,
+        2636.609746143222,
+        2655.452247709036,
+        2639.1272675246,
+        2632.3034279048443,
+        2645.1455671340227,
+        2652.9131531715393,
+        2650.121932849288,
+        2705.9136386960745,
+        2663.913520053029,
+        2651.867965236306,
+        2646.682484075427,
+        2654.765848070383,
+        2650.9721856564283,
+        2644.4824803620577,
+        2652.736969292164,
+        2643.2536393404007,
+        2654.5579992234707,
+        2637.0976008474827,
+        2648.2298225164413
+      ]
+    },
+    {
+      "run": "h3-sp2-bf16",
+      "case": "h3-2k",
+      "sampling": {
+        "height": 2048,
+        "width": 2048,
+        "num_inference_steps": 6,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      },
+      "reference_images": 0,
+      "source_sha": "5c2ffde4a4cdba09e6377e0b79ffe37d00fd2146",
+      "run_exit_code": "0",
+      "sp": 2,
+      "vae_parallel": 2,
+      "quantization": "BF16",
+      "serial_ms": 1288.898336701095,
+      "overlap_ms": 1270.9703212603927,
+      "latency_reduction_pct": 1.3909565192386524,
+      "paired_faster": 4,
+      "pairs": 4,
+      "median_paired_saving_ms": 16.40959084033966,
+      "peak_memory_mb": 92282.0,
+      "qkv_audit": [
+        [
+          1,
+          2064,
+          56,
+          128
+        ]
+      ],
+      "output_shapes": [
+        [
+          2048,
+          2048,
+          3
+        ]
+      ],
+      "exact_seeds": [
+        42,
+        43,
+        44
+      ],
+      "seed_hashes": {
+        "42": [
+          "bb667b528336b2de3e5d018cb96e180fd2f85539078a559055df7d32724ff5d9"
+        ],
+        "43": [
+          "ade6eb8a43e6f30e6d011ac71440645760ff57403100474a78c4d2fa4fe7d8e5"
+        ],
+        "44": [
+          "96c78a98d7e73b30d7c31a59500035070832a48789ab9184ac2042fffc5c5e4c"
+        ]
+      },
+      "new_profile": false,
+      "communication_share": null,
+      "serial_samples_ms": [
+        1304.9323875457048,
+        1293.6289329081774,
+        1284.1677404940128,
+        1267.6952220499516
+      ],
+      "overlap_samples_ms": [
+        1279.301082715392,
+        1291.5595844388008,
+        1262.6395598053932,
+        1256.4042210578918
+      ]
+    },
+    {
+      "run": "h3-sp2-bf16",
+      "case": "h3-3k",
+      "sampling": {
+        "height": 3072,
+        "width": 3072,
+        "num_inference_steps": 6,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      },
+      "reference_images": 0,
+      "source_sha": "5c2ffde4a4cdba09e6377e0b79ffe37d00fd2146",
+      "run_exit_code": "0",
+      "sp": 2,
+      "vae_parallel": 2,
+      "quantization": "BF16",
+      "serial_ms": 2947.797665372491,
+      "overlap_ms": 2909.072430804372,
+      "latency_reduction_pct": 1.3137005644254636,
+      "paired_faster": 4,
+      "pairs": 4,
+      "median_paired_saving_ms": 39.57516327500343,
+      "peak_memory_mb": 94138.0,
+      "qkv_audit": [
+        [
+          1,
+          4624,
+          56,
+          128
+        ]
+      ],
+      "output_shapes": [
+        [
+          3072,
+          3072,
+          3
+        ]
+      ],
+      "exact_seeds": [
+        42,
+        43,
+        44
+      ],
+      "seed_hashes": {
+        "42": [
+          "d40290abc54011919fb29800b867de200d4e9f13a57a57c90fabf51798c4ee9b"
+        ],
+        "43": [
+          "86d1bc1d04c089dba4d14f9b2be54b50e347b2ecf09b491cc6984e204b593674"
+        ],
+        "44": [
+          "24df5472a0107d21daf87072121ed2167e023230c7794ae58c6dc4f66abb85d0"
+        ]
+      },
+      "new_profile": false,
+      "communication_share": null,
+      "serial_samples_ms": [
+        2958.02179351449,
+        2939.609507098794,
+        2950.9966988116503,
+        2944.5986319333315
+      ],
+      "overlap_samples_ms": [
+        2915.432972833514,
+        2902.345923706889,
+        2921.580070629716,
+        2902.7118887752295
+      ]
+    },
+    {
+      "run": "h3-sp2-bf16",
+      "case": "h3-4k",
+      "sampling": {
+        "height": 4096,
+        "width": 4096,
+        "num_inference_steps": 6,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      },
+      "reference_images": 0,
+      "source_sha": "5c2ffde4a4cdba09e6377e0b79ffe37d00fd2146",
+      "run_exit_code": "0",
+      "sp": 2,
+      "vae_parallel": 2,
+      "quantization": "BF16",
+      "serial_ms": 5951.4458533376455,
+      "overlap_ms": 5864.969385787845,
+      "latency_reduction_pct": 1.4530329214253672,
+      "paired_faster": 4,
+      "pairs": 4,
+      "median_paired_saving_ms": 87.92041148990393,
+      "peak_memory_mb": 96958.0,
+      "qkv_audit": [
+        [
+          1,
+          8208,
+          56,
+          128
+        ]
+      ],
+      "output_shapes": [
+        [
+          4096,
+          4096,
+          3
+        ]
+      ],
+      "exact_seeds": [
+        42,
+        43,
+        44
+      ],
+      "seed_hashes": {
+        "42": [
+          "fa22cfc6756228e678b80d6d8b6b20f196d53ed03de762fd2d643a7a04f9d0e8"
+        ],
+        "43": [
+          "5fba2fcf62be257f22b449539e384f217b557063549606beb98e88051f1282e1"
+        ],
+        "44": [
+          "c9ad3ab11051105be5d771cb0ead701037d8b88d91f2701286416932572dd104"
+        ]
+      },
+      "new_profile": false,
+      "communication_share": null,
+      "serial_samples_ms": [
+        5963.921841233969,
+        5949.36965033412,
+        5953.522056341171,
+        5945.927046239376
+      ],
+      "overlap_samples_ms": [
+        5870.837079361081,
+        5861.909508705139,
+        5865.141374990344,
+        5864.797396585345
+      ]
+    },
+    {
+      "run": "qwen-edit-sp2-fp8",
+      "case": "qwen-edit-1k-ref1",
+      "sampling": {
+        "height": 1024,
+        "width": 1024,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 4.0,
+        "num_outputs_per_prompt": 1
+      },
+      "reference_images": 1,
+      "source_sha": "5c2ffde4a4cdba09e6377e0b79ffe37d00fd2146",
+      "run_exit_code": "0",
+      "sp": 2,
+      "vae_parallel": 2,
+      "quantization": "FP8 DiT / BF16 attention",
+      "serial_ms": 1410.3479254990816,
+      "overlap_ms": 1419.734664261341,
+      "latency_reduction_pct": -0.6655619221716362,
+      "paired_faster": 2,
+      "pairs": 4,
+      "median_paired_saving_ms": -14.22137301415205,
+      "peak_memory_mb": 49466.0,
+      "qkv_audit": [
+        [
+          [
+            1,
+            4064,
+            24,
+            128
+          ],
+          [
+            12484608,
+            3072,
+            128,
+            1
+          ],
+          "torch.bfloat16",
+          207
+        ]
+      ],
+      "output_shapes": [
+        [
+          1024,
+          1024,
+          3
+        ]
+      ],
+      "exact_seeds": [
+        42,
+        43,
+        44
+      ],
+      "seed_hashes": {
+        "42": [
+          "3b04205436060626c79d35b87018b0be7c2b7c2a5bb59bcfc913e984b8c1fbe7"
+        ],
+        "43": [
+          "ce7362a62003443420608e32ce4b02c7812e130ac41ac148d0e680a476726cb0"
+        ],
+        "44": [
+          "10161ab5fccd1b229e3c0ee1b07dafd2bd624477831627b218628994a496b68c"
+        ]
+      },
+      "new_profile": false,
+      "communication_share": null,
+      "serial_samples_ms": [
+        1399.1211242973804,
+        1421.7651691287756,
+        1389.2614133656025,
+        1421.5747267007828
+      ],
+      "overlap_samples_ms": [
+        1355.4953318089247,
+        1401.6866274178028,
+        1437.7827011048794,
+        1568.0850856006145
+      ],
+      "effective_true_cfg": false,
+      "configuration_note": "Requested true_cfg_scale=4; no negative prompt, so only one branch executes"
+    },
+    {
+      "run": "qwen-edit-sp2-fp8",
+      "case": "qwen-edit-1k-ref2",
+      "sampling": {
+        "height": 1024,
+        "width": 1024,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 4.0,
+        "num_outputs_per_prompt": 1
+      },
+      "reference_images": 2,
+      "source_sha": "5c2ffde4a4cdba09e6377e0b79ffe37d00fd2146",
+      "run_exit_code": "0",
+      "sp": 2,
+      "vae_parallel": 2,
+      "quantization": "FP8 DiT / BF16 attention",
+      "serial_ms": 2253.2262904569507,
+      "overlap_ms": 2223.7746054306626,
+      "latency_reduction_pct": 1.3070895342835396,
+      "paired_faster": 2,
+      "pairs": 4,
+      "median_paired_saving_ms": 18.426887691020966,
+      "peak_memory_mb": 50298.0,
+      "qkv_audit": [
+        [
+          [
+            1,
+            6112,
+            24,
+            128
+          ],
+          [
+            18776064,
+            3072,
+            128,
+            1
+          ],
+          "torch.bfloat16",
+          410
+        ]
+      ],
+      "output_shapes": [
+        [
+          1024,
+          1024,
+          3
+        ]
+      ],
+      "exact_seeds": [
+        42,
+        43,
+        44
+      ],
+      "seed_hashes": {
+        "42": [
+          "c78b57a14fa7056b35ca444d5b2374f0cdca07fa64efc91a6c0365a4ff89172c"
+        ],
+        "43": [
+          "db90d1f799c8bac0209d1656758cd001c45b5025be3bed68d137e9b359667c0a"
+        ],
+        "44": [
+          "b49c72ff4c1f891fdbd077b646202cd7227a34a4d26ac475cee561f5044837f8"
+        ]
+      },
+      "new_profile": false,
+      "communication_share": null,
+      "serial_samples_ms": [
+        2258.2107074558735,
+        2248.241873458028,
+        2285.8271803706884,
+        2207.728374749422
+      ],
+      "overlap_samples_ms": [
+        2215.966770425439,
+        2258.140865713358,
+        2231.5824404358864,
+        2213.1185363978148
+      ],
+      "effective_true_cfg": false,
+      "configuration_note": "Requested true_cfg_scale=4; no negative prompt, so only one branch executes"
+    },
+    {
+      "run": "qwen-edit-sp2-fp8",
+      "case": "qwen-edit-1536-ref2",
+      "sampling": {
+        "height": 1536,
+        "width": 1536,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 4.0,
+        "num_outputs_per_prompt": 1
+      },
+      "reference_images": 2,
+      "source_sha": "5c2ffde4a4cdba09e6377e0b79ffe37d00fd2146",
+      "run_exit_code": "0",
+      "sp": 2,
+      "vae_parallel": 2,
+      "quantization": "FP8 DiT / BF16 attention",
+      "serial_ms": 3502.5892620906234,
+      "overlap_ms": 3499.0432942286134,
+      "latency_reduction_pct": 0.10123847236068688,
+      "paired_faster": 3,
+      "pairs": 4,
+      "median_paired_saving_ms": 12.809744104743004,
+      "peak_memory_mb": 57896.0,
+      "qkv_audit": [
+        [
+          [
+            1,
+            8672,
+            24,
+            128
+          ],
+          [
+            26640384,
+            3072,
+            128,
+            1
+          ],
+          "torch.bfloat16",
+          410
+        ]
+      ],
+      "output_shapes": [
+        [
+          1536,
+          1536,
+          3
+        ]
+      ],
+      "exact_seeds": [
+        42,
+        43,
+        44
+      ],
+      "seed_hashes": {
+        "42": [
+          "2479777af2b604b1095b602f121743fbd90c59e2f71f4facf2243a83da0955dd"
+        ],
+        "43": [
+          "f24afb6af70ef322f653063a48494f2ad7e9409db7d9ca46e6624873337a105b"
+        ],
+        "44": [
+          "2b52ae1f49182226fe4ec041e31a16de2fbcf504f7aad8238675476c170c3bcf"
+        ]
+      },
+      "new_profile": false,
+      "communication_share": null,
+      "serial_samples_ms": [
+        3493.674460798502,
+        3505.678568035364,
+        3499.4999561458826,
+        3614.1403913497925
+      ],
+      "overlap_samples_ms": [
+        3517.442714422941,
+        3493.6481676995754,
+        3485.9108682721853,
+        3504.4384207576513
+      ],
+      "effective_true_cfg": false,
+      "configuration_note": "Requested true_cfg_scale=4; no negative prompt, so only one branch executes"
+    },
+    {
+      "run": "qwen-edit-sp2-fp8",
+      "case": "qwen-edit-2k-ref1",
+      "sampling": {
+        "height": 2048,
+        "width": 2048,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 4.0,
+        "num_outputs_per_prompt": 1
+      },
+      "reference_images": 1,
+      "source_sha": "5c2ffde4a4cdba09e6377e0b79ffe37d00fd2146",
+      "run_exit_code": "0",
+      "sp": 2,
+      "vae_parallel": 2,
+      "quantization": "FP8 DiT / BF16 attention",
+      "serial_ms": 4224.402666091919,
+      "overlap_ms": 4244.522430002689,
+      "latency_reduction_pct": -0.47627476595131546,
+      "paired_faster": 1,
+      "pairs": 4,
+      "median_paired_saving_ms": -5.158820189535618,
+      "peak_memory_mb": 67968.0,
+      "qkv_audit": [
+        [
+          [
+            1,
+            10208,
+            24,
+            128
+          ],
+          [
+            31358976,
+            3072,
+            128,
+            1
+          ],
+          "torch.bfloat16",
+          207
+        ]
+      ],
+      "output_shapes": [
+        [
+          2048,
+          2048,
+          3
+        ]
+      ],
+      "exact_seeds": [
+        42,
+        43,
+        44
+      ],
+      "seed_hashes": {
+        "42": [
+          "41637a1917cea035e96efb70df9a5dd9ce9d920e80249830419e1cf9e9289541"
+        ],
+        "43": [
+          "cd65d2524fee111749d16531b42bab3c54828c554d17d5f1ae88ddb8be1d806c"
+        ],
+        "44": [
+          "a84ed6efcfd8996609f446aabf190f22141f22c19383d1bb299d8f624c958143"
+        ]
+      },
+      "new_profile": false,
+      "communication_share": null,
+      "serial_samples_ms": [
+        4285.332707688212,
+        4218.665800988674,
+        4229.4825334101915,
+        4219.322798773646
+      ],
+      "overlap_samples_ms": [
+        4268.500123172998,
+        4255.769249051809,
+        4233.275610953569,
+        4225.84736160934
+      ],
+      "effective_true_cfg": false,
+      "configuration_note": "Requested true_cfg_scale=4; no negative prompt, so only one branch executes"
+    },
+    {
+      "run": "flux-bf16",
+      "case": "flux-1k-text",
+      "sampling": {
+        "height": 1024,
+        "width": 1024,
+        "num_inference_steps": 4,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      },
+      "reference_images": 0,
+      "source_sha": "847b1087e0c879fe89912b52b25abe0371a6d66a",
+      "run_exit_code": "1",
+      "sp": 2,
+      "vae_parallel": 2,
+      "quantization": "BF16",
+      "serial_ms": 325.16917306929827,
+      "overlap_ms": 320.41453290730715,
+      "latency_reduction_pct": 1.46220507839402,
+      "paired_faster": 3,
+      "pairs": 4,
+      "median_paired_saving_ms": 2.652464434504509,
+      "peak_memory_mb": 20910.0,
+      "qkv_audit": [
+        [
+          [
+            1,
+            2560,
+            24,
+            128
+          ],
+          [
+            7864320,
+            3072,
+            128,
+            1
+          ],
+          "torch.bfloat16",
+          0
+        ]
+      ],
+      "output_shapes": [
+        [
+          1024,
+          1024,
+          3
+        ]
+      ],
+      "exact_seeds": [
+        42,
+        43,
+        44
+      ],
+      "seed_hashes": {
+        "42": [
+          "a33e3922f7b163eef15abc839e62a113a26b977f353da591ca9ea288feaa3ac1"
+        ],
+        "43": [
+          "9431e327e737f2797ef7de7e4bd8b320a1a2deff05cf1b9385657fc02afe865f"
+        ],
+        "44": [
+          "7eb1e93c79e9674cc30b095fc8a20733835c271ac205adf0c693bc2d16a6f1fb"
+        ]
+      },
+      "new_profile": false,
+      "communication_share": null,
+      "serial_samples_ms": [
+        317.2548282891512,
+        331.5349332988262,
+        325.4064843058586,
+        324.9318618327379
+      ],
+      "overlap_samples_ms": [
+        319.7407443076372,
+        320.3186634927988,
+        324.523014947772,
+        320.5104023218155
+      ]
+    },
+    {
+      "run": "flux-bf16",
+      "case": "flux-1k-ref1",
+      "sampling": {
+        "height": 1024,
+        "width": 1024,
+        "num_inference_steps": 4,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      },
+      "reference_images": 1,
+      "source_sha": "847b1087e0c879fe89912b52b25abe0371a6d66a",
+      "run_exit_code": "1",
+      "sp": 2,
+      "vae_parallel": 2,
+      "quantization": "BF16",
+      "serial_ms": 940.189640969038,
+      "overlap_ms": 943.9028771594167,
+      "latency_reduction_pct": -0.3949454480855048,
+      "paired_faster": 1,
+      "pairs": 4,
+      "median_paired_saving_ms": -2.4560000747442245,
+      "peak_memory_mb": 26396.0,
+      "qkv_audit": [
+        [
+          [
+            1,
+            7259,
+            24,
+            128
+          ],
+          [
+            22299648,
+            3072,
+            128,
+            1
+          ],
+          "torch.bfloat16",
+          0
+        ]
+      ],
+      "output_shapes": [
+        [
+          1024,
+          1024,
+          3
+        ]
+      ],
+      "exact_seeds": [
+        42,
+        43,
+        44
+      ],
+      "seed_hashes": {
+        "42": [
+          "a6b527f231ea8caf55ae3b4628c76dfa311aacf150b6d0992772867273e65fb7"
+        ],
+        "43": [
+          "55b3759ed00919319c5ea69c2dffce60cb19a98305fdf82475c07e7e16734f0e"
+        ],
+        "44": [
+          "4ababf18ec6a78db7d344a1b669f22e58c978d8ede1c5da8a30aa60e1a2cf798"
+        ]
+      },
+      "new_profile": false,
+      "communication_share": null,
+      "serial_samples_ms": [
+        938.9942642301321,
+        948.7734977155924,
+        936.169296503067,
+        941.3850177079439
+      ],
+      "overlap_samples_ms": [
+        939.3188878893852,
+        947.049081325531,
+        940.7566729933023,
+        966.0426713526249
+      ]
+    },
+    {
+      "run": "flux-bf16-large",
+      "case": "flux-2k-text",
+      "sampling": {
+        "height": 2048,
+        "width": 2048,
+        "num_inference_steps": 4,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      },
+      "reference_images": 0,
+      "source_sha": "4978d601401d3cf3974561547f4381f2765f379b",
+      "run_exit_code": "0",
+      "sp": 2,
+      "vae_parallel": 2,
+      "quantization": "BF16",
+      "serial_ms": 1303.1009174883366,
+      "overlap_ms": 1308.9329525828362,
+      "latency_reduction_pct": -0.44755053244383797,
+      "paired_faster": 1,
+      "pairs": 4,
+      "median_paired_saving_ms": -6.111063063144684,
+      "peak_memory_mb": 37468.0,
+      "qkv_audit": [
+        [
+          [
+            1,
+            8704,
+            24,
+            128
+          ],
+          [
+            26738688,
+            3072,
+            128,
+            1
+          ],
+          "torch.bfloat16",
+          0
+        ]
+      ],
+      "output_shapes": [
+        [
+          2048,
+          2048,
+          3
+        ]
+      ],
+      "exact_seeds": [
+        42,
+        43,
+        44
+      ],
+      "seed_hashes": {
+        "42": [
+          "154d7600cffd72f9ba3316535b8692ececcb2cdf536e8cebb38e25c816e3f1b0"
+        ],
+        "43": [
+          "556a7be0be2ce36a4494e4b9c095de2e8b2e557dbdf053058c70840d8328d54d"
+        ],
+        "44": [
+          "a185869ec7360d90315a0623f0329ee34d59f33d1ccc96fe9c05a7d18bebf384"
+        ]
+      },
+      "new_profile": false,
+      "communication_share": null,
+      "serial_samples_ms": [
+        1306.8163003772497,
+        1298.8274786621332,
+        1299.3855345994234,
+        1400.8885081857443
+      ],
+      "overlap_samples_ms": [
+        1308.958277106285,
+        1308.9076280593872,
+        1312.4111220240593,
+        1300.4861064255238
+      ]
+    },
+    {
+      "run": "flux-bf16-large",
+      "case": "flux-2k-ref1",
+      "sampling": {
+        "height": 2048,
+        "width": 2048,
+        "num_inference_steps": 4,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      },
+      "reference_images": 1,
+      "source_sha": "4978d601401d3cf3974561547f4381f2765f379b",
+      "run_exit_code": "0",
+      "sp": 2,
+      "vae_parallel": 2,
+      "quantization": "BF16",
+      "serial_ms": 2684.480383992195,
+      "overlap_ms": 2477.4128487333655,
+      "latency_reduction_pct": 7.713505246437727,
+      "paired_faster": 4,
+      "pairs": 4,
+      "median_paired_saving_ms": 69.26007382571697,
+      "peak_memory_mb": 38760.0,
+      "qkv_audit": [
+        [
+          [
+            1,
+            13403,
+            24,
+            128
+          ],
+          [
+            41174016,
+            3072,
+            128,
+            1
+          ],
+          "torch.bfloat16",
+          0
+        ]
+      ],
+      "output_shapes": [
+        [
+          2048,
+          2048,
+          3
+        ]
+      ],
+      "exact_seeds": [
+        42,
+        43,
+        44
+      ],
+      "seed_hashes": {
+        "42": [
+          "5e3c1ed5afea70b5f3d84428f2d5bc99552d9eeb9e00492f2ceec97df5a133f3"
+        ],
+        "43": [
+          "a815e1d7248a53ba2b4ca113b0720718643a648892711a7e1f39e6a8be7c1539"
+        ],
+        "44": [
+          "3337a81634797b6e5a563eee68aff234b29c4933000341c5dba829d68f79b39e"
+        ]
+      },
+      "new_profile": false,
+      "communication_share": null,
+      "serial_samples_ms": [
+        2175.979483872652,
+        2583.44722725451,
+        2785.5135407298803,
+        3026.3703614473343
+      ],
+      "overlap_samples_ms": [
+        2154.5076929032803,
+        2192.517939954996,
+        2762.307757511735,
+        2911.0559970140457
+      ]
+    },
+    {
+      "run": "flux-bf16-large",
+      "case": "flux-3k-ref1",
+      "sampling": {
+        "height": 3072,
+        "width": 3072,
+        "num_inference_steps": 4,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      },
+      "reference_images": 1,
+      "source_sha": "4978d601401d3cf3974561547f4381f2765f379b",
+      "run_exit_code": "0",
+      "sp": 2,
+      "vae_parallel": 2,
+      "quantization": "BF16",
+      "serial_ms": 4991.573808714747,
+      "overlap_ms": 4965.082918293774,
+      "latency_reduction_pct": 0.5307121848969372,
+      "paired_faster": 3,
+      "pairs": 4,
+      "median_paired_saving_ms": 23.657027631998062,
+      "peak_memory_mb": 64196.0,
+      "qkv_audit": [
+        [
+          [
+            1,
+            23643,
+            24,
+            128
+          ],
+          [
+            72631296,
+            3072,
+            128,
+            1
+          ],
+          "torch.bfloat16",
+          0
+        ]
+      ],
+      "output_shapes": [
+        [
+          3072,
+          3072,
+          3
+        ]
+      ],
+      "exact_seeds": [
+        42,
+        43,
+        44
+      ],
+      "seed_hashes": {
+        "42": [
+          "0e58e218c1ab5e70226eae040ccc701e798b37e407cd3282a13e657729a0fb60"
+        ],
+        "43": [
+          "35c9b19d17e06071c2bdb2a1230771448fe943846661540dad724ac77b6b3504"
+        ],
+        "44": [
+          "ae50aafa610045564487e6c530b55c6b7632ffc92a29e337a3e85a8496d21b02"
+        ]
+      },
+      "new_profile": false,
+      "communication_share": null,
+      "serial_samples_ms": [
+        4997.006475925446,
+        4990.984382107854,
+        4983.391545712948,
+        4992.163235321641
+      ],
+      "overlap_samples_ms": [
+        5008.234947919846,
+        4972.859030589461,
+        4954.202841967344,
+        4957.306805998087
+      ]
+    },
+    {
+      "run": "flux-confirm",
+      "case": "flux-2k-ref1",
+      "sampling": {
+        "height": 2048,
+        "width": 2048,
+        "num_inference_steps": 4,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      },
+      "reference_images": 1,
+      "source_sha": "68435746aa25b83453751a0d1952921d0b53e010",
+      "run_exit_code": "0",
+      "sp": 2,
+      "vae_parallel": 2,
+      "quantization": "BF16",
+      "serial_ms": 2134.519732557237,
+      "overlap_ms": 2115.9100253134966,
+      "latency_reduction_pct": 0.8718451724709713,
+      "paired_faster": 27,
+      "pairs": 30,
+      "median_paired_saving_ms": 19.44108959287405,
+      "peak_memory_mb": 39038.0,
+      "qkv_audit": [
+        [
+          [
+            1,
+            13403,
+            24,
+            128
+          ],
+          [
+            41174016,
+            3072,
+            128,
+            1
+          ],
+          "torch.bfloat16",
+          0
+        ]
+      ],
+      "output_shapes": [
+        [
+          2048,
+          2048,
+          3
+        ]
+      ],
+      "exact_seeds": [
+        42,
+        43,
+        44
+      ],
+      "seed_hashes": {
+        "42": [
+          "5e3c1ed5afea70b5f3d84428f2d5bc99552d9eeb9e00492f2ceec97df5a133f3"
+        ],
+        "43": [
+          "a815e1d7248a53ba2b4ca113b0720718643a648892711a7e1f39e6a8be7c1539"
+        ],
+        "44": [
+          "3337a81634797b6e5a563eee68aff234b29c4933000341c5dba829d68f79b39e"
+        ]
+      },
+      "new_profile": false,
+      "communication_share": null,
+      "serial_samples_ms": [
+        2143.9000386744738,
+        2131.9860331714153,
+        2147.9482743889093,
+        2132.9763531684875,
+        2136.957786977291,
+        2132.346887141466,
+        2146.6504260897636,
+        2126.2176875025034,
+        2129.7343727201223,
+        2132.580464705825,
+        2142.9351046681404,
+        2134.5417331904173,
+        2127.528006210923,
+        2137.0325461030006,
+        2127.9133539646864,
+        2132.058158516884,
+        2134.497731924057,
+        2131.09446503222,
+        2128.36891785264,
+        2127.7300491929054,
+        2144.249565899372,
+        2154.8840440809727,
+        2136.8958316743374,
+        2135.4463882744312,
+        2140.233524143696,
+        2129.2644515633583,
+        2131.6718757152557,
+        2538.351619616151,
+        2252.600857988,
+        2140.4887102544308
+      ],
+      "overlap_samples_ms": [
+        2123.2041474431753,
+        2116.890177130699,
+        2103.017047047615,
+        2115.2593679726124,
+        2106.991855427623,
+        2121.675381436944,
+        2114.2497453838587,
+        2142.140083014965,
+        2109.0605463832617,
+        2110.805680975318,
+        2115.6742330640554,
+        2108.563529327512,
+        2113.462259992957,
+        2108.5276026278734,
+        2111.2716533243656,
+        2116.1458175629377,
+        2137.648716568947,
+        2123.853260651231,
+        2114.840729162097,
+        2117.252239957452,
+        2099.9497175216675,
+        2151.46716684103,
+        2113.2183130830526,
+        2116.996556520462,
+        2106.7965142428875,
+        2134.723113849759,
+        2121.398162096739,
+        2327.6557326316833,
+        2126.1266730725765,
+        2120.056362822652
+      ]
+    },
+    {
+      "run": "wan-sp2-fp8",
+      "case": "wan5b-480p-f17",
+      "sampling": {
+        "height": 480,
+        "width": 832,
+        "num_frames": 17,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1,
+        "fps": 16
+      },
+      "reference_images": 0,
+      "source_sha": "30db6b8bb6d294b3ea78061e9501225d60e431e0",
+      "run_exit_code": "0",
+      "sp": 2,
+      "vae_parallel": 2,
+      "quantization": "FP8 DiT / BF16 attention",
+      "serial_ms": 738.3188400417566,
+      "overlap_ms": 729.9422388896346,
+      "latency_reduction_pct": 1.1345506436823785,
+      "paired_faster": 3,
+      "pairs": 4,
+      "median_paired_saving_ms": 5.772865377366543,
+      "peak_memory_mb": 18486.0,
+      "qkv_audit": [
+        [
+          [
+            1,
+            975,
+            24,
+            128
+          ],
+          [
+            2995200,
+            3072,
+            128,
+            1
+          ],
+          "torch.bfloat16",
+          0
+        ]
+      ],
+      "output_shapes": [
+        [
+          1,
+          17,
+          480,
+          832,
+          3
+        ]
+      ],
+      "exact_seeds": [
+        42,
+        43,
+        44
+      ],
+      "seed_hashes": {
+        "42": [
+          "d40852a7bec6c9c6caa6fba1ee2e7c83fcdc6293ca250e09ec03565ca60bfc45"
+        ],
+        "43": [
+          "fc0ca535584f626208f7b298f5a9866ee240877c4300607cd564d21a8d66f055"
+        ],
+        "44": [
+          "69659a0126e6a7ee84b395ce797d175e1d239f2e861c0cfbb8ec1c150d74b6a4"
+        ]
+      },
+      "new_profile": false,
+      "communication_share": null,
+      "serial_samples_ms": [
+        749.0198165178299,
+        732.3835846036673,
+        722.4103920161724,
+        744.254095479846
+      ],
+      "overlap_samples_ms": [
+        738.6917173862457,
+        751.6913842409849,
+        721.1927603930235,
+        718.7444716691971
+      ]
+    },
+    {
+      "run": "wan-sp2-fp8",
+      "case": "wan5b-480p-f33",
+      "sampling": {
+        "height": 480,
+        "width": 832,
+        "num_frames": 33,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1,
+        "fps": 16
+      },
+      "reference_images": 0,
+      "source_sha": "30db6b8bb6d294b3ea78061e9501225d60e431e0",
+      "run_exit_code": "0",
+      "sp": 2,
+      "vae_parallel": 2,
+      "quantization": "FP8 DiT / BF16 attention",
+      "serial_ms": 1250.410177744925,
+      "overlap_ms": 1260.4226041585207,
+      "latency_reduction_pct": -0.8007313593410419,
+      "paired_faster": 2,
+      "pairs": 4,
+      "median_paired_saving_ms": -6.784019060432911,
+      "peak_memory_mb": 18908.0,
+      "qkv_audit": [
+        [
+          [
+            1,
+            1755,
+            24,
+            128
+          ],
+          [
+            5391360,
+            3072,
+            128,
+            1
+          ],
+          "torch.bfloat16",
+          0
+        ]
+      ],
+      "output_shapes": [
+        [
+          1,
+          33,
+          480,
+          832,
+          3
+        ]
+      ],
+      "exact_seeds": [
+        42,
+        43,
+        44
+      ],
+      "seed_hashes": {
+        "42": [
+          "efb8ff1d291bfde750b64f7dd6ea17ff43bfb8bb1567fd1f1d993d72fe488bb0"
+        ],
+        "43": [
+          "97208d5279165ea80462e831b3838adc8e3accfb0c9435cf7a08688fdf1a223b"
+        ],
+        "44": [
+          "38b615e881152f1a0f36c188ed3ff3dcb4b2ffaf4488eb5dae22d8639ab7dc87"
+        ]
+      },
+      "new_profile": false,
+      "communication_share": null,
+      "serial_samples_ms": [
+        1262.1497735381126,
+        1245.127396658063,
+        1251.7674174159765,
+        1249.0529380738735
+      ],
+      "overlap_samples_ms": [
+        1261.6340145468712,
+        1259.2111937701702,
+        1406.8383798003197,
+        1245.1379597187042
+      ]
+    },
+    {
+      "run": "wan-sp2-fp8",
+      "case": "wan5b-480p-f65",
+      "sampling": {
+        "height": 480,
+        "width": 832,
+        "num_frames": 65,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1,
+        "fps": 16
+      },
+      "reference_images": 0,
+      "source_sha": "30db6b8bb6d294b3ea78061e9501225d60e431e0",
+      "run_exit_code": "0",
+      "sp": 2,
+      "vae_parallel": 2,
+      "quantization": "FP8 DiT / BF16 attention",
+      "serial_ms": 2362.5858444720507,
+      "overlap_ms": 2382.259499281645,
+      "latency_reduction_pct": -0.8327170356847067,
+      "paired_faster": 1,
+      "pairs": 4,
+      "median_paired_saving_ms": -28.654648922383785,
+      "peak_memory_mb": 20232.0,
+      "qkv_audit": [
+        [
+          [
+            1,
+            3315,
+            24,
+            128
+          ],
+          [
+            10183680,
+            3072,
+            128,
+            1
+          ],
+          "torch.bfloat16",
+          0
+        ]
+      ],
+      "output_shapes": [
+        [
+          1,
+          65,
+          480,
+          832,
+          3
+        ]
+      ],
+      "exact_seeds": [
+        42,
+        43,
+        44
+      ],
+      "seed_hashes": {
+        "42": [
+          "896e17f26ae08e97a0c5c6930e566d6f115b8b2ff7c397cf53959340b26aad93"
+        ],
+        "43": [
+          "3d1a32bae2ea6e3b198380027e663e0f7eb99092d24bf8ef7b3ef2589dcb3cf3"
+        ],
+        "44": [
+          "d24e85ab573778f1777e849cd59f7c18832ea0a2a8aa64c9eb7ee3ecd3344dfc"
+        ]
+      },
+      "new_profile": false,
+      "communication_share": null,
+      "serial_samples_ms": [
+        2381.989561021328,
+        2401.0572247207165,
+        2338.435336947441,
+        2343.1821279227734
+      ],
+      "overlap_samples_ms": [
+        2487.869419157505,
+        2391.4257623255253,
+        2373.0932362377644,
+        2365.8335264772177
+      ]
+    },
+    {
+      "run": "wan-sp2-fp8",
+      "case": "wan5b-720p-f33",
+      "sampling": {
+        "height": 720,
+        "width": 1280,
+        "num_frames": 33,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1,
+        "fps": 16
+      },
+      "reference_images": 0,
+      "source_sha": "30db6b8bb6d294b3ea78061e9501225d60e431e0",
+      "run_exit_code": "0",
+      "sp": 2,
+      "vae_parallel": 2,
+      "quantization": "FP8 DiT / BF16 attention",
+      "serial_ms": 2484.5071006566286,
+      "overlap_ms": 2461.4691929891706,
+      "latency_reduction_pct": 0.9272627017797367,
+      "paired_faster": 2,
+      "pairs": 4,
+      "median_paired_saving_ms": 16.757335513830185,
+      "peak_memory_mb": 20530.0,
+      "qkv_audit": [
+        [
+          [
+            1,
+            3960,
+            24,
+            128
+          ],
+          [
+            12165120,
+            3072,
+            128,
+            1
+          ],
+          "torch.bfloat16",
+          0
+        ]
+      ],
+      "output_shapes": [
+        [
+          1,
+          33,
+          704,
+          1280,
+          3
+        ]
+      ],
+      "exact_seeds": [
+        42,
+        43,
+        44
+      ],
+      "seed_hashes": {
+        "42": [
+          "48b5e399694f99e2114f86e3929dfb18fdcf1790b4d749d74af0447d4f48939d"
+        ],
+        "43": [
+          "b22f55dfe1b33a91a7fe4119cc086f84944d6a9eedf37c2368ab8a54081102a3"
+        ],
+        "44": [
+          "2cbfb34f21dc05f7b2b2da09f00a1c34316bd771c513f22f2de8a26f93a21d08"
+        ]
+      },
+      "new_profile": false,
+      "communication_share": null,
+      "serial_samples_ms": [
+        2480.7003512978554,
+        2524.9781869351864,
+        2463.58204446733,
+        2488.313850015402
+      ],
+      "overlap_samples_ms": [
+        2508.918548002839,
+        2454.4410593807697,
+        2468.4973265975714,
+        2449.8838968575
+      ]
+    }
+  ],
+  "complete_case_runs": 27,
+  "unique_case_configurations": 24,
+  "raw_requests": 718
+}

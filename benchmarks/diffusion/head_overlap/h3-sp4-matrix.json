@@ -1,0 +1,83 @@
+{
+  "engine": {
+    "parallel_config": {
+      "ulysses_degree": 4,
+      "ulysses_a2a_permute": true,
+      "ulysses_head_chunks": 2,
+      "text_encoder_tp_size": 4,
+      "tensor_parallel_size": 1
+    },
+    "dtype": "bfloat16",
+    "quantization_config": {
+      "transformer": {
+        "method": "fp8"
+      }
+    },
+    "diffusion_attention_config": {
+      "default": "FLASH_ATTN"
+    },
+    "enable_diffusion_pipeline_profiler": false,
+    "enforce_eager": false,
+    "additional_config": {
+      "text_encoder_cudnn_sdp": false,
+      "vae_tile_parallel": true,
+      "min_generation_area": null
+    },
+    "log_stats": false,
+    "init_timeout": 900,
+    "stage_init_timeout": 900
+  },
+  "prompt": {
+    "prompt": "A red bicycle leaning against a white wall, soft morning light, detailed photograph.",
+    "modalities": [
+      "image"
+    ]
+  },
+  "variants": {
+    "serial1": {
+      "graph_mode": "graph",
+      "chunks": 1,
+      "schedule": "old"
+    },
+    "overlap2": {
+      "graph_mode": "graph",
+      "chunks": 2,
+      "schedule": "stage-local-shared-slots"
+    }
+  },
+  "cases": [
+    {
+      "id": "h3-2k",
+      "sampling": {
+        "height": 2048,
+        "width": 2048,
+        "num_inference_steps": 6,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      }
+    },
+    {
+      "id": "h3-3k",
+      "sampling": {
+        "height": 3072,
+        "width": 3072,
+        "num_inference_steps": 6,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      }
+    },
+    {
+      "id": "h3-4k",
+      "sampling": {
+        "height": 4096,
+        "width": 4096,
+        "num_inference_steps": 6,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1
+      }
+    }
+  ]
+}

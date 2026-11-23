@@ -328,6 +328,9 @@ class DiffusionParallelConfig:
     allocator, Triton-Ascend and a symmetric-memory runtime.
     """
 
+    ulysses_head_chunks: int = 1
+    """Experimental CUDA CE head pipeline; 1 preserves the serial path."""
+
     cfg_parallel_size: int = 1
     """Number of ranks used to execute guidance passes in parallel."""
 
@@ -400,6 +403,16 @@ class DiffusionParallelConfig:
         assert self.sequence_parallel_size is not None
         assert self.sequence_parallel_size > 0, "Sequence parallel size must be > 0"
         assert self.ulysses_degree > 0, "Ulysses degree must be > 0"
+        if self.ulysses_head_chunks not in (1, 2, 4):
+            raise ValueError("ulysses_head_chunks must be 1, 2 or 4")
+        if self.ulysses_head_chunks > 1 and (
+            not self.ulysses_a2a_permute
+            or self.ulysses_degree <= 1
+            or self.ring_degree != 1
+            or self.allgather_degree != 1
+            or self.ulysses_mode != "strict"
+        ):
+            raise ValueError("head overlap requires CE transport and strict, pure Ulysses")
         assert self.ring_degree > 0, "Ring degree must be > 0"
         assert self.allgather_degree > 0, "AllGather degree must be > 0"
         assert self.cfg_parallel_size > 0, "CFG parallel size must be > 0"

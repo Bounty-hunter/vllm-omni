@@ -53,5 +53,19 @@ path without distributed initialization.
 
 ## Safe-change guide
 
+The experimental CUDA head pipeline in `attention/parallel/head_overlap.py`
+keeps stream and CE workspace ownership per device/Ulysses group. All ranks
+enqueue the same `F0, F1, R0, F2, R1, ...` sequence of input and reverse
+exchanges, with each next input submitted after launching the current kernel
+and before waiting on its output. Per-group event
+waits protect consumers, existing CE peer barriers protect workspace reuse,
+and outputs return in the original global head order. The serial workspace
+remains separate so a shape or metadata fallback does not change its stream
+ownership. Each CE plan retains one input/output slot per head group, reused
+after the next call's compute-producer fence. Compute-owned reverse inputs
+stay live until all transport waits are enqueued. This bounds cross-stream
+temporary retention instead of deferring frees across many DiT layers.
+Group teardown synchronizes workspaces before releasing resources.
+
 Test topology validation, single-rank execution, affected parallel modes,
 combined modes, invalid shapes, and orderly teardown.

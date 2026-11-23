@@ -462,6 +462,18 @@ def test_serve_cli_preserves_ulysses_a2a_permute(enabled: bool) -> None:
     assert parallel_config["ulysses_a2a_permute"] is enabled
 
 
+@pytest.mark.parametrize("chunks", [1, 2, 4])
+def test_serve_cli_preserves_ulysses_head_chunks(chunks: int) -> None:
+    parser = TrackingArgumentParser()
+    subparsers = parser.add_subparsers(dest="command")
+    OmniServeCommand().subparser_init(subparsers)
+    args = parser.parse_args(
+        ["serve", "fake-model", "--omni", "--usp", "2", "--ulysses-a2a-permute", "--ulysses-head-chunks", str(chunks)]
+    )
+    stage_cfg = StageConfigFactory.create_default_diffusion(args.get_explicit_kwargs_dict())[0]
+    assert _terminal_config(stage_cfg).parallel_config.ulysses_head_chunks == chunks
+
+
 def test_serve_cli_accepts_text_encoder_tp_size():
     parser = TrackingArgumentParser()
     subparsers = parser.add_subparsers(dest="command")

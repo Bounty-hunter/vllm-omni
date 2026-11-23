@@ -1,0 +1,94 @@
+[
+  {
+    "id": "wan33-tail-2-6-2",
+    "tokens": 14040,
+    "heads": 40,
+    "joint": 0,
+    "padding": 0,
+    "head_partition": [
+      2,
+      6,
+      2
+    ],
+    "fused_v": true
+  },
+  {
+    "id": "wan33-tail-2-7-1",
+    "tokens": 14040,
+    "heads": 40,
+    "joint": 0,
+    "padding": 0,
+    "head_partition": [
+      2,
+      7,
+      1
+    ],
+    "fused_v": true
+  },
+  {
+    "id": "wan33-tail-1-2-6-1",
+    "tokens": 14040,
+    "heads": 40,
+    "joint": 0,
+    "padding": 0,
+    "head_partition": [
+      1,
+      2,
+      6,
+      1
+    ],
+    "fused_v": true
+  },
+  {
+    "id": "wan81-tail-1-8-1",
+    "tokens": 32760,
+    "heads": 40,
+    "joint": 0,
+    "padding": 0,
+    "head_partition": [
+      1,
+      8,
+      1
+    ],
+    "fused_v": true
+  },
+  {
+    "id": "h3image4k-tail-2-10-2",
+    "tokens": 16416,
+    "heads": 56,
+    "joint": 0,
+    "padding": 16,
+    "head_partition": [
+      2,
+      10,
+      2
+    ],
+    "fused_v": true
+  },
+  {
+    "id": "h3video1024-tail-2-10-2",
+    "tokens": 33152,
+    "heads": 56,
+    "joint": 0,
+    "padding": 17,
+    "head_partition": [
+      2,
+      10,
+      2
+    ],
+    "fused_v": true
+  },
+  {
+    "id": "h3video-ci-tail-1-12-1",
+    "tokens": 63232,
+    "heads": 56,
+    "joint": 0,
+    "padding": 29,
+    "head_partition": [
+      1,
+      12,
+      1
+    ],
+    "fused_v": true
+  }
+]

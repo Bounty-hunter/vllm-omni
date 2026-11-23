@@ -251,6 +251,7 @@ class UlyssesParallelAttention:
         gather_idx: int,
         use_sync: bool,
         ulysses_a2a_permute: bool = False,
+        head_chunks: int = 1,
     ) -> None:
         self._sp_group = sp_group
         self._ulysses_pg = sp_group.ulysses_group
@@ -261,6 +262,7 @@ class UlyssesParallelAttention:
         # Every rank must use the same setting. Unsupported layouts keep their
         # existing exchange, and explicit symmetric memory takes precedence.
         self._packed_qkv = not ulysses_a2a_permute and envs.VLLM_OMNI_PACKED_QKV
+        self.head_chunks = head_chunks
         if ulysses_a2a_permute:
             from vllm_omni.diffusion.distributed.a2a_permute import (
                 ensure_a2a_permute_available,

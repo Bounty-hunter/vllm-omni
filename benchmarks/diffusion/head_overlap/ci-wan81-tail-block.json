@@ -1,0 +1,100 @@
+{
+  "engine": {
+    "dtype": "bfloat16",
+    "quantization_config": {
+      "transformer": {
+        "method": "fp8"
+      },
+      "transformer_2": {
+        "method": "fp8"
+      }
+    },
+    "diffusion_attention_config": {
+      "default": "FLASH_ATTN"
+    },
+    "enable_diffusion_pipeline_profiler": false,
+    "enforce_eager": true,
+    "log_stats": false,
+    "init_timeout": 900,
+    "stage_init_timeout": 900,
+    "ulysses_degree": 4,
+    "ulysses_a2a_permute": true,
+    "ulysses_head_chunks": 2,
+    "text_encoder_tp_size": 1,
+    "tensor_parallel_size": 1,
+    "vae_patch_parallel_size": 4,
+    "num_gpus": 4,
+    "devices": "0,1,2,3",
+    "distributed_executor_backend": "mp",
+    "max_num_seqs": 1,
+    "vae_use_slicing": true
+  },
+  "prompt": {
+    "prompt": "Two cats in boxing gear on a spotlighted stage.",
+    "modalities": [
+      "video"
+    ]
+  },
+  "variants": {
+    "serial1": {
+      "graph_mode": "graph",
+      "chunks": 1,
+      "schedule": "stage-local-shared-slots",
+      "real_prefix": true
+    },
+    "previous": {
+      "graph_mode": "graph",
+      "chunks": 1,
+      "schedule": "stage-local-shared-slots",
+      "real_prefix": true,
+      "autotune": true
+    },
+    "adaptive": {
+      "graph_mode": "graph",
+      "chunks": 1,
+      "schedule": "stage-local-shared-slots",
+      "real_prefix": true,
+      "autotune": true,
+      "candidate_partition": [
+        1,
+        8,
+        1
+      ]
+    }
+  },
+  "cases": [
+    {
+      "id": "wan22-i2v-ci-832x480_frames81_steps4",
+      "sampling": {
+        "width": 832,
+        "height": 480,
+        "num_inference_steps": 4,
+        "num_frames": 81,
+        "fps": 16,
+        "return_frames": true,
+        "output_type": "np"
+      },
+      "prompt": {
+        "negative_prompt": "Negative prompt for benchmarking diffusion models"
+      },
+      "media": {
+        "image": "tests/assets/qwen_image_edit/qwen_image_edit_2511_test1.png"
+      }
+    }
+  ],
+  "measurement": {
+    "rounds": 30,
+    "warmups": 1,
+    "seeds": [
+      42,
+      43,
+      44
+    ],
+    "new_profiler_traces": false,
+    "paired_audit": false,
+    "selection": "Real denoising call one discovers; only first24 same-signature cores of call two sample. Return both eager outputs to the actual pipeline, then freeze at existing capture sync. Both controls share the delayed capture path. No exploration in auxiliary sync probe or replay.",
+    "purpose": "Natural-prefix whole versus a bounded candidate, unchanged confidence gates; previous is the original predicted two-group policy. No diagnostic forcing, added model forwards or steady timers."
+  },
+  "ci_source": "tests/dfx/perf/tests/test_wan22_i2v_vllm_omni.json",
+  "deployment_changes": "Offline decoded frames (no HTTP/MP4 mux); batch1 FP8 DiT, FA3, Ulysses CE, VAE parallel; no Cache-DiT/profiler."
+}
