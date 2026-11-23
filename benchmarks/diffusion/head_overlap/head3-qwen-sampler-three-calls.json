@@ -56,6 +56,13 @@
       "autotune": true,
       "candidate_family": "three-then-two",
       "real_prefix_calls": 3
+    },
+    "original_prefix": {
+      "chunks": 1,
+      "schedule": "stage-local-shared-slots",
+      "real_prefix": true,
+      "graph_mode": "graph",
+      "real_prefix_calls": 2
     }
   },
   "cases": [
@@ -96,7 +103,8 @@
       44
     ],
     "new_profiler_traces": false,
-    "selection": "Use three actual decode calls: discover layouts, 15 whole/triple pairs, then 16 whole/double pairs; two initial whole layers are untimed. No extra requested forward, probe or per-layer synchronization. Capture once after call three; record first-request eager cost separately."
+    "selection": "Use three actual decode calls: discover layouts, 15 whole/triple pairs, then 16 whole/double pairs; two initial whole layers are untimed. No extra requested forward, probe or per-layer synchronization. Capture once after call three; record first-request eager cost separately.",
+    "control": "original_prefix keeps the prior two-actual-call whole protocol. Compare real eager calls plus replay counts, excluding capture recording, to verify no requested model forward was added."
   },
   "ci_source": "tests/dfx/perf/tests/test_qwen_image_21_vllm_omni.json",
   "deployment_changes": "Offline decoded frames (no HTTP/MP4 mux); batch1 FP8 DiT, FA3, Ulysses CE, VAE parallel; no Cache-DiT/profiler.",
