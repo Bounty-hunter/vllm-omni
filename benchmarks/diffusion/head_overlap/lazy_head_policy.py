@@ -473,6 +473,7 @@ class LazyHeadPolicy:
         return result
 
     def prepare(self, *, warmup_passes=1, sample_limit=None):
+        import native_prefilled as native
         import torch
         import torch.distributed as dist
         from native_prefilled import prepare_plan
@@ -489,6 +490,7 @@ class LazyHeadPolicy:
             slots = entry.calls * warmup_passes
             return slots if sample_limit is None else min(slots, sample_limit)
 
+        remaining_plans = max(0, native._PLAN_LIMIT - len(native._PLANS))
         for entry in self.entries.values():
             # No extra forward is manufactured when this signature is rare.
             slots = slots_for(entry)
@@ -514,6 +516,16 @@ class LazyHeadPolicy:
                 entry.choices = entry.choices[:2]
             if slots < 7 * len(entry.choices):
                 entry.choices = entry.choices[:1]
+            # Whole plans were prepared by discovery. Reserve candidate space
+            # before the rank-consistency header and allocation; lack of space
+            # keeps this signature whole instead of failing a real request.
+            needed = len(set(entry.choices)) - 1
+            if needed > remaining_plans:
+                entry.choices = entry.choices[:1]
+                entry.trial_order = ()
+                entry.untimed_prefix_calls = 0
+            else:
+                remaining_plans -= needed
         header = (
             self.schedule,
             [(entry.signature, entry.choices, entry.calls, entry.trial_order) for entry in self.entries.values()],

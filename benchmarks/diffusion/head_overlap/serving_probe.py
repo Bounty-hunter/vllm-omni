@@ -64,7 +64,9 @@ def install(pipeline):
         if policy.phase != "discover":
             signature = policy.signature(q, k, v, md, get_sp_group().ulysses_group)
             return signature in policy.entries
-        return True
+        # A new layout must fall back before entering the CE route when its
+        # bounded caches are full. Sampling/frozen calls never allocate.
+        return len(native._PLANS) < native._PLAN_LIMIT and len(native._SLOT_ARENA) < 128
 
     def native_run(q, k, v, md, pg, chunks, kernel, **kwargs):
         policy = _ACTIVE.get()
