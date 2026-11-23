@@ -1,0 +1,41 @@
+[
+  {
+    "id": "wan33-groups-3-7",
+    "tokens": 14040,
+    "heads": 40,
+    "joint": 0,
+    "padding": 0,
+    "head_partition": [
+      3,
+      7
+    ],
+    "fused_v": true
+  },
+  {
+    "id": "wan33-groups-2-2-6",
+    "tokens": 14040,
+    "heads": 40,
+    "joint": 0,
+    "padding": 0,
+    "head_partition": [
+      2,
+      2,
+      6
+    ],
+    "fused_v": true
+  },
+  {
+    "id": "wan33-groups-1-1-2-6",
+    "tokens": 14040,
+    "heads": 40,
+    "joint": 0,
+    "padding": 0,
+    "head_partition": [
+      1,
+      1,
+      2,
+      6
+    ],
+    "fused_v": true
+  }
+]

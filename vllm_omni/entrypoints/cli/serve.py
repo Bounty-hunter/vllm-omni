@@ -827,6 +827,13 @@ class OmniServeCommand(CLISubcommand):
             ),
         )
         omni_config_group.add_argument(
+            "--ulysses-head-chunks",
+            type=int,
+            choices=[1, 2, 4],
+            default=None,
+            help="Experimental CUDA CE attention head chunks. Requires strict Ulysses with all-to-all permute.",
+        )
+        omni_config_group.add_argument(
             "--ring",
             "--ring-degree",
             dest="ring_degree",

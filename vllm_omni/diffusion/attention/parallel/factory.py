@@ -126,6 +126,7 @@ def build_parallel_attention_strategy(
             gather_idx=gather_idx,
             use_sync=use_sync,
             ulysses_a2a_permute=ulysses_a2a_permute,
+            head_chunks=getattr(p, "ulysses_head_chunks", 1),
         )
 
     # Pure Ring Attention

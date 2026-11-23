@@ -1,0 +1,80 @@
+{
+  "scope": "Historical initial-publication mapping; these hashes describe that snapshot, not every later branch revision. Later head-partition source identities are in evidence/head-partition-summary.json.",
+  "base_sha": "fb41f81b96ab3c4f6bc7e888ed8e47b07583795b",
+  "files": {
+    "overlap_probe.py": {
+      "measured_source_sha256": "5cc852e426c977aac463e5275132227b48431ee0f2386a019a94ccd1759780cf",
+      "published_source_sha256": "b92ba88a4d17d1fc5219614835a1d634870805bdc14c4833236163f8aa981559",
+      "algorithm_ast_equal_after_device_api_normalization": true
+    },
+    "prefilled_probe.py": {
+      "measured_source_sha256": "700a067b6eb133e85a1b5384c504ef0f9534b249a691573338d022598d84c3cd",
+      "published_source_sha256": "ce26d909d0c29f2ccf05be57b011ca8084944caea609fcb16012d2b82aa57ff8",
+      "algorithm_ast_equal_after_device_api_normalization": true
+    },
+    "native_prefilled.py": {
+      "measured_source_sha256": "5f953cf4e605a91f424358a26909dc455428a12219ee8e685023fbbdfea73a7b",
+      "published_source_sha256": "143019f48addd34d774a2e50d31b6af6d721bede5847282f49ffa60458c576b4",
+      "algorithm_ast_equal_after_device_api_normalization": true
+    },
+    "prefilled_runner.py": {
+      "measured_source_sha256": "e3670c815348429d1b2e2ca18ff320a4282b5520ebf7ac108a5c977eb68e158a",
+      "published_source_sha256": "950025d765daed8b26c6d521f4df3a1e5bc2788cb40e474a3795b39df695c833",
+      "algorithm_ast_equal_after_device_api_normalization": true
+    },
+    "stress_fences.py": {
+      "measured_source_sha256": "f76e1b1a34b823b4939aff938e8c21d0921a58418684075985b4f968a77949cf",
+      "published_source_sha256": "043302a6ab0ef32da4e2c79bac5779df5942fec9bb8033d6451691fc02e479ee",
+      "algorithm_ast_equal_after_device_api_normalization": true
+    },
+    "e2e.py": {
+      "measured_source_sha256": "59d3c99ae9b00cd029412a8e22f2269165aea4b4c2c2b0f9846218d8bb5f8754",
+      "published_source_sha256": "56caf06ed66240a5a3f3b0367a48d104ce624c6303e322dfdb3febdf27b4e819",
+      "algorithm_ast_equal_after_device_api_normalization": false,
+      "configuration_note": "Explicit vae_tile_parallel=True equals the image-pipeline default used by historical runs; no model GPU rerun for this explicit-default change."
+    },
+    "full_request_driver.py": {
+      "measured_source_sha256": "c172e988647136791c3924163f35f53cdcbc716b2b4fff338a423b88d1822678",
+      "published_source_sha256": "b1387c0cbc46ad662320f1e75f51baa4bed0bdf3f9ccc046e2ac86c0c12482f7",
+      "algorithm_ast_equal_after_device_api_normalization": false,
+      "configuration_note": "Explicit vae_tile_parallel=True equals the image-pipeline default used by historical runs; no model GPU rerun for this explicit-default change."
+    },
+    "profile_full_request.py": {
+      "measured_source_sha256": "8e068e0c6e39c49f92000944e208a47a5a70ea8871bafd34c30a8e4d2e8b6a9d",
+      "published_source_sha256": "9cb297e1e8eb3695c32706d7d2e1be3931076ff3a1a79800ce3cc858cb8514c2",
+      "algorithm_ast_equal_after_device_api_normalization": true
+    },
+    "split_full_request.py": {
+      "measured_source_sha256": "eb2d8d6d9303c46a112a2035789e25ec81a51913962fa3d2738026d4221f3d27",
+      "published_source_sha256": "2f473c9316837ca0fbd640545f5d709e79356e3f7408efa822d790909de88dcb",
+      "algorithm_ast_equal_after_device_api_normalization": true
+    },
+    "export_rich_request.py": {
+      "measured_source_sha256": "1a04c35797166fbe0afd1b511458d42525871e25aa35c0deeaff6a22ba079676",
+      "published_source_sha256": "3986fca7e1064fef336de3b371fcb0c70adef991bdfe22ce6f01aebe23a2c138",
+      "algorithm_ast_equal_after_device_api_normalization": true
+    },
+    "analyze_probe.py": {
+      "measured_source_sha256": "64e07453c11d3be658a72b152545a6172c07164c0dff3aacedee4ca67fef21f3",
+      "published_source_sha256": "87637884f7d2ce9f2f12bcfaa20cbf65db29731b5688fb9ffbe65d5ef4aeaaa6",
+      "algorithm_ast_equal_after_device_api_normalization": true
+    },
+    "analyze_edges.py": {
+      "measured_source_sha256": "2f5baaf99c30acbb0371a37411a74c463743c13f420df8d7c3a6f7c9ed0639f5",
+      "published_source_sha256": "4d83cafc20bf8f49074e92f5b954dc9775ff7aeaea6571528ddf3515c9865f8a",
+      "algorithm_ast_equal_after_device_api_normalization": true
+    }
+  },
+  "publication_changes": [
+    "SPDX headers, formatting and import order",
+    "Portable accelerator equivalents for device selection and synchronization",
+    "Full-request driver model path and optional expected hash are CLI arguments",
+    "Both model drivers explicitly retain the existing vae_tile_parallel=True default in their recorded configurations"
+  ],
+  "publication_checks": {
+    "gpu_retest": false,
+    "gpu_retest_note": "Devices were occupied; recorded GPU results belong to the measured-source hashes above.",
+    "core_schedule_ast_unchanged": true,
+    "driver_changes": "Model path and optional expected hash CLI parameters; explicit existing VAE tile-parallel default; no new model performance acceptance claim."
+  }
+}

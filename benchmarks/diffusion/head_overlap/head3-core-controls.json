@@ -1,0 +1,205 @@
+[
+  {
+    "id": "qwen21-turbo-1536-ref1-35",
+    "tokens": 9216,
+    "heads": 32,
+    "joint": 4055,
+    "padding": 0,
+    "joint_query_length": 0,
+    "fused_v": true,
+    "joint_strategy": "front",
+    "head_partition": [
+      3,
+      5
+    ],
+    "copy_event_diagnostic": true,
+    "staging_variants": [
+      "overlap-input",
+      "overlap-return",
+      "overlap-staging",
+      "stage-defer-fence"
+    ]
+  },
+  {
+    "id": "qwen21-turbo-1536-ref1-161",
+    "tokens": 9216,
+    "heads": 32,
+    "joint": 4055,
+    "padding": 0,
+    "joint_query_length": 0,
+    "fused_v": true,
+    "joint_strategy": "front",
+    "head_partition": [
+      1,
+      6,
+      1
+    ],
+    "copy_event_diagnostic": true,
+    "staging_variants": [
+      "overlap-input",
+      "overlap-return",
+      "overlap-staging",
+      "stage-defer-fence"
+    ]
+  },
+  {
+    "id": "qwen21-turbo-1536-ref2-35",
+    "tokens": 9216,
+    "heads": 32,
+    "joint": 8157,
+    "padding": 0,
+    "joint_query_length": 0,
+    "fused_v": true,
+    "joint_strategy": "front",
+    "head_partition": [
+      3,
+      5
+    ],
+    "copy_event_diagnostic": true,
+    "staging_variants": [
+      "overlap-input",
+      "overlap-return",
+      "overlap-staging",
+      "stage-defer-fence"
+    ]
+  },
+  {
+    "id": "qwen21-turbo-1536-ref2-161",
+    "tokens": 9216,
+    "heads": 32,
+    "joint": 8157,
+    "padding": 0,
+    "joint_query_length": 0,
+    "fused_v": true,
+    "joint_strategy": "front",
+    "head_partition": [
+      1,
+      6,
+      1
+    ],
+    "copy_event_diagnostic": true,
+    "staging_variants": [
+      "overlap-input",
+      "overlap-return",
+      "overlap-staging",
+      "stage-defer-fence"
+    ]
+  },
+  {
+    "id": "wan33-37",
+    "tokens": 14040,
+    "heads": 40,
+    "joint": 0,
+    "padding": 0,
+    "fused_v": true,
+    "head_partition": [
+      3,
+      7
+    ],
+    "copy_event_diagnostic": true,
+    "staging_variants": [
+      "overlap-input",
+      "overlap-return",
+      "overlap-staging",
+      "stage-defer-fence"
+    ]
+  },
+  {
+    "id": "wan33-262",
+    "tokens": 14040,
+    "heads": 40,
+    "joint": 0,
+    "padding": 0,
+    "fused_v": true,
+    "head_partition": [
+      2,
+      6,
+      2
+    ],
+    "copy_event_diagnostic": true,
+    "staging_variants": [
+      "overlap-input",
+      "overlap-return",
+      "overlap-staging",
+      "stage-defer-fence"
+    ]
+  },
+  {
+    "id": "wan65-55",
+    "tokens": 26520,
+    "heads": 40,
+    "joint": 0,
+    "padding": 0,
+    "fused_v": true,
+    "head_partition": [
+      5,
+      5
+    ],
+    "copy_event_diagnostic": true,
+    "staging_variants": [
+      "overlap-input",
+      "overlap-return",
+      "overlap-staging",
+      "stage-defer-fence"
+    ]
+  },
+  {
+    "id": "wan65-181",
+    "tokens": 26520,
+    "heads": 40,
+    "joint": 0,
+    "padding": 0,
+    "fused_v": true,
+    "head_partition": [
+      1,
+      8,
+      1
+    ],
+    "copy_event_diagnostic": true,
+    "staging_variants": [
+      "overlap-input",
+      "overlap-return",
+      "overlap-staging",
+      "stage-defer-fence"
+    ]
+  },
+  {
+    "id": "wan-i2v81-28",
+    "tokens": 32760,
+    "heads": 40,
+    "joint": 0,
+    "padding": 0,
+    "fused_v": true,
+    "head_partition": [
+      2,
+      8
+    ],
+    "copy_event_diagnostic": true,
+    "staging_variants": [
+      "overlap-input",
+      "overlap-return",
+      "overlap-staging",
+      "stage-defer-fence"
+    ]
+  },
+  {
+    "id": "wan-i2v81-181",
+    "tokens": 32760,
+    "heads": 40,
+    "joint": 0,
+    "padding": 0,
+    "fused_v": true,
+    "head_partition": [
+      1,
+      8,
+      1
+    ],
+    "copy_event_diagnostic": true,
+    "staging_variants": [
+      "overlap-input",
+      "overlap-return",
+      "overlap-staging",
+      "stage-defer-fence"
+    ]
+  }
+]

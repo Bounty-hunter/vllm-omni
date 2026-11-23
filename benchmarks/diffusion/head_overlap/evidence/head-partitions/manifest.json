@@ -1,0 +1,488 @@
+{
+  "qa2": {
+    "remote": "/data/dyy/logs/hcms-10448-partition-qa2-20261121",
+    "exit_code": "0",
+    "files": [
+      {
+        "file": "evidence/head-partitions/qa2/exit-code",
+        "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+        "original_file": "qa2/exit-code",
+        "original_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+      },
+      {
+        "file": "evidence/head-partitions/qa2/restoration-status.txt",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "original_file": "qa2/restoration-status.txt",
+        "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "file": "evidence/head-partitions/qa2/results/rank0.json",
+        "sha256": "3d7c19c01d6ef9e00e3ae006f06a144052e435ee56fae8cce674961ef09694d7",
+        "original_file": "qa2/results/rank0.json",
+        "original_sha256": "3d7c19c01d6ef9e00e3ae006f06a144052e435ee56fae8cce674961ef09694d7"
+      },
+      {
+        "file": "evidence/head-partitions/qa2/results/rank1.json",
+        "sha256": "041cb38da65eefea417851decd6606eab6ec54650704c9e440f545ced49c9420",
+        "original_file": "qa2/results/rank1.json",
+        "original_sha256": "041cb38da65eefea417851decd6606eab6ec54650704c9e440f545ced49c9420"
+      },
+      {
+        "file": "evidence/head-partitions/qa2/run.log.gz",
+        "sha256": "7b5e869353c46835ce79a88405fa561f86103e3b1e3f64c18e6a5f2d5037cd54",
+        "original_file": "qa2/run.log",
+        "original_sha256": "1bea9282798dca923cb6e4a81a0c6fee17c4bfb0c379184d09e7693ee2a82932"
+      },
+      {
+        "file": "evidence/head-partitions/qa2/source/code-sha.txt",
+        "sha256": "a28ff46984c60b2858b87a4e3cc6c9e330dd98c7738ed4da59d3cccd45a2695b",
+        "original_file": "qa2/source/code-sha.txt",
+        "original_sha256": "a28ff46984c60b2858b87a4e3cc6c9e330dd98c7738ed4da59d3cccd45a2695b"
+      },
+      {
+        "file": "evidence/head-partitions/qa2/source/integration.patch.gz",
+        "sha256": "eb7d4c2a376fb44cc3bdb80f3ac22757960178e92cef41579c3b3003db291faa",
+        "original_file": "qa2/source/integration.patch",
+        "original_sha256": "8f94fb338383b151ab06fa86962b84df0610d2af265ec6b34c72bafad7cd0d03"
+      },
+      {
+        "file": "evidence/head-partitions/qa2/source/source.sha256",
+        "sha256": "6a12574c9e79b5c8e33569da2e13a0bb0a40c52b3bb71ccc6060f77e57db5997",
+        "original_file": "qa2/source/source.sha256",
+        "original_sha256": "6a12574c9e79b5c8e33569da2e13a0bb0a40c52b3bb71ccc6060f77e57db5997"
+      },
+      {
+        "file": "evidence/head-partitions/qa2/runtime-lines.txt",
+        "sha256": "cfd5352629fd4e02644ee47bc31a113d2bf1476f005d2d7e6476552a32394c38"
+      }
+    ]
+  },
+  "qa4": {
+    "remote": "/data/dyy/logs/hcms-10448-partition-qa4-20261121",
+    "exit_code": "0",
+    "files": [
+      {
+        "file": "evidence/head-partitions/qa4/exit-code",
+        "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+        "original_file": "qa4/exit-code",
+        "original_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+      },
+      {
+        "file": "evidence/head-partitions/qa4/restoration-status.txt",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "original_file": "qa4/restoration-status.txt",
+        "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "file": "evidence/head-partitions/qa4/results/rank0.json",
+        "sha256": "56ed3a5176c3a8fc08f0f28c918e0a880f7898a9b8ec32d0d8bd51363bd5d277",
+        "original_file": "qa4/results/rank0.json",
+        "original_sha256": "56ed3a5176c3a8fc08f0f28c918e0a880f7898a9b8ec32d0d8bd51363bd5d277"
+      },
+      {
+        "file": "evidence/head-partitions/qa4/results/rank1.json",
+        "sha256": "0d2ffe9dbc89e155e3dcdd5aa94df9c74d5160a13407cf1ad7b6bf691b2e9c40",
+        "original_file": "qa4/results/rank1.json",
+        "original_sha256": "0d2ffe9dbc89e155e3dcdd5aa94df9c74d5160a13407cf1ad7b6bf691b2e9c40"
+      },
+      {
+        "file": "evidence/head-partitions/qa4/results/rank2.json",
+        "sha256": "c8e15489d2c08bc16213410aa42bf875d10ce9dce0f97727775b13f665d8c66b",
+        "original_file": "qa4/results/rank2.json",
+        "original_sha256": "c8e15489d2c08bc16213410aa42bf875d10ce9dce0f97727775b13f665d8c66b"
+      },
+      {
+        "file": "evidence/head-partitions/qa4/results/rank3.json",
+        "sha256": "b20d9a91cc4e68ff5eb0ed9ed40ed0263343451d6035d4d52a10af34c26d319b",
+        "original_file": "qa4/results/rank3.json",
+        "original_sha256": "b20d9a91cc4e68ff5eb0ed9ed40ed0263343451d6035d4d52a10af34c26d319b"
+      },
+      {
+        "file": "evidence/head-partitions/qa4/run.log.gz",
+        "sha256": "7198aba4c43b6d110770c48b44eefa7b71a606755d62d93d95f0d2fd743bcd42",
+        "original_file": "qa4/run.log",
+        "original_sha256": "0c9c28664d1044acfac4de4c3d679cbd164a39726253d75c9b32e85c84c7b293"
+      },
+      {
+        "file": "evidence/head-partitions/qa4/source/code-sha.txt",
+        "sha256": "a28ff46984c60b2858b87a4e3cc6c9e330dd98c7738ed4da59d3cccd45a2695b",
+        "original_file": "qa4/source/code-sha.txt",
+        "original_sha256": "a28ff46984c60b2858b87a4e3cc6c9e330dd98c7738ed4da59d3cccd45a2695b"
+      },
+      {
+        "file": "evidence/head-partitions/qa4/source/integration.patch.gz",
+        "sha256": "eb7d4c2a376fb44cc3bdb80f3ac22757960178e92cef41579c3b3003db291faa",
+        "original_file": "qa4/source/integration.patch",
+        "original_sha256": "8f94fb338383b151ab06fa86962b84df0610d2af265ec6b34c72bafad7cd0d03"
+      },
+      {
+        "file": "evidence/head-partitions/qa4/source/source.sha256",
+        "sha256": "6a12574c9e79b5c8e33569da2e13a0bb0a40c52b3bb71ccc6060f77e57db5997",
+        "original_file": "qa4/source/source.sha256",
+        "original_sha256": "6a12574c9e79b5c8e33569da2e13a0bb0a40c52b3bb71ccc6060f77e57db5997"
+      },
+      {
+        "file": "evidence/head-partitions/qa4/runtime-lines.txt",
+        "sha256": "08ec416b6597fa78045045af3a6c08250fb3aa1e6ab713ddae4a65f292e6c39e"
+      }
+    ]
+  },
+  "wan": {
+    "remote": "/data/dyy/logs/hcms-10448-wan-partitions-20261121",
+    "exit_code": "0",
+    "files": [
+      {
+        "file": "evidence/head-partitions/wan/exit-code",
+        "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+        "original_file": "wan/exit-code",
+        "original_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+      },
+      {
+        "file": "evidence/head-partitions/wan/partition-qa/rank0.json",
+        "sha256": "92f471f534ada7db9e8479e191cedd8b3ff7cd7f35238852f4a3e8829aed909a",
+        "original_file": "wan/partition-qa/rank0.json",
+        "original_sha256": "92f471f534ada7db9e8479e191cedd8b3ff7cd7f35238852f4a3e8829aed909a"
+      },
+      {
+        "file": "evidence/head-partitions/wan/partition-qa/rank1.json",
+        "sha256": "e0b3a7b224f370dbe9cc8cc2aedd665138dd7666e7ef68793d56489d906dd7c0",
+        "original_file": "wan/partition-qa/rank1.json",
+        "original_sha256": "e0b3a7b224f370dbe9cc8cc2aedd665138dd7666e7ef68793d56489d906dd7c0"
+      },
+      {
+        "file": "evidence/head-partitions/wan/restoration-status.txt",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "original_file": "wan/restoration-status.txt",
+        "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "file": "evidence/head-partitions/wan/results/audit/rank0.jsonl",
+        "sha256": "de4d23a0a7e4b03604b0cc257a156143a20b73819624ea0a2aac41a0c759d46e",
+        "original_file": "wan/results/audit/rank0.jsonl",
+        "original_sha256": "de4d23a0a7e4b03604b0cc257a156143a20b73819624ea0a2aac41a0c759d46e"
+      },
+      {
+        "file": "evidence/head-partitions/wan/results/audit/rank1.jsonl",
+        "sha256": "e6a77d26d228159a3c706c4a21e5f6e98f3ba0e7003a84123567c9556f404f9a",
+        "original_file": "wan/results/audit/rank1.jsonl",
+        "original_sha256": "e6a77d26d228159a3c706c4a21e5f6e98f3ba0e7003a84123567c9556f404f9a"
+      },
+      {
+        "file": "evidence/head-partitions/wan/results/results.json",
+        "sha256": "f1d23a755efb5b8e00e11223d991ec539a3f698bcdea3c7733609225171f36df",
+        "original_file": "wan/results/results.json",
+        "original_sha256": "f1d23a755efb5b8e00e11223d991ec539a3f698bcdea3c7733609225171f36df"
+      },
+      {
+        "file": "evidence/head-partitions/wan/run.log.gz",
+        "sha256": "3f92fb8f3e34164f1391c95d394fe9232788c9769bbada0eb2e8e1cf94b1b51c",
+        "original_file": "wan/run.log",
+        "original_sha256": "c6bdd2d25c0b9a40728ac0ec234b10e39451bd5b5f0061b9ced1c92b6df3ee39"
+      },
+      {
+        "file": "evidence/head-partitions/wan/source/code-sha.txt",
+        "sha256": "064e2b830cf7f6c831be3370b1d9fdf029a62b7fb087031059184ad62212349e",
+        "original_file": "wan/source/code-sha.txt",
+        "original_sha256": "064e2b830cf7f6c831be3370b1d9fdf029a62b7fb087031059184ad62212349e"
+      },
+      {
+        "file": "evidence/head-partitions/wan/source/config.json",
+        "sha256": "eae59e845f3f4389a712ea9147422bf002666245e79d8b5e4da6c75327e61d59",
+        "original_file": "wan/source/config.json",
+        "original_sha256": "eae59e845f3f4389a712ea9147422bf002666245e79d8b5e4da6c75327e61d59"
+      },
+      {
+        "file": "evidence/head-partitions/wan/source/integration.patch.gz",
+        "sha256": "27b890d59d81bc02d3f384cb0e8dfe16f05c02da3599caf17b09e3cb6e39b1ea",
+        "original_file": "wan/source/integration.patch",
+        "original_sha256": "cd6eaaa29e45a4afeb9a4fea629017616f315b7dbea3a5858fa756ae35b15701"
+      },
+      {
+        "file": "evidence/head-partitions/wan/source/payload.sh.gz",
+        "sha256": "c9a88a3d1263b016fd329d6bb7f980bf17ca7f73063a58cc23a6e2d012d257cf",
+        "original_file": "wan/source/payload.sh",
+        "original_sha256": "9e43f7cb4f35979430adc40f9f982822e21154d37bb6c801dcf5757c5cae6adb"
+      },
+      {
+        "file": "evidence/head-partitions/wan/source/source.sha256",
+        "sha256": "a9878bdc2eb08dcf8daf8c9c91ad98b3c91f6c055c76185567dcb076e9218e9b",
+        "original_file": "wan/source/source.sha256",
+        "original_sha256": "a9878bdc2eb08dcf8daf8c9c91ad98b3c91f6c055c76185567dcb076e9218e9b"
+      },
+      {
+        "file": "evidence/head-partitions/wan/topology.txt.gz",
+        "sha256": "23f58a70cb4c438932dc24c3c79aa1af2bf206f10682fb85d8db3a9721ff8018",
+        "original_file": "wan/topology.txt",
+        "original_sha256": "2559bd868f8de7144aa72240c93480aca232c9d9ca07f27abf191b3cceaf14d8"
+      },
+      {
+        "file": "evidence/head-partitions/wan/runtime-lines.txt",
+        "sha256": "f33051e567a3aabdb2ad63982578f2ee43795c5dd328b4630b9a6584aa7839e6"
+      }
+    ]
+  },
+  "h3": {
+    "remote": "/data/dyy/logs/hcms-10448-h3-partitions-20261121",
+    "exit_code": "0",
+    "files": [
+      {
+        "file": "evidence/head-partitions/h3/audit/audit-rank0.jsonl",
+        "sha256": "01c52dceb7417487f8551866c4e6b4dd31b15e3b3909aeb8e915f094d6bfc29c",
+        "original_file": "h3/audit/audit-rank0.jsonl",
+        "original_sha256": "01c52dceb7417487f8551866c4e6b4dd31b15e3b3909aeb8e915f094d6bfc29c"
+      },
+      {
+        "file": "evidence/head-partitions/h3/audit/audit-rank1.jsonl",
+        "sha256": "efe2658f72aabfd1c7c245969e43ff3d437045c1d3ac63f297127fde22042117",
+        "original_file": "h3/audit/audit-rank1.jsonl",
+        "original_sha256": "efe2658f72aabfd1c7c245969e43ff3d437045c1d3ac63f297127fde22042117"
+      },
+      {
+        "file": "evidence/head-partitions/h3/audit/audit-rank2.jsonl",
+        "sha256": "da72ca16f39cc83966682d449bfbaa8d3bf888b74bbcfcdb9f1d9d5d207f3366",
+        "original_file": "h3/audit/audit-rank2.jsonl",
+        "original_sha256": "da72ca16f39cc83966682d449bfbaa8d3bf888b74bbcfcdb9f1d9d5d207f3366"
+      },
+      {
+        "file": "evidence/head-partitions/h3/audit/audit-rank3.jsonl",
+        "sha256": "74d033f47f1d0379ea7096b04cf6771e4a871a1cdee45211163271c292f7cd49",
+        "original_file": "h3/audit/audit-rank3.jsonl",
+        "original_sha256": "74d033f47f1d0379ea7096b04cf6771e4a871a1cdee45211163271c292f7cd49"
+      },
+      {
+        "file": "evidence/head-partitions/h3/exit-code",
+        "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+        "original_file": "h3/exit-code",
+        "original_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+      },
+      {
+        "file": "evidence/head-partitions/h3/restoration-status.txt",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "original_file": "h3/restoration-status.txt",
+        "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "file": "evidence/head-partitions/h3/results/results.json",
+        "sha256": "b100619268db4992cc931144ca3a9cdc59ae6326d8bde2fa72b3885dff168c13",
+        "original_file": "h3/results/results.json",
+        "original_sha256": "b100619268db4992cc931144ca3a9cdc59ae6326d8bde2fa72b3885dff168c13"
+      },
+      {
+        "file": "evidence/head-partitions/h3/run.log.gz",
+        "sha256": "bbaaa711ecdfecf309f5bd47b1ba475e4463acd2bbc96a48284e333782ec54b4",
+        "original_file": "h3/run.log",
+        "original_sha256": "03c1881583ae56a5a3a9cbe717d417b5ea73f2e780432b59646113880c6d96a8"
+      },
+      {
+        "file": "evidence/head-partitions/h3/source/code-sha.txt",
+        "sha256": "c815cf5ba5810bb443634b7dc02845e4bc92120572b90b6b400f5dd7ccedcc7d",
+        "original_file": "h3/source/code-sha.txt",
+        "original_sha256": "c815cf5ba5810bb443634b7dc02845e4bc92120572b90b6b400f5dd7ccedcc7d"
+      },
+      {
+        "file": "evidence/head-partitions/h3/source/config.json",
+        "sha256": "40158628a02cb6c6a4964359464ff8a92085feca7374d1a65d37bfa0745a0711",
+        "original_file": "h3/source/config.json",
+        "original_sha256": "40158628a02cb6c6a4964359464ff8a92085feca7374d1a65d37bfa0745a0711"
+      },
+      {
+        "file": "evidence/head-partitions/h3/source/integration.patch.gz",
+        "sha256": "043d855ac7a272b61f78fd9ab7ebd41c69d19183c1314de0e1fc1dd3328200da",
+        "original_file": "h3/source/integration.patch",
+        "original_sha256": "7eaa3e2930156fd924e32c0d1cbf265470dbe6153482f0f0a225074df34af840"
+      },
+      {
+        "file": "evidence/head-partitions/h3/source/source.sha256",
+        "sha256": "ae615618c0bb762c082b44b8146207a0000892732a92930c57e41ef710affa7e",
+        "original_file": "h3/source/source.sha256",
+        "original_sha256": "ae615618c0bb762c082b44b8146207a0000892732a92930c57e41ef710affa7e"
+      },
+      {
+        "file": "evidence/head-partitions/h3/topology.txt.gz",
+        "sha256": "23f58a70cb4c438932dc24c3c79aa1af2bf206f10682fb85d8db3a9721ff8018",
+        "original_file": "h3/topology.txt",
+        "original_sha256": "2559bd868f8de7144aa72240c93480aca232c9d9ca07f27abf191b3cceaf14d8"
+      },
+      {
+        "file": "evidence/head-partitions/h3/runtime-lines.txt",
+        "sha256": "2f97b0df2ca176906d9b76aa0ad02fcddbc544fb00fa902d100ee8955d3f362c"
+      }
+    ]
+  },
+  "wan-confirm": {
+    "remote": "/data/dyy/logs/hcms-10448-wan-partition-confirm-20261121",
+    "exit_code": "0",
+    "files": [
+      {
+        "file": "evidence/head-partitions/wan-confirm/exit-code",
+        "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+        "original_file": "wan-confirm/exit-code",
+        "original_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+      },
+      {
+        "file": "evidence/head-partitions/wan-confirm/restoration-status.txt",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "original_file": "wan-confirm/restoration-status.txt",
+        "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "file": "evidence/head-partitions/wan-confirm/results/audit/rank0.jsonl",
+        "sha256": "1dfe1526f9ac3256ab4f0953c7f3b105f6985f1f43acaa18d48344fe3dbc60c7",
+        "original_file": "wan-confirm/results/audit/rank0.jsonl",
+        "original_sha256": "1dfe1526f9ac3256ab4f0953c7f3b105f6985f1f43acaa18d48344fe3dbc60c7"
+      },
+      {
+        "file": "evidence/head-partitions/wan-confirm/results/audit/rank1.jsonl",
+        "sha256": "3253d95243ec81ac7eab7ab5f90b9a2024f1f29765d3cbe67a0bc158c470f297",
+        "original_file": "wan-confirm/results/audit/rank1.jsonl",
+        "original_sha256": "3253d95243ec81ac7eab7ab5f90b9a2024f1f29765d3cbe67a0bc158c470f297"
+      },
+      {
+        "file": "evidence/head-partitions/wan-confirm/results/results.json",
+        "sha256": "cc98a7fd7866cbd4ef2ad3370f95fead4ef6cc138a0090e3ff1078503b1f2039",
+        "original_file": "wan-confirm/results/results.json",
+        "original_sha256": "cc98a7fd7866cbd4ef2ad3370f95fead4ef6cc138a0090e3ff1078503b1f2039"
+      },
+      {
+        "file": "evidence/head-partitions/wan-confirm/run.log.gz",
+        "sha256": "31eb927f62af692ecc91825120ed1473202601b0a9ca9937d8ea8cf95946c190",
+        "original_file": "wan-confirm/run.log",
+        "original_sha256": "8f185bbee01024418d215e6c8d23a4e74110168bd9755c161573fa2b0ba9bd4e"
+      },
+      {
+        "file": "evidence/head-partitions/wan-confirm/source/code-sha.txt",
+        "sha256": "193719241789aa1085319ef60ff9748ee6cdbbce66af68ba231aecdd750e3069",
+        "original_file": "wan-confirm/source/code-sha.txt",
+        "original_sha256": "193719241789aa1085319ef60ff9748ee6cdbbce66af68ba231aecdd750e3069"
+      },
+      {
+        "file": "evidence/head-partitions/wan-confirm/source/config.json",
+        "sha256": "2aceba68546de558633822f758ae6dc3629241910c1bb92af8528999325245d0",
+        "original_file": "wan-confirm/source/config.json",
+        "original_sha256": "2aceba68546de558633822f758ae6dc3629241910c1bb92af8528999325245d0"
+      },
+      {
+        "file": "evidence/head-partitions/wan-confirm/source/integration.patch.gz",
+        "sha256": "27b890d59d81bc02d3f384cb0e8dfe16f05c02da3599caf17b09e3cb6e39b1ea",
+        "original_file": "wan-confirm/source/integration.patch",
+        "original_sha256": "cd6eaaa29e45a4afeb9a4fea629017616f315b7dbea3a5858fa756ae35b15701"
+      },
+      {
+        "file": "evidence/head-partitions/wan-confirm/source/payload.sh.gz",
+        "sha256": "4526cecfd6f554ce1dd09e0d865f5f31da7663e2b7d26014799f50a5c70edc5f",
+        "original_file": "wan-confirm/source/payload.sh",
+        "original_sha256": "665d31919d92a47afc7600ff04f08a5b5f1bcfac667d8ded97a7607af1c29e83"
+      },
+      {
+        "file": "evidence/head-partitions/wan-confirm/source/source.sha256",
+        "sha256": "ed96c858402b300f3ab31acf304c6d893bc28198f785118877f171484bac64bf",
+        "original_file": "wan-confirm/source/source.sha256",
+        "original_sha256": "ed96c858402b300f3ab31acf304c6d893bc28198f785118877f171484bac64bf"
+      },
+      {
+        "file": "evidence/head-partitions/wan-confirm/topology.txt.gz",
+        "sha256": "23f58a70cb4c438932dc24c3c79aa1af2bf206f10682fb85d8db3a9721ff8018",
+        "original_file": "wan-confirm/topology.txt",
+        "original_sha256": "2559bd868f8de7144aa72240c93480aca232c9d9ca07f27abf191b3cceaf14d8"
+      },
+      {
+        "file": "evidence/head-partitions/wan-confirm/runtime-lines.txt",
+        "sha256": "743639a8a89809f3a0d6654bcc776661a4d2cf1fa1766dd8efdee46b96134f36"
+      }
+    ]
+  },
+  "h3-confirm": {
+    "remote": "/data/dyy/logs/hcms-10448-h3-partition-confirm-20261121",
+    "exit_code": "0",
+    "files": [
+      {
+        "file": "evidence/head-partitions/h3-confirm/audit/audit-rank0.jsonl",
+        "sha256": "e0a3e26f5dac71b2a5b2b2b205abf0776825720e73b9c30dd25c8d531222ee5a",
+        "original_file": "h3-confirm/audit/audit-rank0.jsonl",
+        "original_sha256": "e0a3e26f5dac71b2a5b2b2b205abf0776825720e73b9c30dd25c8d531222ee5a"
+      },
+      {
+        "file": "evidence/head-partitions/h3-confirm/audit/audit-rank1.jsonl",
+        "sha256": "005b0c1e253c89d5781a432a231356a9007613b81e55bda0141fb9042490e1e9",
+        "original_file": "h3-confirm/audit/audit-rank1.jsonl",
+        "original_sha256": "005b0c1e253c89d5781a432a231356a9007613b81e55bda0141fb9042490e1e9"
+      },
+      {
+        "file": "evidence/head-partitions/h3-confirm/audit/audit-rank2.jsonl",
+        "sha256": "676bbf2d154c785568d171a2afb29cae57bf2e6675e267a663f56eb2c7f6740e",
+        "original_file": "h3-confirm/audit/audit-rank2.jsonl",
+        "original_sha256": "676bbf2d154c785568d171a2afb29cae57bf2e6675e267a663f56eb2c7f6740e"
+      },
+      {
+        "file": "evidence/head-partitions/h3-confirm/audit/audit-rank3.jsonl",
+        "sha256": "79f96f8ab91645a9ea97eaedade4b13030ad62eb694231c12b1dae716a0ff520",
+        "original_file": "h3-confirm/audit/audit-rank3.jsonl",
+        "original_sha256": "79f96f8ab91645a9ea97eaedade4b13030ad62eb694231c12b1dae716a0ff520"
+      },
+      {
+        "file": "evidence/head-partitions/h3-confirm/exit-code",
+        "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+        "original_file": "h3-confirm/exit-code",
+        "original_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+      },
+      {
+        "file": "evidence/head-partitions/h3-confirm/restoration-status.txt",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "original_file": "h3-confirm/restoration-status.txt",
+        "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "file": "evidence/head-partitions/h3-confirm/results/results.json",
+        "sha256": "bead0a6acf8dbaf1454e03784d513b1db20349a59bad2d85094daa70a98eb667",
+        "original_file": "h3-confirm/results/results.json",
+        "original_sha256": "bead0a6acf8dbaf1454e03784d513b1db20349a59bad2d85094daa70a98eb667"
+      },
+      {
+        "file": "evidence/head-partitions/h3-confirm/run.log.gz",
+        "sha256": "142d875d21d2d826eee1e04b07929e2bfe032849f5137a8daa9ecea533e36651",
+        "original_file": "h3-confirm/run.log",
+        "original_sha256": "d445d4792da46810257ff9a48580f6d2fd34b842b528245f7ca60b6d276b57d0"
+      },
+      {
+        "file": "evidence/head-partitions/h3-confirm/source/code-sha.txt",
+        "sha256": "193719241789aa1085319ef60ff9748ee6cdbbce66af68ba231aecdd750e3069",
+        "original_file": "h3-confirm/source/code-sha.txt",
+        "original_sha256": "193719241789aa1085319ef60ff9748ee6cdbbce66af68ba231aecdd750e3069"
+      },
+      {
+        "file": "evidence/head-partitions/h3-confirm/source/config.json",
+        "sha256": "76311dab160485600d33c9e0229cad705051f0de59500111a5d8ab20cd7feaf7",
+        "original_file": "h3-confirm/source/config.json",
+        "original_sha256": "76311dab160485600d33c9e0229cad705051f0de59500111a5d8ab20cd7feaf7"
+      },
+      {
+        "file": "evidence/head-partitions/h3-confirm/source/integration.patch.gz",
+        "sha256": "043d855ac7a272b61f78fd9ab7ebd41c69d19183c1314de0e1fc1dd3328200da",
+        "original_file": "h3-confirm/source/integration.patch",
+        "original_sha256": "7eaa3e2930156fd924e32c0d1cbf265470dbe6153482f0f0a225074df34af840"
+      },
+      {
+        "file": "evidence/head-partitions/h3-confirm/source/payload.sh.gz",
+        "sha256": "adfb16afd30ee461944e4b39e1e5281b2aa5ce53b3a368cc5fb3b5ffed5504e7",
+        "original_file": "h3-confirm/source/payload.sh",
+        "original_sha256": "8efe8ebb4fd4bb9c70740d6c56a7820f40b7ec75731dda0bc11df49d83b7e469"
+      },
+      {
+        "file": "evidence/head-partitions/h3-confirm/source/source.sha256",
+        "sha256": "80bc32b2cc933d827c9f667410b7b5b6820f8092b4a6f7417ce3080aa757252d",
+        "original_file": "h3-confirm/source/source.sha256",
+        "original_sha256": "80bc32b2cc933d827c9f667410b7b5b6820f8092b4a6f7417ce3080aa757252d"
+      },
+      {
+        "file": "evidence/head-partitions/h3-confirm/topology.txt.gz",
+        "sha256": "23f58a70cb4c438932dc24c3c79aa1af2bf206f10682fb85d8db3a9721ff8018",
+        "original_file": "h3-confirm/topology.txt",
+        "original_sha256": "2559bd868f8de7144aa72240c93480aca232c9d9ca07f27abf191b3cceaf14d8"
+      },
+      {
+        "file": "evidence/head-partitions/h3-confirm/runtime-lines.txt",
+        "sha256": "0951a95072ce03d8a9aa9a9e785e5030ab9252a0f13bfb01658446948ab43093"
+      }
+    ]
+  }
+}

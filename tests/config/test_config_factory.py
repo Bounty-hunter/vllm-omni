@@ -40,10 +40,29 @@ from vllm_omni.config.stage_config import (
     pipeline_cfg_resolver,
 )
 from vllm_omni.diffusion.data import DiffusionParallelConfig
-from vllm_omni.engine.arg_utils import SHARED_FIELDS, OmniEngineArgs, internal_blacklist_keys
+from vllm_omni.engine.arg_utils import SHARED_FIELDS, OmniEngineArgs, OrchestratorArgs, internal_blacklist_keys
 from vllm_omni.entrypoints.utils import filter_dataclass_kwargs
 
 pytestmark = [pytest.mark.core_model, pytest.mark.cpu]
+
+
+@pytest.mark.parametrize("chunks", [1, 2, 4])
+def test_registered_diffusion_preserves_head_chunks(chunks: int):
+    caller_kwargs = filter_dataclass_kwargs(
+        OrchestratorArgs, {"ulysses_degree": 2, "ulysses_a2a_permute": True, "ulysses_head_chunks": chunks}
+    )
+    overrides = build_stage_runtime_overrides(0, filter_dataclass_kwargs(OmniEngineArgs, caller_kwargs))
+    stage = StageConfig(
+        stage_id=0,
+        model_stage="diffusion",
+        stage_type=StageType.DIFFUSION,
+        runtime_overrides=overrides,
+    ).to_omegaconf()
+    parallel = DiffusionParallelConfig(**stage.engine_args.parallel_config)
+    assert parallel.ulysses_head_chunks == chunks
+    assert parallel.ulysses_degree == 2
+    assert parallel.ulysses_a2a_permute is True
+
 
 SINGLE_STAGE_PIPE_CFG = (StagePipelineConfig(stage_id=0, model_stage="a", final_output=True),)
 # Validation strings to match against in post init
