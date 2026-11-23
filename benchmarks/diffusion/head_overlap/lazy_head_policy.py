@@ -576,6 +576,17 @@ class LazyHeadPolicy:
                     pair[0].record()
                     pair[1].record()
                 self.stats["event_records"] += 2 * len(entry.events)
+            # All plans and timer handles are ready. Later real calls bind
+            # their own QKV; a rare prefill signature may never reach finish(),
+            # so discovery activations must not survive until selection.
+            entry.inputs, entry.joint, entry.metadata, entry.kernel, entry.group, entry.comm = (
+                (),
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
         self.phase = "sample"
         self.stats["prepare_ms"] += (time.perf_counter() - start) * 1000
 
@@ -674,14 +685,6 @@ class LazyHeadPolicy:
                     allocated_sample_pairs=len(entry.events),
                     paired_samples_max_rank_us=paired,
                 )
-            )
-            entry.inputs, entry.joint, entry.metadata, entry.kernel, entry.group, entry.comm = (
-                (),
-                None,
-                None,
-                None,
-                None,
-                None,
             )
             entry.events.clear()
             entry.samples.clear()
