@@ -16,6 +16,7 @@ from lazy_head_policy import (
     symmetric_candidates,
     tensor_spec,
     three_then_two_candidates,
+    two_pass_order,
 )
 
 
@@ -137,6 +138,28 @@ def main():
     assert choose_three_then_two(samples, controlled, paired) == 3
     paired["whole_vs_two"] = [[1090] * 5, [960] * 5]
     assert choose_three_then_two(samples, controlled, paired) == 1
+    order = two_pass_order(32, 64)
+    assert len(order) == 64 and order[:2] == (0, 0)
+    assert set(order[2:32]) == {0, 1} and set(order[32:]) == {2, 3}
+    assert Counter(order) == {0: 17, 1: 15, 2: 16, 3: 16}
+    # Six early host-starved layers still leave enough complete, all-rank
+    # observations. Rejecting them preserves the same confidence gate.
+    observations = [[] for _ in controlled]
+    for index, choice in enumerate(order[2:], 2):
+        value = (1100, 1050, 1090, 960)[choice]
+        observations[choice].append([(value, index >= 8, 1)] * 4)
+    maximum = qualified_cycles(observations)
+    paired = {
+        name: qualified_cycles([observations[a], observations[b]])
+        for name, a, b in (("whole_vs_three", 0, 1), ("whole_vs_two", 2, 3), ("three_vs_two", 1, 3))
+    }
+    assert min(len(values) for values in maximum) >= 6
+    assert choose_three_then_two(maximum, controlled, paired) == 3
+    for calls in (16, 17, 20, 28, 32, 40, 42):
+        slots = min(2 * calls, 64)
+        order = two_pass_order(calls, slots)
+        assert len(order) <= 2 * calls and all(0 <= choice < 4 for choice in order)
+        assert min(Counter(order)[choice] for choice in (1, 3)) >= 7
     for heads in range(1, 33):
         for tokens in (1024, 4096, 9216, 14040, 16384):
             choices = three_then_two_candidates(heads, tokens, 128, 4, 132, kv_tokens=tokens + 4055)

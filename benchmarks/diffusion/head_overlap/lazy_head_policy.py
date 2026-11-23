@@ -201,6 +201,22 @@ def candidate_index(index, count):
     return order[position]
 
 
+def two_pass_order(calls, slots):
+    """Pair a triple with whole, then a double with its own whole control.
+
+    For 32-layer decode calls this consumes two real calls: two initial whole
+    layers and 15 triple pairs in the first, then 16 double pairs in the next.
+    The caller supplies actual discovery counts; no forward is manufactured.
+    """
+    if calls < 16 or slots < 32:
+        raise ValueError("Two-pass head learning requires enough actual cores")
+    first = 2 * min((calls - 2) // 2, (slots - 16) // 2)
+    order = [0, 0]
+    order.extend((0, 1)[candidate_index(i, 2)] for i in range(first))
+    order.extend((2, 3)[candidate_index(i, 2)] for i in range(slots - len(order)))
+    return tuple(order)
+
+
 @dataclass
 class Observation:
     signature: tuple
@@ -218,6 +234,7 @@ class Observation:
     samples: list = field(default_factory=list)
     sample_calls: int = 0
     untimed_prefix_calls: int = 0
+    trial_order: tuple = ()
 
 
 class LazyHeadPolicy:
@@ -397,10 +414,13 @@ class LazyHeadPolicy:
             choice = 0
         elif self.phase == "sample":
             entry.sample_calls += 1
+            if entry.trial_order and entry.sample_calls <= len(entry.trial_order):
+                choice = entry.trial_order[entry.sample_calls - 1]
             if entry.sample_calls <= entry.untimed_prefix_calls:
                 choice = 0
             elif entry.index < len(entry.events):
-                choice = candidate_index(entry.index, len(entry.choices))
+                if not entry.trial_order:
+                    choice = candidate_index(entry.index, len(entry.choices))
                 event_pair = entry.events[entry.index]
                 entry.index += 1
         plan = prepare_plan(
@@ -458,9 +478,10 @@ class LazyHeadPolicy:
         start = time.perf_counter()
         self.stats["preparation_calls"] += 1
         if sample_limit is not None:
-            if sample_limit < 1 or warmup_passes != 1:
-                raise ValueError("A real request prefix must be one bounded pass")
+            if sample_limit < 1 or warmup_passes not in (1, 2):
+                raise ValueError("A real request prefix must use one or two bounded actual passes")
             self.stats["sample_limit_per_signature"] = sample_limit
+        self.stats["sampling_passes"] = warmup_passes
 
         def slots_for(entry):
             slots = entry.calls * warmup_passes
@@ -485,11 +506,16 @@ class LazyHeadPolicy:
                     # triple pairs, enough for six after the cold-pair discard.
                     # No extra layer, attention call or synchronization is added.
                     entry.untimed_prefix_calls = 2
+                    if warmup_passes == 2:
+                        entry.trial_order = two_pass_order(entry.calls, slots)
             if slots < 7 * len(entry.choices):
                 entry.choices = entry.choices[:2]
             if slots < 7 * len(entry.choices):
                 entry.choices = entry.choices[:1]
-        header = (self.schedule, [(entry.signature, entry.choices, entry.calls) for entry in self.entries.values()])
+        header = (
+            self.schedule,
+            [(entry.signature, entry.choices, entry.calls, entry.trial_order) for entry in self.entries.values()],
+        )
         if any(len(entry.choices) > 1 for entry in self.entries.values()):
             headers = [None] * dist.get_world_size(self.group)
             dist.all_gather_object(headers, header, group=self.group)
@@ -615,6 +641,7 @@ class LazyHeadPolicy:
                     sampling_pass_calls=entry.sample_calls,
                     timed_prefix_calls=entry.index,
                     untimed_prefix_calls=entry.untimed_prefix_calls,
+                    trial_order=entry.trial_order,
                     allocated_sample_pairs=len(entry.events),
                     paired_samples_max_rank_us=paired,
                 )
@@ -629,6 +656,7 @@ class LazyHeadPolicy:
             )
             entry.events.clear()
             entry.samples.clear()
+            entry.trial_order = ()
         self.phase = "frozen"
         key = (
             self.schedule,

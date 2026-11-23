@@ -188,6 +188,18 @@ seven whole/three-group pairs, with rotated/reversed local controls. This
 changes no model forward count. Shorter signatures retain the existing
 two-group or whole-attention fallback.
 
+The later Qwen recipes explicitly set `real_prefix_calls=3` for every arm,
+including whole attention. Call one discovers; the next two actual decode
+calls provide separate whole/triple and whole/double pairs. A 32-layer
+component has two initial untimed whole layers, 15 triple pairs, and 16 double
+pairs. All buffers and 62 event pairs are ready before call two. Results are
+read once at the capture boundary after call three. Each actual eager output
+continues into the pipeline. There is one capture, followed by four replays
+in a seven-decode-call first request: `3 + 4 = 7`, just as `2 + 5 = 7` before.
+The extra eager call adds first-request host overhead and replaces one replay;
+capture recording is not an executed model forward. Ordinary two-call recipes
+retain their previous sampling order and count.
+
 The six-valid-pair confidence gate is unchanged. A qualifying three-group
 partition has priority; the two-group partition replaces it when qualified
 observations establish an additional gain. Insufficient evidence retains

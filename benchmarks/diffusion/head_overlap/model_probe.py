@@ -57,12 +57,13 @@ class StableGraph(GraphedForward):
 
 
 class PackedForward(nn.Module):
-    def __init__(self, forward, learner=None):
+    def __init__(self, forward, learner=None, *, prefix_calls=2):
         super().__init__()
         self.body = forward
         self.learner = learner
         self.forward_calls = 0
         self.prefix_steps = 0
+        self.prefix_calls = prefix_calls
 
     def forward(self, packed_args, packed_kwargs):
         self.forward_calls += 1
@@ -186,11 +187,12 @@ def graph_call(original, graphs, component, *args, **kwargs):
 
 
 def real_prefix_call(original, graphs, component, *args, **kwargs):
-    """Use two actual denoising calls, returning both outputs to the pipeline.
+    """Learn from actual denoising calls, returning every real output.
 
-    The first discovers layouts. Only a bounded prefix of the second samples.
-    They replace existing warmup opportunities. The original sync-debug probe,
-    capture boundary and graph validation remain; none supplies timing samples.
+    The first discovers layouts. A bounded prefix of the next one or two samples.
+    Capture moves after that real prefix. The original sync-debug probe and
+    validation semantics remain; neither supplies timing samples. An eager
+    actual call replaces a replay, rather than adding a probe forward.
     """
     from lazy_head_policy import LazyHeadPolicy
 
@@ -207,7 +209,7 @@ def real_prefix_call(original, graphs, component, *args, **kwargs):
         )
         learner.begin()
         graph = graphs[graph_key] = StableGraph(
-            PackedForward(original, learner),
+            PackedForward(original, learner, prefix_calls=state["real_prefix_calls"]),
             device=torch.cuda.current_stream().device,
             max_entries=8,
             warmup_iters=0,
@@ -217,6 +219,8 @@ def real_prefix_call(original, graphs, component, *args, **kwargs):
         if state.get("capture_without_probes"):
             graph._probe_pending = False
     learner = graph.module.learner
+    if graph.module.prefix_calls != state["real_prefix_calls"]:
+        raise ValueError("A real-prefix call budget must remain fixed within its graph case")
     if learner.schedule != state["schedule"]:
         raise ValueError("A communication schedule must remain fixed within its graph case")
     if learner.candidate_family != state["candidate_family"]:
@@ -226,16 +230,20 @@ def real_prefix_call(original, graphs, component, *args, **kwargs):
         raise ValueError("An experimental candidate must remain fixed within its graph case")
     state["learner"] = learner
     before = graph.module.forward_calls
-    if graph.module.prefix_steps < 2:
+    if graph.module.prefix_steps < graph.module.prefix_calls:
         if graph.module.prefix_steps == 1:
             # All layouts came from step one; allocation is complete before
             # the first trial in step two, without a dummy model invocation.
-            learner.prepare(sample_limit=32 if learner.candidate_family == "three-then-two" else 24)
+            passes = graph.module.prefix_calls - 1 if learner.candidate_family == "three-then-two" else 1
+            learner.prepare(
+                warmup_passes=passes,
+                sample_limit=32 * passes if learner.candidate_family == "three-then-two" else 24,
+            )
         result = graph.module(args, kwargs)
         graph.module.prefix_steps += 1
         state["real_eager_steps"][component] = state["real_eager_steps"].get(component, 0) + 1
         graph.output_type = type(result)
-        if graph.module.prefix_steps == 2:
+        if graph.module.prefix_steps == graph.module.prefix_calls:
             learner.phase = "settle"
             if state.get("capture_without_probes"):
                 packed = dict(packed_args=args, packed_kwargs=kwargs)
@@ -251,8 +259,8 @@ def real_prefix_call(original, graphs, component, *args, **kwargs):
                 kind="capture",
                 component=component,
                 variant=state["variant"],
-                sample_location="real denoising step two prefix",
-                real_eager_steps=2,
+                sample_location="real denoising calls after discovery, before capture",
+                real_eager_steps=graph.module.prefix_calls,
                 graph_stats=graph.stats(),
             )
         # In particular, do not substitute the validation replay's output:
@@ -512,6 +520,9 @@ def install(pipeline):
                     native.clear()
                     previous_case = case
                 schedule = extra["schedule"]
+                prefix_calls = extra.get("real_prefix_calls", 2)
+                if type(prefix_calls) is not int or prefix_calls not in (2, 3):
+                    raise ValueError("The real request prefix must contain two or three actual component calls")
                 state = dict(
                     label=extra["label"],
                     case=case,
@@ -527,6 +538,7 @@ def install(pipeline):
                     candidate_partition=extra.get("candidate_partition"),
                     candidate_family=extra.get("candidate_family"),
                     real_prefix=bool(extra.get("real_prefix", False)),
+                    real_prefix_calls=prefix_calls,
                     eager_forwards={},
                     real_eager_steps={},
                     original_prefill_blocks=0,
