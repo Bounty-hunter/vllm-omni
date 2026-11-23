@@ -903,13 +903,20 @@ Each new geometry audits its first two requests, then disables audit output.
 No profiler trace or per-layer synchronization is added.
 
 The native entrypoint is `tests/dfx/perf/scripts/run_benchmark.py`, using
-`tests/dfx/perf/tests/test_wan22_i2v_vllm_omni.json`. Its two-card case uses
-SP2, VAE2, HSDP and VAE slicing. Keep its 832x480/81-frame and
-1280x720/121-frame workloads, four inference steps, two client warmups,
-ten measured requests and concurrency one. This CI deployment uses the
-checkpoint's default precision; it differs from the prior FP8/SP4 matrix.
+the request workloads in `tests/dfx/perf/tests/test_wan22_i2v_vllm_omni.json`:
+832x480/81 frames and 1280x720/121 frames, four inference steps, two client
+warmups, ten measured requests and concurrency one. For this performance
+experiment use FP8/SP4/VAE4, with HSDP disabled in both arms. The upstream
+two-card CI deployment includes HSDP for memory savings; it is not this
+experiment's deployment baseline. Record all common server overrides.
 Use identical `--ulysses-a2a-permute` settings in both arms, with outer eager
 execution delegating DiT graphs to the controlled real-prefix owner.
+
+HSDP is rejected by this explicit serving adapter: its prefetched weight
+events cross the current capture boundary. An attempted native HSDP run
+failed before producing measured requests, and its zero-filled fallback
+result JSON must not be interpreted as latency data. HSDP capture adaptation
+is outside this performance comparison.
 
 Run the complete baseline benchmark first, then the complete enabled
 benchmark. Report native `mean_e2el_ms` without filtering individual requests:

@@ -48,6 +48,8 @@ def install(pipeline):
     chunks = pipeline.od_config.parallel_config.ulysses_head_chunks
     if chunks not in (1, 2):
         raise ValueError("The serving CI experiment toggles ulysses_head_chunks=1 or 2")
+    if pipeline.od_config.parallel_config.use_hsdp:
+        raise ValueError("The serving head experiment requires replicated DiT weights; disable HSDP")
     install_model_probe(pipeline)
     original = pipeline.forward
     observed = {}
