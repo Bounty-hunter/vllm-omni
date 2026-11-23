@@ -170,6 +170,48 @@ feeding the pipeline; auxiliary graph probes supply no learning observations.
 Packed FA3 precision must be checked for every newly exercised layout;
 a numerical mismatch is a failed case, not an acceptable speedup.
 
+## Three-group priority with a two-group fallback
+
+The `head3-*-matrix.json` recipes explicitly enable
+`candidate_family="three-then-two"`. The CPU model proposes one symmetric
+three-group partition and one two-group partition, alongside whole attention.
+It estimates query-tile work and stream dependencies; its wave counts are not
+observed kernel work assignments. Odd head counts remain eligible. Real core
+observations decide whether either proposed split qualifies.
+
+These recipes reuse the first two actual calls to each component. Qwen2.1
+keeps its original prefill and learns from actual decode calls. The second
+call has a 32-layer budget per execution signature. Its first two layers run
+whole attention without sampling, allowing launch lead to build after resource
+preparation. The remaining 30 layers supply eight whole/two-group pairs and
+seven whole/three-group pairs, with rotated/reversed local controls. This
+changes no model forward count. Shorter signatures retain the existing
+two-group or whole-attention fallback.
+
+The six-valid-pair confidence gate is unchanged. A qualifying three-group
+partition has priority; the two-group partition replaces it when qualified
+observations establish an additional gain. Insufficient evidence retains
+whole attention. Whole fallbacks are timing controls, not overlap speedups.
+Early eager observations can differ from graph execution, so full-request
+measurements remain necessary. These recipes do not guarantee a speedup for
+every shape or a zero-cost first request.
+
+Candidate preparation shares one symmetric output slot for the same owner and
+complete layout, independent of head partition. Different explicit owners
+retain separate slots. No peer-ready or output-completion fence is removed;
+consumers remain ordered on the owning compute stream. `check_plan_storage.py`
+checks resource counts, and `graph_slot_stress.py --mixed-partitions` checks
+delayed consumers across partitions and resident graphs.
+
+`--worker-profile` marks separate diagnostic cohorts using
+`head-request-profile.patch`. Each fixed-partition profile records two complete
+requests after two warmups, with CPU/CUDA activity and Python stacks. Keep
+physical GPU identities, software, checkpoint, shape and output ownership
+matched across variants. Report pure outgoing P2P activity separately from
+barriers, local staging and copy gaps. Profile durations are not unprofiled
+request-latency results. First-prefix CPU/phase instrumentation is also opt-in
+and is not installed in ordinary performance runs.
+
 ## CI shapes and schedule controls
 
 [CI-RESULTS.txt](CI-RESULTS.txt) retains all later Qwen-Image-2.1,
