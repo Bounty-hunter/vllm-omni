@@ -59,6 +59,7 @@ def main():
     parser.add_argument("--warmups", type=int, default=3)
     parser.add_argument("--save-outputs", action="store_true", help="Save the first measured output for each variant")
     parser.add_argument("--profile", action="store_true", help="Mark a separate diagnostic run for Nsight capture")
+    parser.add_argument("--worker-profile", action="store_true", help="Mark same-thread worker PyTorch profiling")
     args = parser.parse_args()
     config = json.loads(args.config.read_text())
     for case in config["cases"]:
@@ -109,7 +110,7 @@ def main():
                     variant=name,
                     label=f"{case['id']}-{phase}-{name}-i{index}",
                     audit=phase != "paired" and index == 0,
-                    trace=args.profile,
+                    trace=args.profile or args.worker_profile,
                     trace_start=args.profile and case is config["cases"][0] and position == paired_positions[0],
                     trace_stop=args.profile and case is config["cases"][-1] and position == paired_positions[-1],
                 )
@@ -150,7 +151,7 @@ def main():
                     phase=phase,
                     index=index,
                     seed=seed,
-                    profile=args.profile,
+                    profile=args.profile or args.worker_profile,
                     e2e_ms=elapsed_ms,
                     shapes=shapes,
                     dtypes=dtypes,

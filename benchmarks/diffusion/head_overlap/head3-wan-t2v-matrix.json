@@ -1,0 +1,100 @@
+{
+  "engine": {
+    "dtype": "bfloat16",
+    "quantization_config": {
+      "transformer": {
+        "method": "fp8"
+      },
+      "transformer_2": {
+        "method": "fp8"
+      }
+    },
+    "diffusion_attention_config": {
+      "default": "FLASH_ATTN"
+    },
+    "enable_diffusion_pipeline_profiler": false,
+    "enforce_eager": true,
+    "log_stats": false,
+    "init_timeout": 900,
+    "stage_init_timeout": 900,
+    "ulysses_degree": 4,
+    "ulysses_a2a_permute": true,
+    "ulysses_head_chunks": 2,
+    "text_encoder_tp_size": 1,
+    "tensor_parallel_size": 1,
+    "vae_patch_parallel_size": 4,
+    "num_gpus": 4,
+    "devices": "0,1,2,3",
+    "distributed_executor_backend": "mp",
+    "max_num_seqs": 1
+  },
+  "prompt": {
+    "prompt": "Two anthropomorphic cats in boxing gear on a spotlighted stage.",
+    "negative_prompt": "low quality, blurry, watermark, text",
+    "modalities": [
+      "video"
+    ]
+  },
+  "variants": {
+    "serial1": {
+      "graph_mode": "graph",
+      "chunks": 1,
+      "schedule": "stage-local-shared-slots",
+      "real_prefix": true
+    },
+    "previous": {
+      "graph_mode": "graph",
+      "chunks": 1,
+      "schedule": "stage-local-shared-slots",
+      "real_prefix": true,
+      "autotune": true
+    },
+    "adaptive": {
+      "graph_mode": "graph",
+      "chunks": 1,
+      "schedule": "stage-local-shared-slots",
+      "real_prefix": true,
+      "autotune": true,
+      "candidate_family": "three-then-two"
+    }
+  },
+  "cases": [
+    {
+      "id": "wan14b-480x832-f33-real-prefix",
+      "sampling": {
+        "height": 480,
+        "width": 832,
+        "num_frames": 33,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1,
+        "fps": 16
+      }
+    },
+    {
+      "id": "wan14b-480x832-f65-real-prefix",
+      "sampling": {
+        "height": 480,
+        "width": 832,
+        "num_frames": 65,
+        "num_inference_steps": 8,
+        "guidance_scale": 1.0,
+        "true_cfg_scale": 1.0,
+        "num_outputs_per_prompt": 1,
+        "fps": 16
+      }
+    }
+  ],
+  "measurement": {
+    "rounds": 30,
+    "warmups": 1,
+    "seeds": [
+      42,
+      43,
+      44
+    ],
+    "new_profiler_traces": false,
+    "selection": "At most24 actual same-signature cores; whole/triple/double. Prefer qualified triple unless double proves a further gain. All-rank complete pair rotations; freeze at existing capture boundary."
+  }
+}

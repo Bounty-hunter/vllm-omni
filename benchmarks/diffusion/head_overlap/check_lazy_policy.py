@@ -10,10 +10,12 @@ from lazy_head_policy import (
     candidate_index,
     candidates,
     choose,
+    choose_three_then_two,
     metadata_spec,
     qualified_cycles,
     symmetric_candidates,
     tensor_spec,
+    three_then_two_candidates,
 )
 
 
@@ -88,6 +90,29 @@ def main():
     assert choose([[100] * 10, [80] * 10, [90] * 10]) == 1
     assert choose([[100] * 10, [110] * 10]) == 0
     assert choose([[100] * 10, [50, 150] * 5]) == 0
+    preferred = ((8,), (1, 6, 1), (3, 5))
+    assert choose_three_then_two([[1000] * 7, [800] * 7, [795] * 7], preferred) == 1
+    assert choose_three_then_two([[1000] * 7, [900] * 7, [800] * 7], preferred) == 2
+    assert choose_three_then_two([[1000] * 7, [1100] * 7, [900] * 7], preferred) == 2
+    assert choose_three_then_two([[1000] * 5, [700] * 5, [800] * 5], preferred) == 0
+    assert choose_three_then_two([[1000] * 7, [1100] * 7, [1200] * 7], preferred) == 0
+    assert choose_three_then_two([[1000] * 7, [800] * 7], ((8,), (3, 5))) == 1
+    paired = {
+        "whole_vs_three": [[], []],
+        "whole_vs_two": [[1000] * 7, [800] * 7],
+        "three_vs_two": [[], []],
+    }
+    assert choose_three_then_two([[], [], []], preferred, paired) == 2
+    for heads in range(1, 33):
+        for tokens in (1024, 4096, 9216, 14040, 16384):
+            choices = three_then_two_candidates(heads, tokens, 128, 4, 132, kv_tokens=tokens + 4055)
+            assert choices[0] == (heads,) and len(choices) <= 3
+            assert len(set(choices)) == len(choices)
+            assert all(sum(parts) == heads and min(parts) > 0 for parts in choices)
+            if len(choices) > 1 and len(choices[1]) == 3:
+                assert choices[1][0] == choices[1][-1] <= choices[1][1]
+            if len(choices) == 3:
+                assert len(choices[1]) == 3 and len(choices[2]) == 2
     for heads, tokens, world in (
         (12, 8335, 2),
         (12, 20623, 2),

@@ -101,6 +101,43 @@ def symmetric_candidates(heads):
     return ((heads,),) + tuple((edge, heads - 2 * edge, edge) for edge in (1, 2) if heads - 2 * edge >= edge)
 
 
+def three_then_two_candidates(heads, tokens, dim, world, sms, *, flops=6e14, bandwidth=None, kv_tokens=None):
+    """Propose one symmetric triple and one double; never benchmark a sweep.
+
+    This CPU wave/stream-order proxy ranks candidates, not observed launch
+    grids. Real complete-core observations retain the final veto.
+    """
+    whole = (heads,)
+    doubles = candidates(heads, tokens, dim, world, sms, flops=flops, bandwidth=bandwidth, kv_tokens=kv_tokens)[1:]
+    triples = [(edge, heads - 2 * edge, edge) for edge in range(1, heads // 3 + 1)]
+    if not triples:
+        return (whole,) + doubles[:1]
+    tiles = math.ceil(tokens / 128)
+    waves = math.ceil(tiles * heads / sms)
+    attention = 4 * tokens * (tokens if kv_tokens is None else kv_tokens) * heads * dim / flops
+    peer_bytes = 4 * tokens * heads * dim * 2 * (world - 1) / world
+    peer = peer_bytes / (bandwidth or 650e9 / world) + 20e-6
+    forward, reverse = peer * 0.75, peer * 0.25
+
+    def elapsed(parts):
+        # Communication submits next F, then previous R. Each A waits for its
+        # own input and the preceding compute; this mirrors stage-local order.
+        comm, compute = parts[0] / heads * forward + 6e-6, 0.0
+        ready, produced = [comm], []
+        for index, width in enumerate(parts):
+            compute = max(compute, ready[index]) + attention * math.ceil(tiles * width / sms) / waves + 4e-6
+            produced.append(compute)
+            if index + 1 < len(parts):
+                comm += parts[index + 1] / heads * forward + 6e-6
+                ready.append(comm)
+            if index:
+                comm = max(comm, produced[index - 1]) + parts[index - 1] / heads * reverse
+        return max(comm, produced[-1]) + parts[-1] / heads * reverse
+
+    triple = min(triples, key=lambda parts: (elapsed(parts), parts[0]))
+    return (whole, triple) + doubles[:1]
+
+
 def choose(samples, *, minimum=6, relative_margin=0.015, absolute_margin_us=5.0):
     """Use position-paired observations and an explicit noise margin."""
     baseline = samples[0]
@@ -119,6 +156,20 @@ def choose(samples, *, minimum=6, relative_margin=0.015, absolute_margin_us=5.0)
         if gain > margin and gain > saving and sum(d > 0 for d in differences) >= math.ceil(0.8 * count):
             best, saving = index, gain
     return best
+
+
+def choose_three_then_two(samples, choices, paired=None):
+    """Prefer a qualified triple unless the double establishes a further gain."""
+    if len(choices) < 2 or len(choices[1]) != 3:
+        return choose(samples)
+    three = samples[:2] if paired is None else paired["whole_vs_three"]
+    if len(choices) == 2:
+        return choose(three)
+    two = [samples[0], samples[2]] if paired is None else paired["whole_vs_two"]
+    direct = samples[1:] if paired is None else paired["three_vs_two"]
+    if choose(three) == 1:
+        return 2 if choose(two) == 1 and choose(direct) == 1 else 1
+    return 2 if choose(two) == 1 else 0
 
 
 def candidate_index(index, count):
@@ -173,7 +224,7 @@ class LazyHeadPolicy:
         ):
             raise ValueError("Lazy learning requires an explicit local-staging schedule")
         self.schedule = schedule
-        if candidate_family not in (None, "symmetric-ends"):
+        if candidate_family not in (None, "symmetric-ends", "three-then-two"):
             raise ValueError("Unknown head candidate family")
         if candidate_family is not None and candidate_partition is not None:
             raise ValueError("Choose either a candidate partition or a candidate family")
@@ -221,8 +272,8 @@ class LazyHeadPolicy:
         if self.all_core_spans and self.core_events is None:
             raise ValueError("All-core spans require explicit core event diagnostics")
         self.force_diagnostic_split = os.environ.get("HCMS_FORCE_DIAGNOSTIC_SPLIT") == "1"
-        if self.force_diagnostic_split and self.core_events is None:
-            raise ValueError("A forced diagnostic split requires explicit core event diagnostics")
+        if self.force_diagnostic_split and self.core_events is None and not os.environ.get("HCMS_FULL_TRACE_DIR"):
+            raise ValueError("A forced diagnostic split requires event or full-request profiler diagnostics")
 
     def signature(self, q, k, v, md, pg):
         import torch.distributed as dist
@@ -298,6 +349,17 @@ class LazyHeadPolicy:
                 choices = ((heads,), self.candidate_partition)
             if self.enabled and safe and (not packed or tokens >= 4096) and self.candidate_family == "symmetric-ends":
                 choices = symmetric_candidates(heads)
+            if self.enabled and safe and (not packed or tokens >= 4096) and self.candidate_family == "three-then-two":
+                choices = three_then_two_candidates(
+                    heads,
+                    tokens,
+                    q.shape[3],
+                    dist.get_world_size(pg),
+                    self.sms,
+                    flops=self.flops,
+                    bandwidth=self.bandwidth,
+                    kv_tokens=kv_tokens,
+                )
             entry = self.entries[signature] = Observation(signature, choices)
         if self.phase == "discover":
             entry.inputs, entry.joint, entry.metadata, entry.kernel, entry.group, entry.comm = (
@@ -389,6 +451,10 @@ class LazyHeadPolicy:
                 # A short real prefix prioritizes one promising split:
                 # more paired evidence and one fewer resident CE allocation.
                 entry.choices = entry.choices[:2]
+            if self.candidate_family == "three-then-two" and len(entry.choices) == 3 and slots < 21:
+                # Insufficient real layers for both trials: retain the double
+                # fallback instead of manufacturing a third sampling pass.
+                entry.choices = (entry.choices[0], entry.choices[2])
             if slots < 7 * len(entry.choices):
                 entry.choices = entry.choices[:2]
             if slots < 7 * len(entry.choices):
@@ -473,8 +539,24 @@ class LazyHeadPolicy:
                 submit_times.append([max(row[2] for row in rank_rows) for rank_rows in rows])
                 rank_rows_by_choice.append(rows)
             maximum = qualified_cycles(rank_rows_by_choice)
+            paired = None
+            if self.candidate_family == "three-then-two" and len(entry.choices) == 3:
+                # Keep complete all-rank paired rotations. A starved triple
+                # must not erase otherwise valid whole/double comparisons.
+                paired = {
+                    name: qualified_cycles([rank_rows_by_choice[a], rank_rows_by_choice[b]])
+                    for name, a, b in (("whole_vs_three", 0, 1), ("whole_vs_two", 0, 2), ("three_vs_two", 1, 2))
+                }
             forced = self.force_diagnostic_split and len(entry.choices) > 1
-            entry.selected = 1 if forced else choose(maximum)
+            entry.selected = (
+                1
+                if forced
+                else (
+                    choose_three_then_two(maximum, entry.choices, paired)
+                    if self.candidate_family == "three-then-two"
+                    else choose(maximum)
+                )
+            )
             self.reports.append(
                 dict(
                     signature=entry.signature,
@@ -489,6 +571,7 @@ class LazyHeadPolicy:
                     sampling_pass_calls=entry.sample_calls,
                     timed_prefix_calls=entry.index,
                     allocated_sample_pairs=len(entry.events),
+                    paired_samples_max_rank_us=paired,
                 )
             )
             entry.inputs, entry.joint, entry.metadata, entry.kernel, entry.group, entry.comm = (

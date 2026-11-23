@@ -1,0 +1,92 @@
+{
+  "engine": {
+    "dtype": "bfloat16",
+    "quantization_config": {
+      "transformer": {
+        "method": "fp8"
+      }
+    },
+    "diffusion_attention_config": {
+      "default": "FLASH_ATTN"
+    },
+    "enable_diffusion_pipeline_profiler": false,
+    "enforce_eager": true,
+    "log_stats": false,
+    "init_timeout": 900,
+    "stage_init_timeout": 900,
+    "ulysses_degree": 4,
+    "ulysses_a2a_permute": true,
+    "ulysses_head_chunks": 2,
+    "text_encoder_tp_size": 1,
+    "tensor_parallel_size": 1,
+    "vae_patch_parallel_size": 4,
+    "num_gpus": 4,
+    "devices": "0,1,2,3",
+    "distributed_executor_backend": "mp",
+    "max_num_seqs": 1,
+    "vae_use_tiling": true
+  },
+  "prompt": {
+    "prompt": "A red bicycle leaning against a white wall.",
+    "modalities": [
+      "image"
+    ]
+  },
+  "variants": {
+    "three": {
+      "graph_mode": "graph",
+      "chunks": 1,
+      "schedule": "stage-local-shared-slots",
+      "real_prefix": true,
+      "autotune": true,
+      "candidate_partition": [
+        1,
+        6,
+        1
+      ]
+    }
+  },
+  "cases": [
+    {
+      "id": "qwen21-turbo-1536x1536-steps8-ref2",
+      "sampling": {
+        "width": 1536,
+        "height": 1536,
+        "num_inference_steps": 8,
+        "true_cfg_scale": 1.0
+      },
+      "media": {
+        "image": [
+          "tests/assets/qwen_image_edit/qwen_image_edit_2511_test1.png",
+          "tests/assets/qwen_image_edit/qwen_image_edit_2511_test2.png"
+        ]
+      }
+    }
+  ],
+  "measurement": {
+    "rounds": 2,
+    "warmups": 2,
+    "seeds": [
+      42,
+      43,
+      44
+    ],
+    "new_profiler_traces": true,
+    "diagnostic_forced": true,
+    "purpose": "Two warmed complete worker requests; CPU/CUDA with Python stacks. No per-core diagnostic events; never a normal performance sample."
+  },
+  "ci_source": "tests/dfx/perf/tests/test_qwen_image_21_vllm_omni.json",
+  "deployment_changes": "Offline decoded frames (no HTTP/MP4 mux); batch1 FP8 DiT, FA3, Ulysses CE, VAE parallel; no Cache-DiT/profiler.",
+  "adapter_note": "Original prefix KV cache and original Ulysses prefill retained; only first two actual decode calls learn. One fixed decode graph per CFG branch; no auxiliary probe or validation forward. Whole and adaptive use the same graph preparation.",
+  "ci_extra_cases": [
+    "qwen21-turbo-512x512-steps8-ref1",
+    "qwen21-turbo-1024x1024-steps8-ref1",
+    "qwen21-turbo-1536x1536-steps8-ref1",
+    "qwen21-turbo-2048x2048-steps8-ref1"
+  ],
+  "checkpoint": {
+    "repo": "Qwen/Qwen-Image-2.1-Turbo",
+    "revision": "fc13ba1986fcb905854dc8de2f52eee395f49b5b",
+    "sampling": "Use checkpoint model_index sample_sigmas verbatim; request steps8 and CFG1. Teacher35 results remain separate."
+  }
+}
