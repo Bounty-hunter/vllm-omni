@@ -122,6 +122,21 @@ def install(pipeline):
                 baseline._packed_qkv = VLLM_OMNI_PACKED_QKV
                 strategies.append((attention, strategy, baseline))
         native_mode = False
+        query_bound = getattr(module, "attention_query_token_bound", None)
+        bound_limits = []
+        if query_bound is not None and strategies:
+            for attention, strategy, _ in strategies:
+                heads = getattr(attention, "num_heads", 0)
+                world = strategy._sp_group.ulysses_world_size
+                if getattr(attention, "head_size", None) != 128 or heads < world * 2 or heads % world:
+                    bound_limits = []
+                    break
+                bound_limits.append((heads // world // 2, world - 1))
+        if bound_limits:
+            import torch
+
+            sms = torch.cuda.get_device_properties(torch.accelerator.current_device_index()).multi_processor_count
+        bound_recorded = False
 
         def select_native(enabled):
             nonlocal native_mode
@@ -132,8 +147,36 @@ def install(pipeline):
 
         @functools.wraps(original)
         def forward(*args, **kwargs):
+            nonlocal bound_recorded
+            if request_key is None:
+                select_native(True)
+                return original(*args, **kwargs)
+            if bound_limits:
+                tokens = query_bound(args, kwargs)
+                if tokens is not None:
+                    if not isinstance(tokens, int) or isinstance(tokens, bool) or tokens < 0:
+                        raise TypeError("attention_query_token_bound must return a nonnegative int or None")
+                    if all(heads * ((tokens + padding + 127) // 128) < 0.8 * sms for heads, padding in bound_limits):
+                        # Decide before entering a compiled block. Discovering
+                        # this inside the first core temporarily enabled CE and
+                        # split the native compiled region for every new prompt.
+                        # The model's bound includes all potential joint Q rows;
+                        # it never reads KV-cache contents or device values.
+                        select_native(True)
+                        if not bound_recorded:
+                            record(
+                                kind="admission",
+                                component=component,
+                                query_token_bound=tokens,
+                                route="native-nccl",
+                                reason="model query bound cannot qualify a split",
+                                extra_forwards=0,
+                                event_records=0,
+                            )
+                            bound_recorded = True
+                        return original(*args, **kwargs)
             signature, supported = metadata_spec((args, kwargs))
-            if request_key is None or not supported:
+            if not supported:
                 select_native(True)
                 return original(*args, **kwargs)
             key = request_key, component, signature

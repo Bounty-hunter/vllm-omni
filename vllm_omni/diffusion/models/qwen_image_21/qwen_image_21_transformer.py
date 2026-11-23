@@ -1288,6 +1288,22 @@ class QwenImage21Transformer2DModel(CachedTransformer):
             return "piecewise"
         return "mask"
 
+    @staticmethod
+    def attention_query_token_bound(args: tuple[object, ...], kwargs: dict[str, object]) -> int | None:
+        """Host-only upper bound for optional attention admission.
+
+        Packed image latents include every reference and the target. Text
+        embeddings bound all additional prefix queries, including prefill;
+        cached KV never adds query rows. The SP owner adds any target padding.
+        """
+        hidden = kwargs.get("hidden_states", args[0] if args else None)
+        text = kwargs.get("encoder_hidden_states", args[1] if len(args) > 1 else None)
+        if not isinstance(hidden, torch.Tensor) or not isinstance(text, torch.Tensor):
+            return None
+        if hidden.ndim != 3 or text.ndim != 3 or hidden.shape[0] != 1 or text.shape[0] != 1:
+            return None
+        return hidden.shape[1] + text.shape[1]
+
     def forward(
         self,
         hidden_states: torch.Tensor,
