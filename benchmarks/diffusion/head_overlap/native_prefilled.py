@@ -141,6 +141,11 @@ class NativePipeline(PrefilledPipeline):
             + (((self.output_joint_offset, self.joint_offset),) if self.joint_len else ())
             for peer in range(self.world)
         ]
+        # Geometry is now pointer-only. The executing core owns its inputs
+        # through compute's final transport wait; keeping them in cached plans
+        # would retain a different layer's full QKV allocation per candidate.
+        # Captured callers separately own their static graph inputs.
+        self.inputs, self.joint = (), None
 
     def reverse_operations(self, group, out, peer):
         operations = self.reverse_ops[group][peer]
@@ -185,7 +190,6 @@ class NativePipeline(PrefilledPipeline):
         pointers = [x.data_ptr() for x in tensors]
         for operation, field, offset in self.bindings:
             operation[2] = pointers[field] + offset
-        self.inputs, self.joint = inputs, joint
         self.attention_kernel, self.metadata = kernel, metadata
 
 
