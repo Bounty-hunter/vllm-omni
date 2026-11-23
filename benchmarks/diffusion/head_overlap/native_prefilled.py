@@ -25,9 +25,10 @@ _COPY_SUBMITTER = os.environ.get("HCMS_COPY_SUBMITTER")
 def output_slot(key):
     """Scope a static graph/layer's storage; ordinary calls remain owned.
 
-    Keys must identify one fixed layout. A graph consumes each slot on the
-    owning compute stream before replaying that slot. Destroy graphs before
-    clear() releases their external buffers. The caller bounds graph residency.
+    Keys identify one fixed output layout, shared across head partitions.
+    A graph consumes each slot on its compute stream before its next use.
+    Distinct keys retain independent storage. Destroy graphs before clear()
+    releases their external buffers. The caller bounds graph residency.
     """
     token = _OUTPUT_SLOT.set(key)
     try:
@@ -64,9 +65,13 @@ class NativePipeline(PrefilledPipeline):
         values = [dest, dpitch, source, spitch, width, rows, 4]
         return (ctypes.c_size_t * 7)(*values) if _COPY_SUBMITTER else values
 
-    def __init__(self, inputs, joint, pg, chunks, comm, kernel, metadata, *, head_sizes=None, joint_strategy="front"):
+    def __init__(
+        self, inputs, joint, pg, chunks, comm, kernel, metadata, *, head_sizes=None, joint_strategy="front", output=None
+    ):
         self.attention_kernel, self.metadata = kernel, metadata
-        super().__init__(inputs, joint, pg, chunks, self.attend, head_sizes=head_sizes, joint_strategy=joint_strategy)
+        super().__init__(
+            inputs, joint, pg, chunks, self.attend, head_sizes=head_sizes, joint_strategy=joint_strategy, output=output
+        )
         if _COPY_SUBMITTER:
             # Descriptor pointers remain valid when bind() updates their source
             # addresses in place. Prepare every forward batch before sampling.
@@ -90,7 +95,6 @@ class NativePipeline(PrefilledPipeline):
                 tuple(map(id, operations)): (ctypes.POINTER(ctypes.c_size_t) * len(operations))(*operations)
                 for operations in groups
             }
-        self.base_output = self.output
         self.stream = comm
         tensors = inputs + (() if joint is None else joint)
         self.input_layout = layout(tensors)
@@ -143,7 +147,8 @@ def prepare_plan(
     """
     q = inputs[0]
     tensors = inputs + (() if joint is None else joint)
-    signature = (tuple(head_sizes), layout(tensors), joint_strategy)
+    source_layout = layout(tensors)
+    signature = (tuple(head_sizes), source_layout, joint_strategy)
     key = (q.device, pg.group_name, len(head_sizes), signature)
     cached = _PLANS.get(key)
     if cached is None:
@@ -151,6 +156,21 @@ def prepare_plan(
             raise RuntimeError("CE plan was not prepared before sampling/capture")
         if len(_PLANS) >= _PLAN_LIMIT:
             raise RuntimeError("Destroy captured graphs and clear CE plans before adding more layouts")
+    # Complete output layout and ownership do not depend on head partition.
+    # Allocate it once, before constructing a plan, instead of giving every
+    # candidate both an unused base output and another symmetric output slot.
+    arena_key = (q.device, pg.group_name, source_layout, joint_strategy, slot_key)
+    slot = _SLOT_ARENA.get(arena_key)
+    if slot is None:
+        if not allocate or torch.cuda.is_current_stream_capturing():
+            raise RuntimeError("CE output slot was not prepared before sampling/capture")
+        if len(_SLOT_ARENA) >= 128:
+            raise RuntimeError("The fixed-canvas experiment exceeded its output-slot budget")
+        joint_queries = 0 if joint is None else joint[0].shape[1]
+        slot = _SLOT_ARENA[arena_key] = SymmetricBuffer(
+            (q.shape[0], q.shape[1] + joint_queries, q.shape[2], q.shape[3]), q.dtype, q.device, pg
+        )
+    if cached is None:
         plan = NativePipeline(
             inputs,
             joint,
@@ -161,20 +181,12 @@ def prepare_plan(
             metadata,
             head_sizes=head_sizes,
             joint_strategy=joint_strategy,
+            output=slot,
         )
         _PLANS[key] = (signature, plan)
     else:
         plan = cached[1]
         plan.bind(inputs, joint, kernel, metadata)
-    arena_key = (key, slot_key)
-    slot = _SLOT_ARENA.get(arena_key)
-    if slot is None:
-        if not allocate or torch.cuda.is_current_stream_capturing():
-            raise RuntimeError("CE output slot was not prepared before sampling/capture")
-        if len(_SLOT_ARENA) >= 128:
-            raise RuntimeError("The fixed-canvas experiment exceeded its output-slot budget")
-        tensor = plan.base_output.tensor
-        slot = _SLOT_ARENA[arena_key] = SymmetricBuffer(tuple(tensor.shape), tensor.dtype, tensor.device, pg)
     plan.output = slot
     return plan
 
@@ -259,61 +271,14 @@ def run(
     comm, producer = streams[key]
     if producer != compute.cuda_stream:
         raise RuntimeError("head overlap buffers require a single compute stream")
-    tensors = inputs + (() if joint is None else joint)
-    signature = (head_sizes, layout(tensors), joint_strategy)
     kernel_md = (
         None if md is None else replace(md, joint_query=None, joint_key=None, joint_value=None, extra=dict(md.extra))
     )
-    # Joint and concatenated attention can coexist in one captured model.
-    # A resident graph retains its CE addresses, so never replace its plan
-    # merely because the following layer has another layout.
-    plan_key = (*key, selected_chunks, signature)
-    cached = _PLANS.get(plan_key)
-    if cached is None:
-        if torch.cuda.is_current_stream_capturing():
-            raise RuntimeError("Native CE plan must be warmed before capture")
-        if len(_PLANS) >= _PLAN_LIMIT:
-            raise RuntimeError("Destroy captured graphs and clear CE plans before adding more layouts")
-        print(
-            f"NATIVE_PREFILLED chunks={selected_chunks} heads={head_sizes} q={tuple(q.shape)} "
-            f"packed={md is not None and 'cu_seqlens_q' in md.extra}",
-            flush=True,
-        )
-        # Allocations are collective and occur only before capture. Retain
-        # every live layout until its graph owner explicitly calls clear().
-        torch.accelerator.synchronize()
-        plan = NativePipeline(
-            inputs,
-            joint,
-            pg,
-            selected_chunks,
-            comm,
-            kernel,
-            kernel_md,
-            head_sizes=head_sizes,
-            joint_strategy=joint_strategy,
-        )
-        _PLANS[plan_key] = (signature, plan)
-    else:
-        plan = cached[1]
-        plan.bind(inputs, joint, kernel, kernel_md)
     # Unscoped attention results own their storage. The next layer/request can
     # reuse transport buffers only after this copy and its consumers on compute.
     current_slot = _OUTPUT_SLOT.get()
-    if current_slot is None:
-        plan.output = plan.base_output
-        return plan().clone()
-    # Explicit graph-body scope: the caller consumes this layer's slot on the
-    # owning compute stream before the next entry fence. Normal calls above
-    # still return an independent tensor. No peer fence is removed.
-    slot_key = (plan_key, current_slot)
-    slot = _SLOT_ARENA.get(slot_key)
-    if slot is None:
-        if torch.cuda.is_current_stream_capturing():
-            raise RuntimeError("Output slots must be allocated before graph capture")
-        if len(_SLOT_ARENA) >= 128:
-            raise RuntimeError("The fixed-canvas experiment exceeded its output-slot budget")
-        tensor = plan.base_output.tensor
-        slot = _SLOT_ARENA[slot_key] = SymmetricBuffer(tuple(tensor.shape), tensor.dtype, tensor.device, pg)
-    plan.output = slot
-    return plan()
+    plan = prepare_plan(
+        inputs, joint, pg, head_sizes, comm, kernel, kernel_md, current_slot, joint_strategy=joint_strategy
+    )
+    result = plan()
+    return result.clone() if current_slot is None else result

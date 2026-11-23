@@ -50,7 +50,19 @@ class DirectPipeline:
     A call returns only after all incoming reverse writes have completed.
     """
 
-    def __init__(self, inputs, joint, group, chunks, kernel, *, overlap=True, head_sizes=None, joint_strategy="front"):
+    def __init__(
+        self,
+        inputs,
+        joint,
+        group,
+        chunks,
+        kernel,
+        *,
+        overlap=True,
+        head_sizes=None,
+        joint_strategy="front",
+        output=None,
+    ):
         q = inputs[0]
         batch, local_seq, heads, dim = q.shape
         assert batch == 1 and heads % dist.get_world_size(group) == 0
@@ -88,8 +100,15 @@ class DirectPipeline:
         self.stream = torch.cuda.Stream()
         self.runtime = _ce_runtime()
         sequence = local_seq * self.world + max(self.joint_len, self.joint_kv_len)
+        output_shape = (1, self.joint_len + local_seq, heads, dim)
+        if output is not None and (
+            tuple(output.tensor.shape) != output_shape
+            or output.tensor.dtype != q.dtype
+            or output.tensor.device != q.device
+        ):
+            raise ValueError("A supplied symmetric output must match the complete output layout")
         self.forward = [SymmetricBuffer((3, sequence, size, dim), q.dtype, q.device, group) for size in self.head_sizes]
-        self.output = SymmetricBuffer((1, self.joint_len + local_seq, heads, dim), q.dtype, q.device, group)
+        self.output = SymmetricBuffer(output_shape, q.dtype, q.device, group) if output is None else output
         self.ready = [torch.cuda.Event() for _ in range(chunks)]
         self.produced = [torch.cuda.Event() for _ in range(chunks)]
         self.enter, self.done = torch.cuda.Event(), torch.cuda.Event()

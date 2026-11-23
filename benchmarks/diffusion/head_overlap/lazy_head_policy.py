@@ -591,6 +591,9 @@ class LazyHeadPolicy:
                     choices=entry.choices,
                     samples_max_rank_us=maximum,
                     raw_samples_max_rank_us=raw_maximum,
+                    start_pending_all_ranks=[
+                        [all(row[1] for row in rank_rows) for rank_rows in rows] for rows in rank_rows_by_choice
+                    ],
                     host_submission_max_rank_us=submit_times,
                     selected=entry.choices[entry.selected],
                     diagnostic_forced=forced,
