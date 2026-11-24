@@ -48,7 +48,6 @@ def install(pipeline):
     from schedule_probe import run as scheduled
 
     from vllm_omni.diffusion.distributed.parallel_state import get_sp_group, get_world_group
-    from vllm_omni.diffusion.envs import VLLM_OMNI_PACKED_QKV
 
     original_can_overlap = head.can_overlap
     original_native = native.run
@@ -96,7 +95,7 @@ def install(pipeline):
         if not policy.finish(ready_only=ready_only):
             return False
         policy.stats["serving_route"] = (
-            "native-nccl"
+            "baseline-permute"
             if all(len(entry.choices[entry.selected]) == 1 for entry in policy.entries.values())
             else "ce-head-overlap"
         )
@@ -109,17 +108,15 @@ def install(pipeline):
         return True
 
     def wrap_component(original, component, module):
-        # Prepare ordinary NCCL strategies once. Switching them between actual
-        # component calls restores the original compiled attention path; a
-        # frozen whole decision must not retain the experimental CE core.
+        # Preserve the configured transport when disabling head splitting.
+        # Switching between actual component calls restores the unsplit core
+        # without changing permute or packed-QKV precedence.
         strategies = []
         for attention in module.modules():
             strategy = getattr(attention, "parallel_strategy", None)
             if getattr(strategy, "name", None) == "ulysses" and strategy.head_chunks > 1:
                 baseline = copy(strategy)
                 baseline.head_chunks = 1
-                baseline._ulysses_a2a_permute = False
-                baseline._packed_qkv = VLLM_OMNI_PACKED_QKV
                 strategies.append((attention, strategy, baseline))
         native_mode = False
         query_bound = getattr(module, "attention_query_token_bound", None)
@@ -168,7 +165,7 @@ def install(pipeline):
                                 kind="admission",
                                 component=component,
                                 query_token_bound=tokens,
-                                route="native-nccl",
+                                route="baseline-permute",
                                 reason="model query bound cannot qualify a split",
                                 extra_forwards=0,
                                 event_records=0,
@@ -208,7 +205,7 @@ def install(pipeline):
                     # Insufficient predicted parallel work requires no split
                     # allocation, timer, trial or control collective.
                     policy.phase = "native"
-                    policy.stats["serving_route"] = "native-nccl"
+                    policy.stats["serving_route"] = "baseline-permute"
                     policy.reports = [
                         dict(
                             signature=entry.signature,

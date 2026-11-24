@@ -898,7 +898,7 @@ difference is not assigned to a specific hardware cause.
 in `auto_policy_cases.py` describe QKV shape, strides, prefixes and masks only;
 they do not prescribe a partition or expected winner. The ordinary serving
 bridge learns from declared component calls, then freezes. Test all-rank
-agreement, selected-output correctness, native NCCL restoration, exact declared
+agreement, selected-output correctness, unsplit permute restoration, exact declared
 core/head work, and zero growth in frozen sampling/preparation/control counters.
 Test-only guards reject host waits and per-core control gathers during sampling
 or frozen execution; remove these guards and work counters before timing.
@@ -917,7 +917,8 @@ inputs for a smoke test, never head cuts. The older fixed-partition schedules
 remain independent numerical/scheduling diagnostics, not this acceptance gate.
 
 The default performance budget is at most **1% higher steady mean latency per
-input layout** than ordinary NCCL. Measure full eager cores and serving dispatch
+input layout** than unsplit permute. Set `VLLM_OMNI_PACKED_QKV=1` in both arms.
+Measure full eager cores and serving dispatch
 in balanced ABBA/BAAB blocks on the same allocation. Keep every sample and
 aggregate maximum-rank windows. The paired ratio's upper 95% bootstrap bound
 must be at most 1.01; existing native/native windows must also resolve the 1%
@@ -928,16 +929,19 @@ frozen answer or trigger retries until a favorable result appears.
 Initial real calls and their costs are reported separately; the suite does not
 promise a 1% bound on cold startup, individual requests, or model E2E latency.
 Its same-process first-call numbers do not replace the native CI's independent
-cold-cache comparison. The selector still compares whole CE and split CE;
-acceptance against NCCL deliberately checks the additional transport boundary.
+cold-cache comparison. The selector compares whole CE and split CE; both
+acceptance arms retain the same configured transport.
 Packed fixtures publish canonical host-known padding lengths, as H3 does.
 
 `serving_probe.py` connects the existing learner to ordinary serving requests,
 only through `serving-probe.patch` and `native-probe.patch` in an isolated
 checkout. Baseline (`--ulysses-head-chunks 1`, the default) installation is a
-no-op. The enabled arm uses `--ulysses-a2a-permute --ulysses-head-chunks 2`.
-CE is an explicit feature dependency: a native NCCL baseline versus this arm
-measures CE plus overlap, not overlap in isolation.
+no-op. Both arms add `--ulysses-a2a-permute` and `VLLM_OMNI_PACKED_QKV=1`
+to the original CI configuration. The enabled arm adds only
+`--ulysses-head-chunks 2`. Explicit permute retains precedence over the separate
+packed NCCL path; setting both flags does not turn CE's field copies into one
+packed transfer. Earlier NCCL-versus-CE results in this document are historical
+transport comparisons, not measurements of this corrected baseline.
 
 Retain each native CI configuration's precision, HSDP, offload, compilation,
 graph settings and workload. No manual DiT graph is installed. The first real
@@ -951,8 +955,9 @@ boundary. No probe forward, per-layer collective or device synchronize is
 added. Frozen calls have no timing or readiness probes. Unknown
 layouts use the original strategy. When a component has no eligible split, or
 all of its frozen decisions retain whole attention, subsequent component calls
-restore ordinary NCCL strategies. This also restores the original compiled
-attention route instead of retaining the experimental single-group CE core.
+restore unsplit strategies with the configured permute and packed-QKV settings.
+This also restores the baseline compiled attention route instead of retaining
+the experimental single-group CE core.
 Strategies are prepared once and switched only between component calls; new
 signatures can restore overlap. Shared-output single-group CE controls remain
 available during qualified sampling to distinguish transport and split gains.

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
-"""Automatic serving-policy correctness and paired native-baseline acceptance.
+"""Automatic serving-policy correctness and paired permute-baseline acceptance.
 
 Inputs contain layouts only. No candidate, selected partition or expected
 winner is prescribed. Fixed-partition scheduling diagnostics remain separate.
@@ -106,7 +106,7 @@ def make_pipeline(case, inputs, metadata, group, layers, *, enabled):
                 2,
                 1,
                 False,
-                ulysses_a2a_permute=enabled,
+                ulysses_a2a_permute=True,
                 head_chunks=2 if enabled else 1,
             )
             self.impl = FlashAttentionImpl(case.heads // group.ulysses_world_size, case.dim, case.dim**-0.5)
@@ -345,10 +345,11 @@ def check_case(case, options, rank, world, control, group):
             assert pipeline.transformer.attention.calls == options.layers * pipeline.requests
         core = automatic.transformer.attention
         routes = {key: value - routes_before[key] for key, value in core.routes.items()}
-        assert routes["ordinary_ce"] == 0, "Steady fallback retained an ordinary experimental CE route"
+        assert routes["native"] == 0, "Head selection changed the configured permute transport"
+        assert core.parallel_strategy._ulysses_a2a_permute
+        assert not core.parallel_strategy._packed_qkv, "Explicit permute must retain transport precedence"
         if core.parallel_strategy.head_chunks == 1:
-            assert routes["overlap"] == 0 and routes["native"] > 0
-            assert not core.parallel_strategy._ulysses_a2a_permute
+            assert routes["overlap"] == 0 and routes["ordinary_ce"] > 0
         ranks = [None] * world
         dist.all_gather_object(ranks, windows, group=control)
         pairs, controls, device_pairs = [], [], []
@@ -376,7 +377,7 @@ def check_case(case, options, rank, world, control, group):
             qkv_shapes=[list(tensor.shape) for tensor in inputs],
             qkv_strides=[list(tensor.stride()) for tensor in inputs],
             decision=decision,
-            route="native-nccl" if core.parallel_strategy.head_chunks == 1 else "ce-head-overlap",
+            route="baseline-permute" if core.parallel_strategy.head_chunks == 1 else "ce-head-overlap",
             steady_routes=routes,
             rank_consistent=True,
             extra_forward_calls=0,
@@ -398,7 +399,7 @@ def check_case(case, options, rank, world, control, group):
             wall_acceptance=verdict,
             device_pairs_us=device_pairs,
             measurement_scope=(
-                "Complete eager attention core and serving dispatch, native NCCL vs frozen automatic; no profiler"
+                "Complete eager attention core and serving dispatch, common permute/packed-QKV flags; no profiler"
             ),
         )
 
