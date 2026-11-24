@@ -17,7 +17,7 @@ from types import SimpleNamespace
 import torch
 import torch.distributed as dist
 
-from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata
+from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata, VideoTokenLayout
 from vllm_omni.diffusion.attention.backends.utils.fa import dense_flash_attn_func_for
 
 
@@ -132,6 +132,14 @@ def main():
                         max_seqlen_k=total - padding,
                     )
                 )
+            if case.get("video_grid"):
+                grid = tuple(case["video_grid"])
+                if len(grid) != 3 or any(size <= 0 for size in grid) or grid[0] * grid[1] * grid[2] != total:
+                    raise ValueError("Video grid must contain three positive dimensions covering the sequence")
+                if metadata is None:
+                    metadata = AttentionMetadata()
+                metadata.extra["vsa_dit_seq_shape"] = grid
+                metadata.video_layout = VideoTokenLayout(prefix_len=0, latent_grid=grid, used_len=total)
             impl = FlashAttentionImpl(heads // world, 128, 128**-0.5)
             q, k, v, packed_md, context = strategy.pre_attention(*inputs, copy.copy(metadata))
             expected = strategy.post_attention(impl.forward_cuda(q, k, v, packed_md), context).clone()
@@ -230,12 +238,57 @@ def main():
                 if variant not in (
                     "stage-gated",
                     "stage-defer-fence",
+                    "stage-peer-first",
+                    "stage-peer-first-serial",
                     "overlap-return",
                     "overlap-input",
                     "overlap-staging",
                 ):
                     raise ValueError(f"Unknown staging ablation: {variant}")
                 functions[f"core_{variant}_borrowed"] = lambda variant=variant: scheduled(split, variant)
+            extra_plans = []
+            if case.get("balanced_peers"):
+                for widths in ((heads // world,), head_sizes):
+                    balanced = NativePipeline(
+                        inputs,
+                        joint,
+                        pg,
+                        len(widths),
+                        comm,
+                        kernel,
+                        packed_md,
+                        head_sizes=widths,
+                        balanced_peers=True,
+                        **placement,
+                    )
+                    extra_plans.append(balanced)
+                    label = "whole" if len(widths) == 1 else "split"
+                    functions[f"core_balanced_{label}_borrowed"] = lambda plan=balanced: scheduled(
+                        plan, "stage-peer-first-balanced"
+                    )
+                    if label == "whole" and copy_timers:
+                        for direction, measure in (("forward", peer_forward), ("reverse", peer_reverse)):
+                            name = f"balanced_peer_{direction}"
+                            copy_timers[name] = CopyEvents(transport.runtime, inputs[0].device)
+                            functions[name] = lambda fn=measure, plan=balanced, timer=name: fn(plan, 0, timer)
+            for tail_rows in case.get("query_tail_rows", ()):
+                from query_tail import QueryTailPipeline
+
+                tail_plan = QueryTailPipeline(
+                    inputs,
+                    joint,
+                    pg,
+                    chunks,
+                    comm,
+                    kernel,
+                    packed_md,
+                    head_sizes=head_sizes,
+                    balanced_peers=True,
+                    tail_rows=tail_rows,
+                    **placement,
+                )
+                extra_plans.append(tail_plan)
+                functions[f"core_query_tail_{tail_rows}_borrowed"] = tail_plan.run_tail
             if case.get("staging_variants"):
 
                 def local_forward(plan=whole, group=0):
@@ -283,6 +336,20 @@ def main():
                 rtol=0,
                 atol=0,
             )
+            if case.get("query_tail_rows"):
+                # Rebind values in the same captured input storage. Poison the
+                # final result so a missed peer write cannot pass from replay.
+                for index, tensor in enumerate(inputs + (() if joint is None else joint), 1):
+                    tensor.add_(index * 0.125)
+                cq, ck, cv, cm, cx = strategy.pre_attention(*inputs, copy.copy(metadata))
+                changed = strategy.post_attention(impl.forward_cuda(cq, ck, cv, cm), cx).clone()
+                for name, (graph, result_buffer) in graphs.items():
+                    if name.startswith("core_query_tail_"):
+                        result_buffer.fill_(float("nan"))
+                        stream.synchronize()
+                        dist.barrier(group=control)
+                        graph.replay()
+                        torch.testing.assert_close(result_buffer, changed, rtol=0, atol=0)
             local_samples = {name: [] for name in functions}
             max_samples = {name: [] for name in functions}
             copy_samples = {name: [] for name in copy_timers}
@@ -405,7 +472,7 @@ def main():
             graphs.clear()
             del graph, output
             functions.clear()
-            for plan in (whole, split, serial_split, transport, split_transport):
+            for plan in (whole, split, serial_split, transport, split_transport, *extra_plans):
                 plan.kernel = plan.attention_kernel = None
             whole = split = serial_split = transport = split_transport = None
             from vllm_omni.diffusion.distributed.a2a_permute import (
