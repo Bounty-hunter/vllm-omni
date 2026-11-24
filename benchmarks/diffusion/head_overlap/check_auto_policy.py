@@ -192,8 +192,13 @@ def installed_policy(pipeline):
             super().__init__(*args, **kwargs)
             instances.append(self)
 
+    def record(**row):
+        # Preserve the boundary's values, just as the serving JSONL writer
+        # does; policy.stats continues changing during later real calls.
+        audit.append(json.loads(json.dumps(row)))
+
     lazy_head_policy.LazyHeadPolicy = ObservedPolicy
-    serving_probe.record = lambda **row: audit.append(row)
+    serving_probe.record = record
     try:
         serving_probe.install(pipeline)
         yield instances, audit
