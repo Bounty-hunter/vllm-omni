@@ -892,6 +892,46 @@ difference is not assigned to a specific hardware cause.
 
 ## Native serving CI experiment
 
+### Automatic-policy acceptance
+
+`check_auto_policy.py` is the automatic-selection acceptance suite. Its inputs
+in `auto_policy_cases.py` describe QKV shape, strides, prefixes and masks only;
+they do not prescribe a partition or expected winner. The ordinary serving
+bridge learns from declared component calls, then freezes. Test all-rank
+agreement, selected-output correctness, native NCCL restoration, exact declared
+core/head work, and zero growth in frozen sampling/preparation/control counters.
+Test-only guards reject host waits and per-core control gathers during sampling
+or frozen execution; remove these guards and work counters before timing.
+
+After applying the existing native/serving patches in an isolated checkout and
+building the copy submitter, run inside a scheduler allocation:
+
+```bash
+python -m torch.distributed.run --standalone --nproc-per-node=4 \
+  benchmarks/diffusion/head_overlap/check_auto_policy.py --world 4 \
+  --suite typical --out /data/dyy/logs/TASK/automatic
+```
+
+Use `--suite wan --world 2` for the two observed Wan CI layouts. `--case` selects
+inputs for a smoke test, never head cuts. The older fixed-partition schedules
+remain independent numerical/scheduling diagnostics, not this acceptance gate.
+
+The default performance budget is at most **1% higher steady mean latency per
+input layout** than ordinary NCCL. Measure full eager cores and serving dispatch
+in balanced ABBA/BAAB blocks on the same allocation. Keep every sample and
+aggregate maximum-rank windows. The paired ratio's upper 95% bootstrap bound
+must be at most 1.01; existing native/native windows must also resolve the 1%
+budget. Report `inconclusive` when noise crosses that boundary, not a pass.
+Neither a failed gate nor an inconclusive measurement may change the selector's
+frozen answer or trigger retries until a favorable result appears.
+
+Initial real calls and their costs are reported separately; the suite does not
+promise a 1% bound on cold startup, individual requests, or model E2E latency.
+Its same-process first-call numbers do not replace the native CI's independent
+cold-cache comparison. The selector still compares whole CE and split CE;
+acceptance against NCCL deliberately checks the additional transport boundary.
+Packed fixtures publish canonical host-known padding lengths, as H3 does.
+
 `serving_probe.py` connects the existing learner to ordinary serving requests,
 only through `serving-probe.patch` and `native-probe.patch` in an isolated
 checkout. Baseline (`--ulysses-head-chunks 1`, the default) installation is a
