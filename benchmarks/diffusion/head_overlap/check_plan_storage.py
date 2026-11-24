@@ -32,8 +32,8 @@ def main():
             assert output is not None, "Prepared plans must not allocate another output"
             self.output = output
 
-        def bind(self, *args):
-            pass
+        def bind(self, inputs, joint, kernel, metadata, *, checked_layout):
+            assert checked_layout
 
     torch = ModuleType("torch")
     torch.cuda = SimpleNamespace(is_current_stream_capturing=lambda: False)

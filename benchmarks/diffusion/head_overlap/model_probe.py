@@ -37,6 +37,12 @@ class StableGraph(GraphedForward):
         torch.accelerator.synchronize()
         if learner is not None:
             learner.finish()
+            state = _ACTIVE.get()
+            if state and state.get("native_on_whole"):
+                # Decide once before capture. When every signature stays whole,
+                # record the same unsplit transport used by the reference graph.
+                unsplit = all(len(e.choices[e.selected]) == 1 for e in learner.entries.values())
+                learner.stats["capture_route"] = "native" if unsplit else "head-policy"
         graph.capture_begin(pool=self._pool)
         try:
             events = getattr(learner, "component_events", None)
@@ -356,11 +362,31 @@ def install(pipeline):
 
     original_can_overlap = head.can_overlap
 
-    def can_overlap(*args, **kwargs):
+    def can_overlap(q, k, v, md, world, chunks):
         state = _ACTIVE.get()
-        if state is not None and (state.get("whole_prefix") or state.get("reference_whole")):
-            return False
-        return original_can_overlap(*args, **kwargs)
+        if state is not None:
+            if state.get("whole_prefix") or state.get("reference_whole"):
+                return False
+            learner = state.get("learner")
+            if learner is not None and learner.stats.get("capture_route") == "native":
+                return False
+            layouts = state["native_decode_layouts"]
+            if (
+                learner is not None
+                and state["native_on_whole"]
+                and (learner.phase == "discover" or (learner.phase == "sample" and not all(layouts.values())))
+            ):
+                # Observe the first layer. A second real layer of that layout
+                # initializes native decode before timed trials or capture.
+                from lazy_head_policy import metadata_spec, tensor_spec
+
+                layout = (world, tuple(tensor_spec(x) for x in (q, k, v)), metadata_spec(md)[0])
+                if layout not in layouts and learner.phase == "discover":
+                    layouts[layout] = False
+                elif not layouts.get(layout):
+                    layouts[layout] = True
+                    return False
+        return original_can_overlap(q, k, v, md, world, chunks)
 
     head.can_overlap = can_overlap
 
@@ -544,6 +570,8 @@ def install(pipeline):
                     real_eager_steps={},
                     original_prefill_blocks=0,
                     reference_whole=bool(extra.get("reference_whole", False)),
+                    native_on_whole=bool(extra.get("native_on_whole", False)),
+                    native_decode_layouts={},
                 )
                 token = _ACTIVE.set(state)
                 native._SELECTED_CHUNKS = str(extra["chunks"])
@@ -603,6 +631,7 @@ def install(pipeline):
                         real_eager_steps=state["real_eager_steps"],
                         original_prefill_blocks=state["original_prefill_blocks"],
                         reference_whole=state["reference_whole"],
+                        native_decode_layouts=sum(state["native_decode_layouts"].values()),
                         lazy_policies={
                             name: dict(stats=graph.module.learner.stats, reports=graph.module.learner.reports)
                             for name, graph in selected_graphs.items()

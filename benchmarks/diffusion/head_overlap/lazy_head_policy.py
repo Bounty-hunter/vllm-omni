@@ -236,6 +236,7 @@ class Observation:
     sample_calls: int = 0
     untimed_prefix_calls: int = 0
     trial_order: tuple = ()
+    query_tail_rows: int = 0
 
 
 class LazyHeadPolicy:
@@ -254,6 +255,9 @@ class LazyHeadPolicy:
         if schedule not in (
             "stage-local",
             "stage-serial",
+            "stage-peer-first",
+            "stage-peer-first-balanced",
+            "stage-query-tail",
             "stage-defer-fence",
             "stage-gated",
             "overlap-return",
@@ -262,10 +266,13 @@ class LazyHeadPolicy:
         ):
             raise ValueError("Lazy learning requires an explicit local-staging schedule")
         self.schedule = schedule
-        if candidate_family not in (None, "symmetric-ends", "three-then-two"):
+        self.balanced_peers = schedule in ("stage-peer-first-balanced", "stage-query-tail")
+        if candidate_family not in (None, "symmetric-ends", "three-then-two", "small-leading-group"):
             raise ValueError("Unknown head candidate family")
         if candidate_family is not None and candidate_partition is not None:
             raise ValueError("Choose either a candidate partition or a candidate family")
+        if schedule == "stage-query-tail" and (candidate_family is not None or candidate_partition is not None):
+            raise ValueError("The query-tail trial generates one split from the actual layout")
         self.candidate_family = candidate_family
         self.candidate_partition = None if candidate_partition is None else tuple(candidate_partition)
         if self.candidate_partition is not None and (
@@ -276,10 +283,11 @@ class LazyHeadPolicy:
         properties = torch.cuda.get_device_properties(torch.accelerator.current_device_index())
         function = dense_flash_attn_func_for(torch.bfloat16)
         backend = (
-            function.__module__,
-            function.__qualname__,
+            getattr(function, "__module__", None),
+            getattr(function, "__qualname__", None),
             tuple(sorted(vllm_varlen_version_kwargs(flash_attn_varlen_func).items())),
         )
+        self.query_tail_supported = properties.major == 9 and backend[0] == "fa3_fwd_interface"
         self.identity = (
             properties.name,
             properties.major,
@@ -338,6 +346,13 @@ class LazyHeadPolicy:
         if producer != compute.cuda_stream:
             raise RuntimeError("Lazy policy requires the native plan's owning compute stream")
         signature = self.signature(q, k, v, md, pg)
+        query_tail = False
+        try_query_layout = self.schedule == "stage-query-tail" or self.candidate_family == "small-leading-group"
+        if try_query_layout:
+            from query_tail import eligible
+
+            query_tail = self.query_tail_supported and eligible(kernel, md)
+            signature += (query_tail,)
         entry = self.entries.get(signature)
         heads = q.shape[2] // dist.get_world_size(pg)
         joint = None if md is None or md.joint_query is None else (md.joint_query, md.joint_key, md.joint_value)
@@ -380,7 +395,7 @@ class LazyHeadPolicy:
                     bandwidth=self.bandwidth,
                     kv_tokens=kv_tokens,
                 )
-                if self.enabled and safe and (not packed or tokens >= 4096)
+                if not try_query_layout and self.enabled and safe and (not packed or tokens >= 4096)
                 else ((heads,),)
             )
             if self.enabled and safe and (not packed or tokens >= 4096) and self.candidate_partition is not None:
@@ -401,6 +416,12 @@ class LazyHeadPolicy:
                     kv_tokens=kv_tokens,
                 )
             entry = self.entries[signature] = Observation(signature, choices)
+            if try_query_layout and self.enabled and safe and query_tail:
+                from query_tail import candidate
+
+                entry.choices, tail_rows = candidate(heads, tokens, dist.get_world_size(pg), self.sms)
+                if self.schedule == "stage-query-tail":
+                    entry.query_tail_rows = tail_rows
         if self.phase == "discover":
             entry.inputs, entry.joint, entry.metadata, entry.kernel, entry.group, entry.comm = (
                 (q, k, v),
@@ -437,6 +458,8 @@ class LazyHeadPolicy:
             ("lazy", signature),
             allocate=self.phase == "discover",
             joint_strategy="front" if md is None else md.joint_strategy,
+            balanced_peers=self.balanced_peers,
+            query_tail_rows=entry.query_tail_rows if len(entry.choices[choice]) == 2 else 0,
         )
         self.stats["core_calls"] += 1
         if self.phase == "frozen" and torch.cuda.is_current_stream_capturing():
@@ -550,6 +573,8 @@ class LazyHeadPolicy:
                     entry.metadata,
                     ("lazy", entry.signature),
                     joint_strategy="front" if entry.metadata is None else entry.metadata.joint_strategy,
+                    balanced_peers=self.balanced_peers,
+                    query_tail_rows=entry.query_tail_rows if len(widths) == 2 else 0,
                 )
             if self.core_events is not None:
                 from schedule_probe import CoreEvents
@@ -566,9 +591,15 @@ class LazyHeadPolicy:
                             len(widths), entry.inputs[0].device, plan.runtime
                         )
             if len(entry.choices) > 1:
+                timed_calls = slots - entry.untimed_prefix_calls
+                if self.schedule == "stage-query-tail" and sample_limit is not None:
+                    # Use the spare real layers before the timed prefix to
+                    # rebuild launch lead after candidate preparation.
+                    spare = entry.calls * warmup_passes - slots
+                    entry.untimed_prefix_calls = min(6, spare)
                 entry.events = [
                     (torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True))
-                    for _ in range(slots - entry.untimed_prefix_calls)
+                    for _ in range(timed_calls)
                 ]
                 # Realize timer handles before measured calls; no kernels/forward.
                 for pair in entry.events:
@@ -671,6 +702,7 @@ class LazyHeadPolicy:
                     ],
                     host_submission_max_rank_us=submit_times,
                     selected=entry.choices[entry.selected],
+                    query_tail_rows=entry.query_tail_rows if len(entry.choices[entry.selected]) == 2 else 0,
                     diagnostic_forced=forced,
                     pairing=(
                         "complete rotated pairs on every rank; direct gains adjusted by matched whole controls"
@@ -692,7 +724,10 @@ class LazyHeadPolicy:
         self.phase = "frozen"
         key = (
             self.schedule,
-            tuple((entry.signature, entry.choices[entry.selected]) for entry in self.entries.values()),
+            tuple(
+                (entry.signature, entry.choices[entry.selected], entry.query_tail_rows if entry.selected else 0)
+                for entry in self.entries.values()
+            ),
         )
         self._cache_key = hashlib.sha256(repr(key).encode()).hexdigest()
         self.stats["finish_ms"] += (time.perf_counter() - start) * 1000

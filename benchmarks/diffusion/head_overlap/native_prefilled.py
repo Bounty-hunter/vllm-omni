@@ -66,12 +66,37 @@ class NativePipeline(PrefilledPipeline):
         return (ctypes.c_size_t * 7)(*values) if _COPY_SUBMITTER else values
 
     def __init__(
-        self, inputs, joint, pg, chunks, comm, kernel, metadata, *, head_sizes=None, joint_strategy="front", output=None
+        self,
+        inputs,
+        joint,
+        pg,
+        chunks,
+        comm,
+        kernel,
+        metadata,
+        *,
+        head_sizes=None,
+        joint_strategy="front",
+        output=None,
+        balanced_peers=False,
     ):
         self.attention_kernel, self.metadata = kernel, metadata
         super().__init__(
             inputs, joint, pg, chunks, self.attend, head_sizes=head_sizes, joint_strategy=joint_strategy, output=output
         )
+        peers = [p for p in range(self.world) if p != self.rank]
+        if balanced_peers:
+            # Match the native CE order. In each round every rank writes to
+            # a different destination. Keep Q, K and V for that peer together.
+            order = [
+                self.rank ^ step if self.world & (self.world - 1) == 0 else (self.rank + step) % self.world
+                for step in range(1, self.world)
+            ]
+            self.remote_forward = [
+                [ops[field * len(peers) + peers.index(peer)] for peer in order for field in range(3)]
+                for ops in self.remote_forward
+            ]
+            peers = order
         if _COPY_SUBMITTER:
             # Descriptor pointers remain valid when bind() updates their source
             # addresses in place. Prepare every forward batch before sampling.
@@ -118,24 +143,20 @@ class NativePipeline(PrefilledPipeline):
         itemsize = inputs[0].element_size()
         self.reverse_ops = []
         for group, width in enumerate(self.head_sizes):
-            peers = []
+            per_peer = []
             for peer in range(self.world):
                 operations = [self.geometry(0, 0, 0, 0, width * self.dim * itemsize, self.local_seq)]
                 if self.joint_len:
                     operations.append(self.geometry(0, 0, 0, 0, width * self.dim * itemsize, self.joint_len))
-                peers.append(operations)
-            self.reverse_ops.append(peers)
+                per_peer.append(operations)
+            self.reverse_ops.append(per_peer)
+        self.remote_reverse = [[op for peer in peers for op in per_peer[peer]] for per_peer in self.reverse_ops]
         if _COPY_SUBMITTER:
-            for peers in self.reverse_ops:
-                groups = [peers[self.rank], [op for peer, ops in enumerate(peers) if peer != self.rank for op in ops]]
-                for operations in groups:
+            for per_peer, remote in zip(self.reverse_ops, self.remote_reverse):
+                for operations in (per_peer[self.rank], remote):
                     self.copy_batches[tuple(map(id, operations))] = (ctypes.POINTER(ctypes.c_size_t) * len(operations))(
                         *operations
                     )
-        self.remote_reverse = [
-            [op for peer, operations in enumerate(peers) if peer != self.rank for op in operations]
-            for peers in self.reverse_ops
-        ]
         self.reverse_rows = [
             ((self.sequence_offset, self.sequence_offset + peer * self.local_seq),)
             + (((self.output_joint_offset, self.joint_offset),) if self.joint_len else ())
@@ -194,7 +215,19 @@ class NativePipeline(PrefilledPipeline):
 
 
 def prepare_plan(
-    inputs, joint, pg, head_sizes, comm, kernel, metadata, slot_key, *, allocate=True, joint_strategy="front"
+    inputs,
+    joint,
+    pg,
+    head_sizes,
+    comm,
+    kernel,
+    metadata,
+    slot_key,
+    *,
+    allocate=True,
+    joint_strategy="front",
+    balanced_peers=False,
+    query_tail_rows=0,
 ):
     """Bind an existing plan, or allocate it only at a shape-preparation boundary.
 
@@ -205,7 +238,7 @@ def prepare_plan(
     tensors = inputs + (() if joint is None else joint)
     source_layout = layout(tensors)
     signature = (tuple(head_sizes), source_layout, joint_strategy)
-    key = (q.device, pg.group_name, len(head_sizes), signature)
+    key = (q.device, pg.group_name, len(head_sizes), signature, balanced_peers, query_tail_rows)
     cached = _PLANS.get(key)
     if cached is None:
         if not allocate or torch.cuda.is_current_stream_capturing():
@@ -227,7 +260,15 @@ def prepare_plan(
             (q.shape[0], q.shape[1] + joint_queries, q.shape[2], q.shape[3]), q.dtype, q.device, pg
         )
     if cached is None:
-        plan = NativePipeline(
+        pipeline = NativePipeline
+        options = {}
+        if query_tail_rows:
+            from query_tail import QueryTailPipeline
+
+            pipeline = QueryTailPipeline
+            options["tail_rows"] = query_tail_rows
+            options["fuse_local"] = True
+        plan = pipeline(
             inputs,
             joint,
             pg,
@@ -238,6 +279,8 @@ def prepare_plan(
             head_sizes=head_sizes,
             joint_strategy=joint_strategy,
             output=slot,
+            balanced_peers=balanced_peers,
+            **options,
         )
         _PLANS[key] = (signature, plan)
     else:

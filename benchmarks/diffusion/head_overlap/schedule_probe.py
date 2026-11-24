@@ -12,6 +12,9 @@ VARIANTS = {
     "old": (False, False, False),
     "stage-local": (True, False, False),
     "stage-serial": (True, False, False),
+    "stage-peer-first": (True, False, False),
+    "stage-peer-first-balanced": (True, False, False),
+    "stage-peer-first-serial": (True, False, False),
     "stage-defer-fence": (True, False, False),
     "stage-gated": (True, False, False),
     "early-peer": (False, True, False),
@@ -114,8 +117,13 @@ class CoreEvents:
 def run(plan, variant):
     if variant == "old" or plan.chunks == 1:
         return ORIGINAL_CALL(plan)
+    if variant == "stage-query-tail":
+        if getattr(plan, "tail_rows", 0):
+            return plan.run_tail()
+        variant = "stage-peer-first-balanced"
     staged, early, deferred = VARIANTS[variant]
-    overlap = plan.overlap and variant != "stage-serial"
+    overlap = plan.overlap and variant not in ("stage-serial", "stage-peer-first-serial")
+    peer_first = variant in ("stage-peer-first", "stage-peer-first-balanced", "stage-peer-first-serial")
     defer_fence = variant == "stage-defer-fence"
     comm_input = variant in ("overlap-input", "overlap-staging")
     comm_output = variant in ("overlap-return", "overlap-staging")
@@ -142,12 +150,19 @@ def run(plan, variant):
     # writes to F1 are disjoint from incoming F0 writes and may run during F0.
     # enter still follows the previous output clone, so F0-ready continues to
     # acknowledge every rank's old copy-out before any new reverse write.
-    prefill(plan.local_forward[0] if staged else plan.local_forward_all)
+    if not peer_first:
+        prefill(plan.local_forward[0] if staged else plan.local_forward_all)
     plan.enter.record(compute)
     with torch.cuda.stream(plan.stream):
         plan.stream.wait_event(plan.enter)
         plan.submit_forward(0)
-    if staged and not comm_input:
+    if peer_first:
+        # enter acknowledges input producers and the previous output's local
+        # consumers. Peer writes and local staging fill disjoint rank rows;
+        # compute orders its own staging before waiting for incoming F0.
+        # The preceding output fence already protects old input readers.
+        prefill(plan.local_forward_all)
+    elif staged and not comm_input:
         prefill(plan.local_forward_tail)
     sources = []
     for group in range(plan.chunks):
