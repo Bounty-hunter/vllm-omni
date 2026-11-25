@@ -346,15 +346,16 @@ class LazyHeadPolicy:
         if producer != compute.cuda_stream:
             raise RuntimeError("Lazy policy requires the native plan's owning compute stream")
         signature = self.signature(q, k, v, md, pg)
+        world = dist.get_world_size(pg)
         query_tail = False
         try_query_layout = self.schedule == "stage-query-tail" or self.candidate_family == "small-leading-group"
         if try_query_layout:
             from query_tail import eligible
 
-            query_tail = self.query_tail_supported and eligible(kernel, md)
+            query_tail = self.query_tail_supported and eligible(kernel, md, q.shape[1] * world)
             signature += (query_tail,)
         entry = self.entries.get(signature)
-        heads = q.shape[2] // dist.get_world_size(pg)
+        heads = q.shape[2] // world
         joint = None if md is None or md.joint_query is None else (md.joint_query, md.joint_key, md.joint_value)
         metadata = (
             None
@@ -369,8 +370,8 @@ class LazyHeadPolicy:
                 )
             if len(self.entries) >= 16:
                 raise RuntimeError("Graph-owned lazy policy signature budget exceeded")
-            tokens = q.shape[1] * dist.get_world_size(pg) + (0 if joint is None else joint[0].shape[1])
-            kv_tokens = k.shape[1] * dist.get_world_size(pg) + (0 if joint is None else joint[1].shape[1])
+            tokens = q.shape[1] * world + (0 if joint is None else joint[0].shape[1])
+            kv_tokens = k.shape[1] * world + (0 if joint is None else joint[1].shape[1])
             packed = md is not None and "cu_seqlens_q" in md.extra
             # Keep known unsafe low-occupancy packed SplitKV calls whole.
             safe = self.metadata_supported and (
@@ -389,7 +390,7 @@ class LazyHeadPolicy:
                     heads,
                     tokens,
                     q.shape[3],
-                    dist.get_world_size(pg),
+                    world,
                     self.sms,
                     flops=self.flops,
                     bandwidth=self.bandwidth,
@@ -409,7 +410,7 @@ class LazyHeadPolicy:
                     heads,
                     tokens,
                     q.shape[3],
-                    dist.get_world_size(pg),
+                    world,
                     self.sms,
                     flops=self.flops,
                     bandwidth=self.bandwidth,
@@ -419,7 +420,7 @@ class LazyHeadPolicy:
             if try_query_layout and self.enabled and safe and query_tail:
                 from query_tail import candidate
 
-                entry.choices, tail_rows = candidate(heads, tokens, dist.get_world_size(pg), self.sms)
+                entry.choices, tail_rows = candidate(heads, tokens, world, self.sms)
                 if self.schedule == "stage-query-tail":
                     entry.query_tail_rows = tail_rows
         if self.phase == "discover":

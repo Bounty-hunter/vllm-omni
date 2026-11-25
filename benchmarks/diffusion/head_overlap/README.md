@@ -6,6 +6,11 @@ The library's `ulysses_head_chunks=2` route is the pooled generic prototype.
 The latest direct-CE schedule is an explicit experimental probe in this
 directory. `ulysses_head_chunks=1` remains the library default.
 
+The early-output-return experiment now admits fully occupied dense video
+grids on FA3. The Qwen Turbo and Wan A14B comparison includes automatic
+fallbacks, paired whole-request timings, first requests and matching P2P
+budgets. [Reproduction and measurements](QUERY-TAIL-RESULTS.md)
+
 The direct probe writes into attention inputs and assembled output head slots,
 puts local copies on compute, and leaves peer copies on communication. It
 submits attention before the next input exchange, returns the preceding
