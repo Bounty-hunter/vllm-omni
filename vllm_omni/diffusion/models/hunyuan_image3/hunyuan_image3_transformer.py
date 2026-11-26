@@ -862,8 +862,7 @@ class HunYuanRotary2DEmbedder:
         custom_pos_emb: tuple[torch.Tensor, torch.Tensor],
         **kwargs,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        hidden_states_shape = hidden_states.shape
-        hidden_states = hidden_states.reshape(-1, hidden_states_shape[-1])
+        hidden_states = hidden_states.reshape(-1, hidden_states.shape[-1])
         if kwargs.get("mode", "gen_text") != "gen_image":
             return q, k
 
@@ -886,10 +885,9 @@ class HunYuanRotary2DEmbedder:
         q = self.rope(q.to(torch.float32), cos, sin)
         k = self.rope(k.to(torch.float32), cos, sin)
 
-        # 5. Restore original shape + convert to bfloat16
-        q = q.reshape(hidden_states.shape[0], self.num_heads * self.head_dim).to(torch.bfloat16)
-        k = k.reshape(hidden_states.shape[0], self.num_kv_heads * self.head_dim).to(torch.bfloat16)
-        hidden_states = hidden_states.reshape(hidden_states_shape)
+        # The official image path keeps rotated Q/K in FP32 through QK norm.
+        q = q.reshape(hidden_states.shape[0], self.num_heads * self.head_dim)
+        k = k.reshape(hidden_states.shape[0], self.num_kv_heads * self.head_dim)
         return q, k
 
 
@@ -957,8 +955,8 @@ class ImageKVCacheManager(nn.Module):
             num_kv_heads=self.num_kv_heads,
             prefix=f"{prefix}.attn" if prefix else "",
             paged_kv_cache_role="primary",
-            # Hunyuan image RoPE produces bfloat16 K and denoising runs under
-            # bfloat16 autocast, independent of the weight-loading dtype.
+            # Image attention receives K in V's dtype after QK normalization.
+            # Denoising runs under bfloat16 autocast.
             paged_kv_cache_dtype=torch.bfloat16,
         )
         # The dense image attention path always sends a 4D mask together with full_attn_spans.
@@ -1923,19 +1921,17 @@ class HunYuanAttention(nn.Module):
             value_states = v.reshape(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
             cache_kwargs = {"cache_position": position_ids}
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_id, cache_kwargs)
-        # for image_generation
         if kwargs.get("mode", "gen_text") == "gen_image":
-            # assert positions is None, "positions should be None for image attention"
             q, k = self.image_rope2d_emb(q, k, hidden_states, custom_pos_emb, **kwargs)
+            if self.use_qk_norm:
+                q = self.query_layernorm.forward_native(q.view(-1, self.num_heads, self.head_dim))
+                k = self.key_layernorm.forward_native(k.view(-1, self.num_kv_heads, self.head_dim))
+            attn_output = self.image_attn(q.to(v.dtype), k.to(v.dtype), v, attention_mask=attention_mask, **kwargs)
         else:
             q, k = self.rotary_emb(positions, q, k)
-        if self.use_qk_norm:
-            q = self.query_layernorm(q.view(-1, self.num_heads, self.head_dim).contiguous())
-            k = self.key_layernorm(k.view(-1, self.num_kv_heads, self.head_dim).contiguous())
-        # for image_generation
-        if kwargs.get("mode", "gen_text") == "gen_image":
-            attn_output = self.image_attn(q, k, v, attention_mask=attention_mask, **kwargs)
-        else:
+            if self.use_qk_norm:
+                q = self.query_layernorm(q.view(-1, self.num_heads, self.head_dim).contiguous())
+                k = self.key_layernorm(k.view(-1, self.num_kv_heads, self.head_dim).contiguous())
             attn_output = self.attn(q, k, v)
         # For o_proj
         # image_attn may return a non-contiguous tensor; reshape is safe here.

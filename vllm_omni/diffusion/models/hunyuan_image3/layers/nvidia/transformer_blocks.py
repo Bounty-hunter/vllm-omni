@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 
 """``ResBlock`` for HunyuanImage3 -- NVIDIA CUDA + Triton implementation.
 
@@ -16,7 +16,7 @@ import torch
 from torch import nn
 
 from vllm_omni.diffusion.models.hunyuan_image3.layers.common import conv_nd, normalization, zero_module
-from vllm_omni.diffusion.models.hunyuan_image3.layers.nvidia._cudnn import cudnn_settings
+from vllm_omni.diffusion.models.hunyuan_image3.layers.nvidia._cudnn import deterministic_cudnn
 from vllm_omni.model_executor.models.common.ops import (
     fused_adaptive_group_norm_silu,
     fused_group_norm_silu,
@@ -92,12 +92,7 @@ class ResBlock(nn.Module):
             self.skip_connection = conv_nd(dims, self.in_channels, self.out_channels, 1, **factory_kwargs)  # noqa: N802
 
     def forward(self, x, emb) -> torch.Tensor:
-        # cuDNN autotune is scoped to this block rather than set at import time.
-        # The benchmark=True win is concentrated in the convolutions right here:
-        # this ResBlock sits inside UNetDown/UNetUp (patch_embed / final_layer),
-        # the heaviest conv users in the DiT. A process-wide flag would instead
-        # silently change every other model's conv behaviour in the same process.
-        with cudnn_settings(benchmark=True, deterministic=True):
+        with deterministic_cudnn():
             # ``in_layers``/``out_layers`` stay nn.Sequential and are indexed into
             # rather than unpacked into named submodules -- that is what keeps the
             # state_dict keys (``in_layers.0/.2``, ``out_layers.0/.3``) identical to
