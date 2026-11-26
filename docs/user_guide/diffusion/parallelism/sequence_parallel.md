@@ -251,53 +251,6 @@ vllm serve Qwen/Qwen-Image --omni --ulysses-degree 2 --ulysses-a2a-permute
 On NPU, the flag retains the existing
 [NPU symmetric-memory requirements](../../../design/feature/sequence_parallel.md#npu-symmetric-memory-ulysses).
 
-### Experimental head-group overlap
-
-The Python parallel configuration accepts `ulysses_head_chunks=1`, `2` or `4`.
-The default is `1`, which keeps the existing serial transport and attention.
-This prototype has no established end-to-end speedup and should remain disabled
-unless the complete target workload benefits in an A/B measurement.
-
-```python
-omni = Omni(
-    model=model_path,
-    parallel_config={
-        "ulysses_degree": 2,
-        "ulysses_a2a_permute": True,
-        "ulysses_head_chunks": 2,
-    },
-)
-```
-
-The pipeline reuses CUDA CE transport and the selected dense attention kernel.
-It queues QKV exchanges on a communication stream, waits for each group before
-attention, and returns completed groups while subsequent attention runs. QKV
-and output projections remain whole operations. Peer fences remain enabled.
-Each exchange owns its output storage, and the communication stream has a
-separate grow-only symmetric workspace from the serial fallback.
-
-Only strict, pure Ulysses with CE transport can configure multiple groups.
-Query and KV heads must both divide evenly over ranks and groups, preserving
-the GQA ratio. Front/rear joint text layouts and head-independent masks are
-preserved. Small shapes, incompatible head counts, quantized/paged KV, sparse
-backends and unsupported metadata retain the original path. Ring/AllGather
-combinations and advanced UAA are rejected for this option. Ascend currently
-retains its existing unchunked transport; this prototype adds no NPU overlap.
-Torch.compile also retains the original path: initial compiled-overlap runs
-did not reproduce the serial Qwen-Image-2.1 outputs. The numerical cause still
-needs an aligned compilation and cross-process reproducibility audit. Eager
-DiT execution and explicitly captured CUDA graphs are separate from this
-limitation.
-
-More groups can reduce kernel efficiency and add launch, copy and fence costs.
-Compare the same CE transport and USP degree with chunks `1` versus `2`, using
-warm requests, identical inputs, steps, precision and backend. Measure full
-request latency and output agreement; an attention-only gain is insufficient.
-
-The latest direct-CE experiment, explicit integration patches, source
-provenance and profiling reproduction commands are in
-[`benchmarks/diffusion/head_overlap`](../../../../benchmarks/diffusion/head_overlap/README.md).
-
 ## Best Practices
 
 ### When to Use

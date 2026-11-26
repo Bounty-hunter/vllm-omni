@@ -362,8 +362,11 @@ class OmniServeCommand(CLISubcommand):
         from vllm_omni.diffusion.utils.hf_utils import is_diffusion_model
 
         model = getattr(args, "model_tag", None) or getattr(args, "model", None)
+        revision = getattr(args, "revision", None)
         native_single_file = resolve_native_single_file(getattr(args, "model_class_name", None))
-        if model and ((native_single_file is not None and os.path.isfile(model)) or is_diffusion_model(model)):
+        if model and (
+            (native_single_file is not None and os.path.isfile(model)) or is_diffusion_model(model, revision=revision)
+        ):
             if api_server_count is not None and api_server_count > 1:
                 raise ValueError("--api-server-count > 1 is not supported for diffusion models")
             logger.info("Detected diffusion model: %s", model)
@@ -827,11 +830,14 @@ class OmniServeCommand(CLISubcommand):
             ),
         )
         omni_config_group.add_argument(
-            "--ulysses-head-chunks",
+            "--ulysses-overlap-chunks",
             type=int,
-            choices=[1, 2, 4],
             default=None,
-            help="Experimental CUDA CE attention head chunks. Requires strict Ulysses with all-to-all permute.",
+            help=(
+                "With --ulysses-a2a-permute on CUDA, split each rank's attention heads into this many chunks and "
+                "move them on copy engines while earlier chunks compute (must divide num_heads / ulysses_degree; "
+                "0 disables). Requires strict pure Ulysses. Defaults to disabled."
+            ),
         )
         omni_config_group.add_argument(
             "--ring",
@@ -1051,6 +1057,16 @@ class OmniServeCommand(CLISubcommand):
             "--vae-use-tiling",
             action="store_true",
             help="Enable VAE tiling for memory optimization (useful for mitigating OOM issues).",
+        )
+        omni_config_group.add_argument(
+            "--vae-stack-tiles",
+            action=argparse.BooleanOptionalAction,
+            default=None,
+            help=(
+                "Decode a rank's VAE spatial tiles in batches of up to 7 (default). Currently only the "
+                "MiniMax-H3 video VAE reads this flag; other models ignore it. --no-vae-stack-tiles "
+                "decodes one tile at a time."
+            ),
         )
         omni_config_group.add_argument(
             "--vae-fast-path",
@@ -1499,7 +1515,7 @@ def _start_api_server_process_manager(**manager_kwargs: object) -> APIServerProc
 
 def run_multi_api_server_omni(args: TrackingNamespace) -> None:
     """Launch API subprocesses that share one set of local stage engines."""
-    from vllm.entrypoints.openai.api_server import setup_server
+    from vllm.entrypoints.launchers.launcher import setup_server
     from vllm.v1.metrics.prometheus import setup_multiprocess_prometheus
 
     num_api_servers = int(args.api_server_count)

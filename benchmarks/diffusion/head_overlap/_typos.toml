@@ -1,7 +1,0 @@
-[default]
-# These are opaque geometry digests, not words to autocorrect.
-extend-ignore-re = [
-    "observed-sp[24]-[0-9a-f]{12}",
-    # The immutable BA-order run identifier must match its saved evidence.
-    "hcms-10448-ci-core-wan-stride-ba-20261121-r3",
-]

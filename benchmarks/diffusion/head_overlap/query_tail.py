@@ -5,7 +5,8 @@
 import math
 
 import torch
-from native_prefilled import NativePipeline
+
+from .ce_plan import HeadPlan
 
 
 def eligible(kernel, metadata, distributed_rows):
@@ -82,10 +83,10 @@ def query_row(source, owner, world):
     return owner if source == world - 1 else source
 
 
-class QueryTailPipeline(NativePipeline):
+class QueryTailPipeline(HeadPlan):
     """Return remote O of the last head group while computing its local query rows."""
 
-    def __init__(self, *args, tail_rows, fuse_local=False, **kwargs):
+    def __init__(self, *args, tail_rows, **kwargs):
         super().__init__(*args, **kwargs)
         if self.chunks != 2 or self.joint_len or not 0 < tail_rows <= self.local_seq:
             raise ValueError("The query-tail control requires two groups and distributed queries only")
@@ -93,8 +94,8 @@ class QueryTailPipeline(NativePipeline):
         q, k, v = self.parts[-1]
         self.tail_inputs = ((q[:, :-tail_rows], k, v), (q[:, -tail_rows:], k, v))
         self.local_batches = ()
-        if fuse_local and q.element_size() == 2:
-            from local_copy import LocalCopyBatch
+        if q.element_size() == 2:
+            from .local_copy import LocalCopyBatch
 
             self.local_batches = tuple(LocalCopyBatch.prepare(ops) for ops in self.local_forward)
             for batch in self.local_batches:
@@ -125,7 +126,7 @@ class QueryTailPipeline(NativePipeline):
             ops[0][2] += (row - peer) * self.local_seq * ops[0][3]
         return ops
 
-    def run_tail(self):
+    def run(self):
         compute, comm = torch.cuda.current_stream(), self.stream
         self.enter.record(compute)
         with torch.cuda.stream(comm):

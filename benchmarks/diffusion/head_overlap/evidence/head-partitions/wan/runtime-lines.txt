@@ -1,9 +1,0 @@
-Source run.log SHA256: c6bdd2d25c0b9a40728ac0ec234b10e39451bd5b5f0061b9ced1c92b6df3ee39
- --> vLLM version 0.34.0
- --> vLLM version 0.34.0
- --> vLLM version 0.34.0
- --> vLLM version 0.34.0
- --> vLLM version 0.34.0
- --> vLLM version 0.34.0
-(DiffusionWorker_SP0 pid=132901) INFO 11-21 09:36:50 [registry.py:643] vae_patch_parallel_size=2 in tile mode requires vae_use_tiling; automatically enabling it.
-(DiffusionWorker_SP1 pid=132902) INFO 11-21 09:36:50 [registry.py:643] vae_patch_parallel_size=2 in tile mode requires vae_use_tiling; automatically enabling it.

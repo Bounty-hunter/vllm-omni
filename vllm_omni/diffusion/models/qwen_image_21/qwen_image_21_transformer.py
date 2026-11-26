@@ -1288,22 +1288,6 @@ class QwenImage21Transformer2DModel(CachedTransformer):
             return "piecewise"
         return "mask"
 
-    @staticmethod
-    def attention_query_token_bound(args: tuple[object, ...], kwargs: dict[str, object]) -> int | None:
-        """Host-only upper bound for optional attention admission.
-
-        Packed image latents include every reference and the target. Text
-        embeddings bound all additional prefix queries, including prefill;
-        cached KV never adds query rows. The SP owner adds any target padding.
-        """
-        hidden = kwargs.get("hidden_states", args[0] if args else None)
-        text = kwargs.get("encoder_hidden_states", args[1] if len(args) > 1 else None)
-        if not isinstance(hidden, torch.Tensor) or not isinstance(text, torch.Tensor):
-            return None
-        if hidden.ndim != 3 or text.ndim != 3 or hidden.shape[0] != 1 or text.shape[0] != 1:
-            return None
-        return hidden.shape[1] + text.shape[1]
-
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -1580,22 +1564,20 @@ class QwenImage21Transformer2DModel(CachedTransformer):
                 pointwise_validated = pointwise_eligible(
                     joint_hidden_states, prepared_modulation[1], prepared_modulation[3]
                 )
-        for index_block, block in enumerate(self.transformer_blocks):
-            block_kv_cache = kv_cache[index_block] if kv_cache is not None else None
-            joint_hidden_states = block(
-                hidden_states=joint_hidden_states,
-                modulation=modulation,
-                freqs=freqs,
-                target_token_mask=local_mask,
-                attn_metadata=attn_metadata,
-                sp_prefix_len=sp_prefix_len,
-                sp_decode=sp_active and is_decode,
-                kv_cache=block_kv_cache,
-                cache_branch=cache_branch,
-                cache_write_len=cache_write_len,
-                prepared_modulation=prepared_modulation,
-                _pointwise_validated=pointwise_validated,
-            )
+        joint_hidden_states = self._run_transformer_blocks(
+            joint_hidden_states,
+            kv_cache,
+            modulation=modulation,
+            freqs=freqs,
+            target_token_mask=local_mask,
+            attn_metadata=attn_metadata,
+            sp_prefix_len=sp_prefix_len,
+            sp_decode=sp_active and is_decode,
+            cache_branch=cache_branch,
+            cache_write_len=cache_write_len,
+            prepared_modulation=prepared_modulation,
+            _pointwise_validated=pointwise_validated,
+        )
 
         if (
             not is_decode
@@ -1628,6 +1610,13 @@ class QwenImage21Transformer2DModel(CachedTransformer):
             return (output,)
 
         return Transformer2DModelOutput(sample=output)
+
+    def _run_transformer_blocks(self, hidden_states, block_caches, **kwargs):
+        for index, block in enumerate(self.transformer_blocks):
+            hidden_states = block(
+                hidden_states=hidden_states, kv_cache=None if block_caches is None else block_caches[index], **kwargs
+            )
+        return hidden_states
 
     def _decode_graph_forward(self, entry) -> torch.Tensor:
         """The exact decode-step computation, captured into a CUDA graph.

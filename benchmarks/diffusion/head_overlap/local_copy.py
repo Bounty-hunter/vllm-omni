@@ -3,8 +3,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-import triton
-import triton.language as tl
+from vllm.triton_utils import tl, triton
 
 
 @triton.jit(do_not_specialize=["sources", "destinations"])
