@@ -7,7 +7,10 @@ from itertools import accumulate
 from vllm.triton_utils import tl, triton
 
 
-@triton.jit(do_not_specialize=["sources", "destinations", "rows", "ends"])
+@triton.jit(
+    do_not_specialize=["sources", "destinations", "rows", "ends"],
+    do_not_specialize_on_alignment=["rows", "ends"],
+)
 def _stage(
     sources,
     destinations,
