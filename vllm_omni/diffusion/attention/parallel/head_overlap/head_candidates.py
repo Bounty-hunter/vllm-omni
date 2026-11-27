@@ -50,7 +50,8 @@ def candidates(heads, rows, sms):
     """Try small/large/small heads first, then small/large, then stay native.
 
     This SM90 estimate is only a candidate filter, not a measured launch grid.
-    Keep the smallest edge groups that do not add estimated compute waves.
+    Minimize estimated compute waves, then edge size. Allow one extra wave:
+    avoiding it entirely would reject useful overlap without measuring it.
     Every candidate still has to beat native CE in real-layer measurements;
     the estimate alone cannot establish that an edge hides enough transfer.
     """
@@ -59,10 +60,17 @@ def candidates(heads, rows, sms):
         return math.ceil(math.ceil(rows / 128) * width / sms)
 
     choices = []
+    whole = waves(heads)
     for groups in (3, 2):
-        for edge in range(1, heads // groups + 1):
-            widths = (edge, heads - 2 * edge, edge) if groups == 3 else (edge, heads - edge)
-            if sum(waves(width) for width in widths) <= waves(heads):
-                choices.append(widths)
-                break
+        if heads < groups or whole < groups:
+            continue
+        widths = min(
+            (
+                (edge, heads - 2 * edge, edge) if groups == 3 else (edge, heads - edge)
+                for edge in range(1, heads // groups + 1)
+            ),
+            key=lambda parts: (sum(waves(width) for width in parts), parts[0]),
+        )
+        if sum(waves(width) for width in widths) <= whole + 1:
+            choices.append(widths)
     return tuple(choices)

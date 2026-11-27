@@ -58,6 +58,9 @@ def test_candidate_selection_and_fallback():
     assert candidates(8, 512, 120) == ()
     assert candidates(8, 15360, 120) == ((1, 6, 1), (1, 7))
     assert candidates(2, 15360, 120) == ((1, 1),)
+    # Qwen 1536^2: the three-group estimate adds one wave. It must reach
+    # real-layer sampling rather than silently becoming a two-group-only test.
+    assert candidates(16, 9216, 132) == ((1, 14, 1), (5, 11))
 
 
 def test_mismatched_layer_order_skips_collective_preparation(monkeypatch):
