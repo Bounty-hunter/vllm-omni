@@ -62,9 +62,10 @@ def candidate_index(index, count):
     return count - 1 - position if cycle % 2 else position
 
 
-# One complete rotation warms every choice; five measured rotations remain.
-# 16 heads require 54 real calls, leaving useful steps in short denoisers.
-_ROTATIONS = 6
+# Three complete rotations fit all eight pairs plus native into 27 real calls.
+# A native lead call lets launches get ahead; require all three valid rotations
+# and unanimous positive paired gains. A cold/noisy request stays native.
+_ROTATIONS = 3
 
 logger = init_logger(__name__)
 _OWNERS = WeakSet()
@@ -112,7 +113,7 @@ class Trial:
     report: torch.Tensor | None = None
     work: object = None
     commit_at: int | None = None
-    seen: int = 0
+    seen: int = -1  # One real native call before assigning the first timed slot.
     selected: bool | None = None
 
 
@@ -367,9 +368,10 @@ class HeadPolicy:
         for key in self.pending:
             trial = self.layouts[key]
             if trial.seen == len(trial.timers) and trial.commit_at is None:
-                # Give GPU events and the CPU reduction one complete component
-                # to finish. Every rank commits at this same logical boundary.
-                trial.commit_at = self.step + 2
+                # Commit at the very next component, not after a native grace
+                # step. All peers reach the same boundary even if CPU launches
+                # have outrun the GPU; only this boundary may wait for samples.
+                trial.commit_at = self.step + 1
         self.resolve_pending()
 
     def _prepare(self, key, trial, device, pg):
@@ -463,14 +465,15 @@ class HeadPolicy:
             count = len(trial.plans) + 1
             samples = [[] for _ in range(count)]
             rows = trial.report.tolist()
-            # Discard the first full rotation, including native. Invalidate a
-            # whole rotation if any choice/rank had an unqueued or missing call.
-            for cycle in range(1, _ROTATIONS):
+            # Do not spend a whole rotation warming every request. Kernels and
+            # launchers are prepared before sampling. Invalidate a whole
+            # rotation if any choice/rank had an unqueued or missing call.
+            for cycle in range(_ROTATIONS):
                 values = rows[cycle * count : (cycle + 1) * count]
                 if all(math.isfinite(value) for value in values):
                     for position, value in enumerate(values):
                         samples[candidate_index(cycle * count + position, count)].append(value)
-            best = choose(samples, minimum=4)
+            best = choose(samples, minimum=_ROTATIONS)
             trial.plan = trial.plans[best - 1] if best else None
             trial.selected = bool(best)
             trial.widths = trial.plan.widths if best else (sum(trial.widths),)

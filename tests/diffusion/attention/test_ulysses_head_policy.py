@@ -58,6 +58,35 @@ def test_candidate_selection_and_fallback():
     assert candidates(16, 9216, 132)[:2] == ((5, 11), (7, 9))
 
 
+def test_short_trial_requires_three_consistent_gains():
+    assert choose([[100] * 3, [80] * 3], minimum=3) == 1
+    assert choose([[100] * 2, [80] * 2], minimum=3) == 0
+    assert choose([[100] * 3, [80, 80, 105]], minimum=3) == 0
+    assert choose([[100] * 3, [96] * 3], minimum=3) == 0
+
+
+def test_all_pairs_fit_one_component_and_commit_on_the_next(monkeypatch):
+    from vllm_omni.diffusion.attention.parallel.head_overlap import head_policy as hp
+
+    monkeypatch.setattr(hp.torch.cuda, "is_current_stream_capturing", lambda: False)
+    monkeypatch.setattr(hp, "kwargs_signature", lambda inputs: "shape")
+    policy = hp.HeadPolicy(None, 132)
+    policy.begin_request()
+    trial = hp.Trial((5, 11), timers=[None] * (hp._ROTATIONS * 9))
+    policy.layouts["layout"] = trial
+    policy.pending.add("layout")
+    policy.component_layouts["shape"] = ("layout",)
+    policy.visits["shape"] = {str(i): trial for i in range(32)}
+    monkeypatch.setattr(policy, "resolve_pending", lambda **kwargs: None)
+    policy.begin_component(None, (), {})
+    assert "0" not in policy.slots  # A real, untimed native lead call.
+    assert len(policy.slots) == trial.seen == 27
+    for cycle in range(3):
+        assert sorted(hp.candidate_index(i, 9) for i in range(cycle * 9, (cycle + 1) * 9)) == list(range(9))
+    policy.finish_component(None, (), None)
+    assert trial.commit_at == policy.step + 1
+
+
 def test_mismatched_layer_order_skips_collective_preparation(monkeypatch):
     from vllm_omni.diffusion.attention.parallel.head_overlap import head_policy
 

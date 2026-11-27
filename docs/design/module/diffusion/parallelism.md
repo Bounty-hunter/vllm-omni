@@ -63,8 +63,10 @@ complete and agree at a component boundary. Graph preparation consumes frozen de
 
 The request-scoped experiment tests small-first two-group partitions (up to eight,
 for at most sixteen rank-local heads). A wave estimate orders candidates but never
-selects the winner. Six rotating/reversed native-and-candidate cycles execute in
-real layers; the first rotation is discarded. All candidates share one symmetric
+selects the winner. After one native lead call, three rotating/reversed
+native-and-candidate cycles execute in real layers (28 calls for sixteen heads).
+Selection requires three valid rotations and positive paired gains in all three;
+insufficient or noisy samples keep native attention. All candidates share one symmetric
 allocation, peer mapping, streams and flags. Their packed views and staging
 launchers are prepared before measurement. The resource owner can reuse the last
 prepared geometry; it retains no winner or timing samples between requests.
@@ -76,7 +78,7 @@ separate wide-index variant. Workspace growth can still require reconnection.
 Sample collection performs no per-layer host synchronization and no per-step
 object collective. Completed events populate one CPU tensor, reduced with MAX
 asynchronously on a dedicated Gloo group. Every rank commits at the same fixed
-component boundary, allowing one full component after sampling for collection.
+component boundary immediately following sampling, without an extra native step.
 That boundary waits if events or reduction are late; this cost is not claimed to
 be zero. Missing/starved observations invalidate the whole rotation. Insufficient
 confidence keeps native attention. Request teardown drains submitted batches;
