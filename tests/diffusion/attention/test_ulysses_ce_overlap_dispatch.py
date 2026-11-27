@@ -209,6 +209,7 @@ def test_auto_capture_uses_current_component_layout(monkeypatch):
 
     monkeypatch.setattr(torch.cuda, "is_current_stream_capturing", lambda: False)
     policy = HeadPolicy(None, 120)
+    policy.begin_request()
     for length, split in ((512, False), (4096, True)):
         policy.begin_component(None, (), {"length": length})
         policy.component_layouts[policy.component_key] = (length,)
@@ -246,3 +247,25 @@ def test_auto_graph_resolves_real_samples_once_before_capture(monkeypatch):
     assert module.call_count == runner.eager_calls == 2
     policy.resolve_pending.assert_called_once_with("layout")
     assert all(call.kwargs["variant"] == (None, 1) for call in replay.call_args_list)
+
+
+def test_request_scoped_trials_do_not_replay_an_old_decision(monkeypatch):
+    from vllm_omni.diffusion.attention.parallel.head_overlap.graph import AdaptiveDenoiseGraph
+    from vllm_omni.diffusion.cuda_graph import GraphedForward
+
+    class Pipeline:
+        transformer = SimpleNamespace(_ulysses_head_policy=SimpleNamespace(request_scoped=True))
+
+        def step(self, x):
+            return x + 1
+
+    pipeline = Pipeline()
+    module = Mock(side_effect=pipeline.step)
+    module._fn = pipeline.step
+    runner = AdaptiveDenoiseGraph(module, device="cuda")
+    replay = Mock(side_effect=AssertionError("Request-local trials must not replay an old choice"))
+    monkeypatch.setattr(layer.current_omni_platform, "is_graph_capturing", lambda: False)
+    monkeypatch.setattr(GraphedForward, "__call__", replay)
+    assert [runner(x=2) for _ in range(5)] == [3] * 5
+    assert module.call_count == runner.eager_calls == 5
+    replay.assert_not_called()
