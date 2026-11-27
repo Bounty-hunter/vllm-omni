@@ -497,9 +497,26 @@ class FlashAttentionImpl(AttentionImpl[AttentionMetadata]):
             return
         logger.warning_once(
             "fa_deterministic=True is ignored on the %s FlashAttention path; "
-            "only the dense flash_attn_func path passes deterministic=True.",
+            "supported paths are dense flash_attn_func and vLLM FA3 packed attention.",
             path,
         )
+
+    @property
+    def stable_packed_head_partitions(self) -> bool:
+        """Whether packed calls keep the same reduction when head count changes.
+
+        FA3's automatic split-KV heuristic can choose different reductions for
+        smaller head groups. Pin one split in both native and partitioned calls
+        when the existing deterministic option is explicitly enabled.
+        """
+        if not self.fa_deterministic:
+            return False
+        from vllm_omni.diffusion.attention.backends.utils.fa import (
+            flash_attn_varlen_func,
+            vllm_varlen_version_kwargs,
+        )
+
+        return vllm_varlen_version_kwargs(flash_attn_varlen_func).get("fa_version") == 3
 
     @staticmethod
     def _unwrap_flash_output(out: torch.Tensor | tuple[torch.Tensor, ...]) -> torch.Tensor:
@@ -616,6 +633,10 @@ class FlashAttentionImpl(AttentionImpl[AttentionMetadata]):
         if query.shape[0] != 1 or key.shape[0] != 1 or value.shape[0] != 1:
             raise ValueError("Packed variable-length attention currently requires batch size 1")
 
+        version_kwargs = vllm_varlen_version_kwargs(flash_attn_varlen_func)
+        if self.fa_deterministic and version_kwargs.get("fa_version") == 3:
+            version_kwargs["num_splits"] = 1
+
         out = flash_attn_varlen_func(
             q=query.flatten(0, 1),
             k=key.flatten(0, 1),
@@ -626,7 +647,7 @@ class FlashAttentionImpl(AttentionImpl[AttentionMetadata]):
             max_seqlen_k=max_seqlen_k,
             causal=self.causal,
             softmax_scale=self.softmax_scale,
-            **vllm_varlen_version_kwargs(flash_attn_varlen_func),
+            **version_kwargs,
         )
         out = self._unwrap_flash_output(out)
         return out.reshape_as(query)
@@ -845,7 +866,8 @@ class FlashAttentionImpl(AttentionImpl[AttentionMetadata]):
             )
 
         if metadata_plan.packing_mode is not PackingMode.NONE:
-            self._warn_fa_deterministic_non_dense("packed-varlen")
+            if not self.stable_packed_head_partitions:
+                self._warn_fa_deterministic_non_dense("packed-varlen")
             return self._forward_varlen_packed(
                 query,
                 key,

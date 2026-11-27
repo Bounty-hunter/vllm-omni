@@ -763,8 +763,8 @@ class OmniServeCommand(CLISubcommand):
             default=False,
             help=(
                 "Request FlashAttention deterministic=True on the local FLASH_ATTN dense path. "
-                "Slower than the library default deterministic=False; intended for accuracy CI. "
-                "Serving default remains non-deterministic."
+                "For vLLM FA3 packed attention, fix num_splits=1 so head partitions retain the same reduction. "
+                "May be slower than automatic kernel scheduling; intended for accuracy CI. Off by default."
             ),
         )
         omni_config_group.add_argument(

@@ -35,6 +35,15 @@ def tensor_spec(value):
     return tuple(value.shape), canonical_strides(value), str(value.dtype), value.device.type
 
 
+def component_signature(module, args, kwargs):
+    # Only the producer can declare values that never affect attention layouts
+    # or collective control flow. Keep all other scalar values in the key.
+    value_only = getattr(module, "_attention_layout_value_only_kwargs", ())
+    if value_only:
+        kwargs = {name: value for name, value in kwargs.items() if name not in value_only}
+    return kwargs_signature((args, kwargs))
+
+
 def layout_family(signature):
     """A dense layer group's structure, independent of Q/KV lengths and grid size."""
     world, qkv, joint, placement, grid, scale, borrowed, packing = signature
@@ -203,7 +212,7 @@ class HeadPolicy:
             return
         self.step += 1
         self.resolve_pending(commit=True)
-        self.component_key = kwargs_signature((args, kwargs))
+        self.component_key = component_signature(module, args, kwargs)
         keys = self.component_layouts.get(self.component_key)
         frozen = _PREPARING_GRAPH.get() or torch.cuda.is_current_stream_capturing()
         discover = keys is None and not frozen and len(self.component_layouts) < 16

@@ -705,6 +705,10 @@ class MiniMaxH3SPGather(nn.Module):
 
 
 class MiniMaxH3DiTModel(nn.Module):
+    # PDD selects only final_layer's output projection after all attention
+    # blocks. It cannot change their layout, backend or collective schedule.
+    _attention_layout_value_only_kwargs = ("pdd_step",)
+
     # Loading is tensor-complete: constructor state plus final-layout
     # parameters and persistent buffers is sufficient to reconstruct a ready
     # inference model. The model-specific validator below checks the preserved

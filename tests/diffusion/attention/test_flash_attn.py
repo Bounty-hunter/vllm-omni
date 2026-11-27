@@ -34,6 +34,29 @@ flash_attn_func = fa.flash_attn_func  # noqa: N813
 
 
 @pytest.mark.cpu
+@pytest.mark.parametrize("version,deterministic", [(3, True), (3, False), (2, True), (4, True)])
+def test_packed_head_partitions_require_fixed_fa3_reduction(monkeypatch, version, deterministic):
+    calls = []
+
+    def kernel(**kwargs):
+        calls.append(kwargs)
+        return kwargs["q"]
+
+    monkeypatch.setattr(fa, "flash_attn_varlen_func", kernel)
+    monkeypatch.setattr(fa, "vllm_varlen_version_kwargs", lambda fn: {"fa_version": version})
+    impl = FlashAttentionImpl(4, 128, softmax_scale=128**-0.5)
+    impl.fa_deterministic = deterministic
+    fixed = deterministic and version == 3
+    assert impl.stable_packed_head_partitions == fixed
+    q = torch.zeros(1, 17, 4, 128)
+    cu = torch.tensor([0, 13, 17], dtype=torch.int32)
+    impl._forward_varlen_packed(q, q, q, cu_seqlens_q=cu, cu_seqlens_k=cu, max_seqlen_q=13, max_seqlen_k=13)
+    assert calls[0].get("num_splits") == (1 if fixed else None)
+    assert calls[0]["fa_version"] == version
+    assert calls[0]["cu_seqlens_q"] is cu
+
+
+@pytest.mark.cpu
 def test_fa4_dense_dispatch_is_opaque_to_compile(monkeypatch):
     calls = []
 

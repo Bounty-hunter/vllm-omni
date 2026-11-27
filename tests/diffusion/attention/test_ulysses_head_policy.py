@@ -69,13 +69,17 @@ def test_packed_padding_preserves_document_contract():
     from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata, PackedPaddingMetadata
     from vllm_omni.diffusion.attention.backends.flash_attn import FlashAttentionBackend
 
-    owner = SimpleNamespace(causal=False, effective_attention=lambda: (None, FlashAttentionBackend, None))
+    impl = SimpleNamespace(stable_packed_head_partitions=True)
+    owner = SimpleNamespace(causal=False, effective_attention=lambda: (impl, FlashAttentionBackend, None))
     kernel = MethodType(lambda self: None, owner)
     cu = torch.tensor([0, 239, 256], dtype=torch.int32)
     padding = PackedPaddingMetadata(239, 239, cu[:2], cu[:2])
     extra = dict(cu_seqlens_q=cu, cu_seqlens_k=cu, max_seqlen_q=239, max_seqlen_k=239)
     md = AttentionMetadata(packed_padding=padding, extra=extra)
     assert eligible(kernel, md, 256)
+    impl.stable_packed_head_partitions = False
+    assert not eligible(kernel, md, 256)
+    impl.stable_packed_head_partitions = True
     assert eligible(kernel, replace(md, extra={**extra, "laser_input_scale": 8}), 256)
     for wrong in (
         replace(md, packed_padding=replace(padding, kv_length=238)),
@@ -90,6 +94,19 @@ def test_packed_padding_preserves_document_contract():
         replace(md, joint_key=torch.ones(1, 4, 2, 128)),
     ):
         assert not eligible(kernel, wrong, 256)
+
+
+def test_component_signature_preserves_control_values_except_declared_outputs():
+    from vllm_omni.diffusion.attention.parallel.head_overlap.head_policy import component_signature
+
+    module = SimpleNamespace(_attention_layout_value_only_kwargs=("pdd_step",))
+    values = dict(pdd_step=0, reference_rows=12, x=torch.zeros(1, 4))
+    expected = component_signature(module, (), values)
+    assert component_signature(module, (), {**values, "pdd_step": 1}) == expected
+    assert component_signature(module, (), {**values, "reference_rows": 13}) != expected
+    assert component_signature(module, (), {**values, "x": torch.zeros(1, 5)}) != expected
+    plain = SimpleNamespace()
+    assert component_signature(plain, (), values) != component_signature(plain, (), {**values, "pdd_step": 1})
 
 
 def group_signature(prefix=4055):

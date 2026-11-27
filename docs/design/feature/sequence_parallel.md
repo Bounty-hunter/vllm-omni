@@ -107,10 +107,18 @@ The experimental automatic CE head-partition policy can retain producer-validate
 `[real, pad]` FlashAttention packing: partitioning heads leaves sequence coordinates
 and document boundaries unchanged. Each chunk passes the original cumulative
 lengths to the packed-varlen backend; it must not silently use dense attention.
+This path requires vLLM FA3 and `--fa-deterministic` in both comparison arms.
+That option pins packed FA3 to `num_splits=1`: automatic split-KV can change
+the reduction for small head groups, including trial groups whose output enters
+the model before selection. Without this contract, packed layouts stay native.
 Its signature includes valid Q/KV lengths. Stateful post-parallel cache hooks,
 multi-document batches and compressed gates remain on the ordinary path.
 The two/four-rank numerical regression is
 `tests/diffusion/distributed/test_ulysses_packed_head_overlap.py`.
+It requires bit-exact outputs, including the small-head split-KV boundary.
+Producers may declare `_attention_layout_value_only_kwargs` only for forward
+arguments that cannot affect attention shape, metadata or collective control
+flow. H3's `pdd_step` selects its final output projection and meets this contract.
 
 Benchmark with the flag off and on using the same model, precision, topology,
 sequence shape, concurrency, and warmup. Larger messages and staging copies can

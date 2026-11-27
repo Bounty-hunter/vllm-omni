@@ -19,9 +19,12 @@ component boundary, which may wait for device events and one asynchronous rank-M
 No probe forward is added, but first-use preparation and slow trial choices have real costs.
 
 Producer-validated `[real, pad]` FlashAttention layouts retain their original cumulative lengths and
-packed-varlen kernel when heads are partitioned. Masks, multi-document batches, sparse gates,
+packed-varlen kernel when heads are partitioned. They require vLLM FA3 and `fa_deterministic=True`
+in both arms, which pins split-KV to one partition. The default automatic split-KV heuristic can
+change a small trial group's reduction and propagate numerical differences before selection.
+Without this backend contract, packed layouts stay native. Masks, multi-document batches, sparse gates,
 reference-cache hooks and quantized KV remain outside this experiment. Numerical coverage includes
-`tests/diffusion/distributed/test_ulysses_packed_head_overlap.py` on two and four ranks. This is not a
+`tests/diffusion/distributed/test_ulysses_packed_head_overlap.py` with bit-exact checks on two and four ranks. This is not a
 claim that every packed model has an end-to-end speedup. New layouts during capture, compiled attention,
 incompatible metadata, and unsupported GPUs use native attention.
 

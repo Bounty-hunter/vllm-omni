@@ -61,7 +61,7 @@ def eligible(kernel, metadata, distributed_rows):
     owner = getattr(kernel, "__self__", None)
     if getattr(owner, "causal", None) is not False or not hasattr(owner, "effective_attention"):
         return False
-    _, backend, _ = owner.effective_attention()
+    impl, backend, _ = owner.effective_attention()
     if backend is None or backend.get_name() != "FLASH_ATTN":
         return False
     if metadata is None:
@@ -78,7 +78,9 @@ def eligible(kernel, metadata, distributed_rows):
     ):
         return False
     if metadata.packed_padding is not None:
-        return _packed_padding_eligible(metadata, distributed_rows)
+        return getattr(impl, "stable_packed_head_partitions", False) and _packed_padding_eligible(
+            metadata, distributed_rows
+        )
     layout = metadata.video_layout
     if layout is None:
         if metadata.extra:

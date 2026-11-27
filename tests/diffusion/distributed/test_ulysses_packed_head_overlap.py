@@ -38,9 +38,11 @@ def _worker(rank, init_method, world):
         local_heads = heads // world
         widths = tuple((h, local_heads - h) for h in range(1, local_heads // 2 + 1))
         impl = FlashAttentionImpl(num_heads=local_heads, head_size=dim, softmax_scale=dim**-0.5, causal=False)
+        impl.fa_deterministic = True
+        assert impl.stable_packed_head_partitions, "This regression requires vLLM FA3"
         checks, exact = 0, 0
         with torch.inference_mode():
-            for rows in (128, 257, 1032):
+            for rows in (128, 257, 1032, 2064):
                 total, valid = rows * world, rows * world - 17
                 cu = torch.tensor([0, valid, total], dtype=torch.int32, device=device)
                 md = AttentionMetadata(
@@ -66,14 +68,14 @@ def _worker(rank, init_method, world):
                 reference = native.post_attention(kernel(qq, kk, vv), ctx).clone()
                 for plan in (*plans, *reversed(plans)):
                     actual = plan.run(*inputs, kernel).clone()
-                    torch.testing.assert_close(actual, reference, rtol=1e-2, atol=5e-3)
+                    torch.testing.assert_close(actual, reference, rtol=0, atol=0)
                     exact += int(torch.equal(actual, reference))
                     checks += 1
                 # Padding is a separate document, never a valid key for real rows.
                 local_valid = max(0, min(rows, valid - rank * rows))
                 packed[:, local_valid:] *= 10
                 changed = plans[0].run(*packed.unbind(2), kernel)
-                torch.testing.assert_close(changed[:, :local_valid], reference[:, :local_valid], rtol=1e-2, atol=5e-3)
+                torch.testing.assert_close(changed[:, :local_valid], reference[:, :local_valid], rtol=0, atol=0)
                 dist.barrier(group=group.cpu_group)
         print(f"packed overlap world={world} rank={rank}: {checks} comparisons, {exact} bit-exact", flush=True)
     finally:
