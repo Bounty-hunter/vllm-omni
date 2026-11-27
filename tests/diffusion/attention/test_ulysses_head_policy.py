@@ -49,12 +49,12 @@ def test_candidate_selection_and_fallback():
     for count in range(2, 10):
         for cycle in range(6):
             assert sorted(candidate_index(cycle * count + i, count) for i in range(count)) == list(range(count))
-    for heads in range(2, 17):
+    for heads in range(2, 33):
         choices = candidates(heads, 9216, 132)
         assert len(choices) == heads // 2
         assert all(len(p) == 2 and 0 < p[0] <= p[1] and sum(p) == heads for p in choices)
     assert candidates(8, 512, 132) == ()
-    assert candidates(32, 9216, 132) == ()
+    assert candidates(64, 9216, 132) == ()
     assert candidates(16, 9216, 132)[:2] == ((5, 11), (7, 9))
 
 
@@ -63,6 +63,74 @@ def test_short_trial_requires_three_consistent_gains():
     assert choose([[100] * 2, [80] * 2], minimum=3) == 0
     assert choose([[100] * 3, [80, 80, 105]], minimum=3) == 0
     assert choose([[100] * 3, [96] * 3], minimum=3) == 0
+
+
+def group_signature(prefix=4055):
+    def spec(rows):
+        return (1, rows, 32, 128), (0, 4096, 128, 1), "torch.bfloat16", "cuda"
+
+    return 2, (spec(4608),) * 3, (spec(0), spec(prefix), spec(prefix)), "front", None, 128**-0.5, True
+
+
+@pytest.mark.parametrize("peer_matches", [False, True])
+def test_inline_group_confirms_actual_kv_before_sampling(monkeypatch, peer_matches):
+    from vllm_omni.diffusion.attention.parallel.head_overlap import head_policy as hp
+
+    policy = hp.HeadPolicy(None, 132)
+    names = tuple(str(i) for i in range(32))
+    policy.layer_group = hp.layout_family(group_signature()), names
+    policy.begin_request()
+    policy.component_key = "changed-prompt"
+    current = group_signature(4074)
+    trial = hp.Trial((5, 11), signature=current, alternatives=((7, 9),))
+    policy.discovered[current] = trial
+    policy.discovery = [("0", current)]
+    policy.probe_name = "0"
+    prepares = []
+    monkeypatch.setattr(hp.dist, "get_world_size", lambda group: 2)
+
+    def gather(peers, proposal, group):
+        assert proposal[0] == current  # Current prompt, not the warmup length.
+        peers[:] = [proposal, proposal if peer_matches else None]
+
+    def prepare(key, value):
+        prepares.append(key)
+        value.plan = object()
+        value.timers = [None] * 27
+        policy.pending.add(key)
+
+    monkeypatch.setattr(hp.dist, "all_gather_object", gather)
+    monkeypatch.setattr(policy, "_prepare_trial", prepare)
+    policy._probe_group("0")
+    assert policy.probe_name is None
+    if peer_matches:
+        assert prepares == [current] and policy.discovery is None
+        assert tuple(policy.routes) == names and len(policy.slots) == 27
+        assert "0" not in policy.slots and trial.selected is None
+        group = policy.layer_group
+        policy.begin_request()
+        assert policy.layer_group is group and not policy.layouts and not policy.slots
+    else:
+        assert not prepares and not policy.routes and policy.discovery == [("0", current)]
+
+
+def test_ineligible_first_visit_still_participates_in_group_confirmation(monkeypatch):
+    from vllm_omni.diffusion.attention.parallel.head_overlap import head_policy as hp
+
+    policy = hp.HeadPolicy(None, 132)
+    policy.layer_group = hp.layout_family(group_signature()), ("0", "1")
+    policy.discovery = []
+    calls = []
+    monkeypatch.setattr(hp.dist, "get_world_size", lambda group: 2)
+
+    def gather(peers, proposal, group):
+        calls.append(proposal)
+        peers[:] = [None, (group_signature(), (5, 11), (), ("0", "1"))]
+
+    monkeypatch.setattr(hp.dist, "all_gather_object", gather)
+    monkeypatch.setattr(policy, "_prepare_trial", lambda *args: pytest.fail("Unagreed layout must stay native"))
+    policy._probe_group("0")
+    assert calls == [None] and policy.discovery == [] and not policy.routes
 
 
 def test_all_pairs_fit_one_component_and_commit_on_the_next(monkeypatch):

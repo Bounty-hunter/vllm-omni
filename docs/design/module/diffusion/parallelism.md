@@ -61,8 +61,8 @@ query rows. Join all peer writes before returning. A caller that consumes the re
 attention can borrow the workspace. Other adaptive callers receive an owned tensor. Read trial events only after they
 complete and agree at a component boundary. Graph preparation consumes frozen decisions.
 
-The request-scoped experiment tests small-first two-group partitions (up to eight,
-for at most sixteen rank-local heads). A wave estimate orders candidates but never
+The request-scoped experiment tests small-first two-group partitions (up to sixteen,
+for at most thirty-two rank-local heads). A wave estimate orders candidates but never
 selects the winner. After one native lead call, three rotating/reversed
 native-and-candidate cycles execute in real layers (28 calls for sixteen heads).
 Selection requires three valid rotations and positive paired gains in all three;
@@ -74,6 +74,16 @@ Staging row counts and launch-region boundaries are runtime arguments, so a
 different prompt length reuses compiled code for the same head partition and
 strides. Widths stay specialized; crossing the 32-bit indexing limit selects a
 separate wide-index variant. Workspace growth can still require reconnection.
+
+An agreed, homogeneous layer group discovered during a real warmup request keeps
+only its ordered layer names and layout structure. On subsequent requests its
+first layer confirms the actual Q/KV signature across ranks, including changed
+prefix lengths, before preparing candidates and sampling the remaining layers
+in that same component call. Ineligible peers participate in this confirmation
+with an empty proposal; disagreement retains whole-component native discovery.
+No chosen partition or timings survive request reset. Unseen or heterogeneous
+groups use the original full discovery pass. Sampling may span components when
+the candidate budget exceeds the number of eligible layers.
 
 Sample collection performs no per-layer host synchronization and no per-step
 object collective. Completed events populate one CPU tensor, reduced with MAX

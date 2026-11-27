@@ -35,6 +35,17 @@ def tensor_spec(value):
     return tuple(value.shape), canonical_strides(value), str(value.dtype), value.device.type
 
 
+def layout_family(signature):
+    """A dense layer group's structure, independent of Q/KV lengths and grid size."""
+    world, qkv, joint, placement, grid, scale, borrowed = signature
+
+    def family(spec):
+        shape, strides, dtype, device = spec
+        return (shape[0], *shape[2:]), strides, dtype, device
+
+    return world, tuple(map(family, qkv)), tuple(map(family, joint)), placement, grid is not None, scale, borrowed
+
+
 def choose(samples, *, minimum=6, relative_margin=0.015, absolute_margin_us=5.0):
     """Use position-paired observations and an explicit noise margin."""
     baseline = samples[0]
@@ -84,6 +95,8 @@ def clear():
         policy.slots.clear()
         policy.workspace = None
         policy.prepared = None
+        policy.layer_group = None
+        policy.probe_name = None
 
 
 _PREPARING_GRAPH = ContextVar("ulysses_preparing_graph", default=False)
@@ -140,6 +153,8 @@ class HeadPolicy:
         self.request_scoped = True
         self.workspace = None
         self.prepared = None
+        self.layer_group = None  # Validated layer names/structure, never a choice or samples.
+        self.probe_name = None
         self.active = False
 
     def begin_request(self):
@@ -153,6 +168,7 @@ class HeadPolicy:
         self.discovered.clear()
         self.slots.clear()
         self.discovery = None
+        self.probe_name = None
         self.step = 0
         self.generation = 0
 
@@ -174,6 +190,7 @@ class HeadPolicy:
             self.enabled_for_call = False
             self.discovery = None
             self.routes = {}
+            self.probe_name = None
             return
         self.step += 1
         self.resolve_pending(commit=True)
@@ -183,11 +200,15 @@ class HeadPolicy:
         discover = keys is None and not frozen and len(self.component_layouts) < 16
         self.discovered.clear()
         self.discovery = [] if discover else None
+        self.probe_name = self.layer_group[1][0] if discover and self.layer_group is not None else None
         self.routes = self.visits.get(self.component_key, {})
         self.enabled_for_call = discover or any(
             self.layouts[key].selected or (not frozen and key in self.pending) for key in keys or ()
         )
 
+        self._assign_slots(frozen)
+
+    def _assign_slots(self, frozen=False):
         self.slots = {}
         if self.pending and not frozen:
             for name, trial in self.routes.items():
@@ -198,6 +219,37 @@ class HeadPolicy:
                         self.slots[name] = index
 
     def try_run(self, strategy, layer, q, k, v, md):
+        """First visit confirms a learned group; subsequent visits can sample now."""
+        result = self._try_run(strategy, layer, q, k, v, md)
+        if self.probe_name == strategy.head_layer_name:
+            # Every peer visits this agreed layer, even if its actual metadata
+            # is ineligible. Do not put the collective behind local eligibility.
+            self._probe_group(strategy.head_layer_name)
+        return result
+
+    def _probe_group(self, name):
+        self.probe_name = None
+        signature = next((key for visit, key in self.discovery if visit == name), None)
+        family, names = self.layer_group
+        proposal = None
+        if signature is not None and layout_family(signature) == family:
+            trial = self.layouts.get(signature) or self.discovered[signature]
+            if trial.selected is not False:
+                proposal = signature, trial.widths, trial.alternatives, names
+        peers = [None] * dist.get_world_size(self.group)
+        dist.all_gather_object(peers, proposal, group=self.group)
+        if proposal is None or any(peer != proposal for peer in peers):
+            return  # Whole-component discovery remains native on every rank.
+        trial = self.layouts.setdefault(signature, trial)
+        self.routes = self.visits[self.component_key] = {visit: trial for visit in names}
+        self.component_layouts[self.component_key] = (signature,)
+        self.discovery = None
+        self.discovered.clear()
+        self._prepare_trial(signature, trial)
+        self._assign_slots()
+        logger.info("Ulysses inline preparation: step=%d layers=%d Q=%s", self.step, len(names), signature[1][0][0])
+
+    def _try_run(self, strategy, layer, q, k, v, md):
         """Return None to execute the normal attention path, including native CE."""
         name = strategy.head_layer_name
         trial = self.routes.get(name)
@@ -333,37 +385,13 @@ class HeadPolicy:
             visits = {name: key for name, key in order if agreed and names[name] == 1}
             self.visits[self.component_key] = {name: trials[key] for name, key in visits.items()}
             keys = self.component_layouts[self.component_key] = tuple(dict.fromkeys(visits.values()))
+            # Reuse only an agreed homogeneous group. Its first real layer
+            # will confirm new Q/KV geometry before any future request samples.
+            if len(keys) == 1 and len(visits) == len(order) and trials[keys[0]].selected is not False:
+                self.layer_group = layout_family(keys[0]), tuple(visits)
             for key in keys:
                 trial = self.layouts.setdefault(key, trials[key])
-                if not trial.example:
-                    continue
-                device, pg = trial.example
-                trial.example = ()
-                started = time.perf_counter()
-                try:
-                    plans, trial.timers, reconnect = prepare_local(
-                        lambda: self._prepare(key, trial, device, pg), self.group
-                    )
-                except PreparationError as exc:
-                    logger.warning("Keeping native Ulysses: %s", exc)
-                    trial.selected = False
-                    continue
-                if reconnect:
-                    self.workspace.connect()
-                for plan in plans:
-                    plan.handle = self.workspace.handle
-                    plan.peer_base = self.workspace.peer_base
-                trial.plans = tuple(plans)
-                trial.plan = plans[0]
-                self.prepared = key, trial.plans, trial.timers
-                logger.info(
-                    "Ulysses head preparation: Q=%s candidates=%s prepare_agree_connect_ms=%.3f workspace_mib=%.3f",
-                    key[1][0][0],
-                    [plan.widths for plan in plans],
-                    (time.perf_counter() - started) * 1000,
-                    self.workspace.capacity / 2**20,
-                )
-                self.pending.add(key)
+                self._prepare_trial(key, trial)
             return
         for key in self.pending:
             trial = self.layouts[key]
@@ -373,6 +401,35 @@ class HeadPolicy:
                 # have outrun the GPU; only this boundary may wait for samples.
                 trial.commit_at = self.step + 1
         self.resolve_pending()
+
+    def _prepare_trial(self, key, trial):
+        if not trial.example:
+            return
+        device, pg = trial.example
+        trial.example = ()
+        started = time.perf_counter()
+        try:
+            plans, trial.timers, reconnect = prepare_local(lambda: self._prepare(key, trial, device, pg), self.group)
+        except PreparationError as exc:
+            logger.warning("Keeping native Ulysses: %s", exc)
+            trial.selected = False
+            return
+        if reconnect:
+            self.workspace.connect()
+        for plan in plans:
+            plan.handle = self.workspace.handle
+            plan.peer_base = self.workspace.peer_base
+        trial.plans = tuple(plans)
+        trial.plan = plans[0]
+        self.prepared = key, trial.plans, trial.timers
+        logger.info(
+            "Ulysses head preparation: Q=%s candidates=%s prepare_agree_connect_ms=%.3f workspace_mib=%.3f",
+            key[1][0][0],
+            [plan.widths for plan in plans],
+            (time.perf_counter() - started) * 1000,
+            self.workspace.capacity / 2**20,
+        )
+        self.pending.add(key)
 
     def _prepare(self, key, trial, device, pg):
         if self.prepared is not None and self.prepared[0] == key:

@@ -55,10 +55,10 @@ def estimated_waves(widths, rows, sms):
 def candidates(heads, rows, sms):
     """Rank all small-first pairs by estimated waves; measurements decide.
 
-    Bound the experiment to at most eight pairs. Larger head counts retain
+    Bound the experiment to at most sixteen pairs. Larger head counts retain
     native attention until a separately validated search budget is available.
     """
-    if heads < 2 or heads > 16 or estimated_waves((heads,), rows, sms) < 2:
+    if heads < 2 or heads > 32 or estimated_waves((heads,), rows, sms) < 2:
         return ()
     pairs = [(small, heads - small) for small in range(1, heads // 2 + 1)]
     return tuple(sorted(pairs, key=lambda parts: (estimated_waves(parts, rows, sms), parts[0])))
