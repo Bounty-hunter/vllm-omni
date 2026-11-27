@@ -68,6 +68,10 @@ real layers; the first rotation is discarded. All candidates share one symmetric
 allocation, peer mapping, streams and flags. Their packed views and staging
 launchers are prepared before measurement. The resource owner can reuse the last
 prepared geometry; it retains no winner or timing samples between requests.
+Staging row counts and launch-region boundaries are runtime arguments, so a
+different prompt length reuses compiled code for the same head partition and
+strides. Widths stay specialized; crossing the 32-bit indexing limit selects a
+separate wide-index variant. Workspace growth can still require reconnection.
 
 Sample collection performs no per-layer host synchronization and no per-step
 object collective. Completed events populate one CPU tensor, reduced with MAX

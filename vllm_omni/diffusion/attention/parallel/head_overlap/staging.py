@@ -7,15 +7,16 @@ from itertools import accumulate
 from vllm.triton_utils import tl, triton
 
 
-@triton.jit(do_not_specialize=["sources", "destinations"])
+@triton.jit(do_not_specialize=["sources", "destinations", "rows", "ends"])
 def _stage(
     sources,
     destinations,
     widths: tl.constexpr,
     pitches: tl.constexpr,
-    rows: tl.constexpr,
-    ends: tl.constexpr,
+    rows,
+    ends,
     column: tl.constexpr,
+    wide_offsets: tl.constexpr,
     block: tl.constexpr,
 ):
     tile = tl.program_id(0)
@@ -24,7 +25,7 @@ def _stage(
             local_tile = tile - ends[i]
             # A fused V row can have three times the packed pitch. Large video
             # layouts can cross 2^31 elements even when one destination cannot.
-            if rows[i] * widths[i] + block >= 2**31 or rows[i] * pitches[i] + column + widths[i] >= 2**31:
+            if wide_offsets[i]:
                 local_tile = local_tile.to(tl.int64)
             offset = local_tile * block + tl.arange(0, block)
             row, col = offset // widths[i], offset % widths[i]
@@ -35,13 +36,22 @@ def _stage(
 
 
 def prepare_staging(targets, pitches, column):
-    """Compile and load before rank agreement. Only source pointers vary between layers."""
+    """Prepare a launcher without specializing on query or prefix KV length.
+
+    Widths and pitches retain constant-division optimization. Runtime row counts
+    and tile boundaries let another prompt reuse the compiled kernel, including
+    across alignment boundaries. Only crossing the 32-bit address limit changes
+    the index-width specialization.
+    """
     block = 1024
     destinations = tuple(t.data_ptr() for t in targets)
     widths = tuple(t.shape[2] * t.shape[3] for t in targets)
     rows = tuple(t.shape[1] for t in targets)
     ends = tuple(accumulate((triton.cdiv(w * r, block) for w, r in zip(widths, rows, strict=True)), initial=0))
-    args = (destinations, widths, pitches, rows, ends, column, block)
+    wide_offsets = tuple(
+        r * w + block >= 2**31 or r * p + column + w >= 2**31 for r, w, p in zip(rows, widths, pitches, strict=True)
+    )
+    args = (destinations, widths, pitches, rows, ends, column, wide_offsets, block)
     grid = (ends[-1], 1, 1)
     # A mapped workspace address has the same 64-bit argument type as each
     # incoming tensor pointer. warmup loads the module without a probe launch.
