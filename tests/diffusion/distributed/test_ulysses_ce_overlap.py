@@ -67,7 +67,7 @@ def _check_uneven(group, device, rank):
         return head_policy.HeadPolicy._prepare(*args)
 
     with (
-        patch.object(head_policy, "candidate", return_value=(((8,), (3, 5)), 0)),
+        patch.object(head_policy, "candidates", return_value=((1, 6, 1), (3, 5))),
         patch.object(policy, "_prepare", prepare),
     ):
         policy.begin_component(None, (), {})
@@ -91,17 +91,15 @@ def _check_uneven(group, device, rank):
     for front in (False, True):
         kv = [torch.cat((p, x) if front else (x, p), dim=1) for p, x in zip(prefix, (k, v))]
         expected = _attention(q, *kv)[:, rank * s : (rank + 1) * s]
-        for tail in (0, s // 2, s):
-            if tail == s:
-                # Use production staging prep on the same strided QKV and both prefix placements.
-                qkv_spec = tuple(head_policy.tensor_spec(x) for x in inputs)
-                joint_spec = tuple(head_policy.tensor_spec(x) for x in (q[:, :0], *prefix))
-                key = (2, qkv_spec, joint_spec, "front" if front else "rear")
-                plan, _ = policy._prepare(key, head_policy.Trial((3, 5), tail), device, group.ulysses_group)
-                plan.connect()
-                assert len(plan.staging) == 2
-            else:
-                plan._configure(s, h, d, (3, 5), q.dtype, prefix=19, front=front, tail=tail)
+        qkv_spec = tuple(head_policy.tensor_spec(x) for x in inputs)
+        joint_spec = tuple(head_policy.tensor_spec(x) for x in (q[:, :0], *prefix))
+        key = (2, qkv_spec, joint_spec, "front" if front else "rear")
+        prepared, _ = policy._prepare(
+            key, head_policy.Trial((1, 6, 1), alternatives=((2, 4, 2), (3, 5))), device, group.ulysses_group
+        )
+        for plan in prepared:
+            plan.connect()
+            assert len(plan.staging) == len(plan.widths) and plan.tail == 0
             actual = plan.run(*inputs, _attention, joint_kv=prefix)
             torch.testing.assert_close(actual, expected, rtol=1e-2, atol=5e-3)
 

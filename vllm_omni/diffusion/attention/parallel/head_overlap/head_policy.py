@@ -17,7 +17,7 @@ from vllm.logger import init_logger
 from vllm_omni.diffusion.cuda_graph import kwargs_signature
 
 from ..ulysses_ce_overlap import CEOverlapUlysses, PreparationError, prepare_local
-from .query_tail import candidate, eligible
+from .head_candidates import candidates, eligible
 
 
 def canonical_strides(value):
@@ -112,12 +112,13 @@ def frozen_graph_policy(original_context):
 @dataclass
 class Trial:
     widths: tuple
-    tail_rows: int
     signature: tuple = ()
+    alternatives: tuple = ()
     example: tuple = ()
     observations: dict = field(default_factory=dict)
     timers: list = field(default_factory=list)
     plan: CEOverlapUlysses | None = None
+    fallback_plans: list = field(default_factory=list)
     seen: int = 0
     selected: bool | None = None
 
@@ -227,9 +228,12 @@ class HeadPolicy:
             )
             trial = self.layouts.get(signature) or self.discovered.get(signature)
             if trial is None and len(self.layouts) + len(self.discovered) < 16:
-                choices, tail = candidate(q.shape[2] // world, q.shape[1] * world, world, self.sms)
-                trial = self.discovered[signature] = Trial(choices[-1], tail, signature)
-                if len(choices) == 1:
+                heads = q.shape[2] // world
+                choices = candidates(heads, q.shape[1] * world, self.sms)
+                trial = self.discovered[signature] = Trial(
+                    choices[0] if choices else (heads,), signature, alternatives=choices[1:]
+                )
+                if not choices:
                     trial.selected = False
                 else:
                     trial.example = (q.device, strategy._ulysses_pg)
@@ -286,7 +290,7 @@ class HeadPolicy:
             # native/split collectives even if the set of layouts agreed.
             trials = self.layouts | self.discovered
             self.discovered.clear()
-            info = [(name, key, trials[key].widths, trials[key].tail_rows) for name, key in order]
+            info = [(name, key, trials[key].widths, trials[key].alternatives) for name, key in order]
             peers = [None] * dist.get_world_size(self.group)
             dist.all_gather_object(peers, info, group=self.group)
             agreed = all(peer == info for peer in peers)
@@ -303,18 +307,35 @@ class HeadPolicy:
                 device, pg = trial.example
                 trial.example = ()
                 try:
-                    trial.plan, trial.timers = prepare_local(lambda: self._prepare(key, trial, device, pg), self.group)
+                    plans, trial.timers = prepare_local(lambda: self._prepare(key, trial, device, pg), self.group)
                 except PreparationError as exc:
                     logger.warning("Keeping native Ulysses: %s", exc)
                     trial.selected = False
                     continue
-                trial.plan.connect()
+                for plan in plans:
+                    plan.connect()
+                trial.plan, *trial.fallback_plans = plans
                 self.pending.add(key)
             return
         self.resolve_pending(self.component_key)
 
     @staticmethod
     def _prepare(key, trial, device, pg):
+        # Prepare both phases before sampling; switching after a failed trial
+        # only swaps plans and reuses completed events. No new forward, local
+        # allocation, compilation or device synchronization at that boundary.
+        plans = [HeadPolicy._prepare_plan(key, widths, device, pg) for widths in (trial.widths, *trial.alternatives)]
+        timers = [(torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)) for _ in range(_SAMPLES)]
+        for plan in plans:
+            for event in (*plan.ev_attn, *plan.ev_in_done.values(), *plan.ev_out_done.values(), plan.ev_inputs):
+                event.record()
+        for start, end in timers:
+            start.record()
+            end.record()
+        return plans, timers
+
+    @staticmethod
+    def _prepare_plan(key, widths, device, pg):
         _, qkv, joint, placement, *_ = key
         _, rows, heads, dim = qkv[0][0]
         plan = CEOverlapUlysses(pg, device=device)
@@ -322,11 +343,10 @@ class HeadPolicy:
             rows,
             heads,
             dim,
-            trial.widths,
+            widths,
             torch.bfloat16,
             prefix=joint[1][0][1] if joint else 0,
             front=placement == "front",
-            tail=trial.tail_rows,
             defer_rendezvous=True,
         )
         if not plan.self_inputs:
@@ -335,7 +355,7 @@ class HeadPolicy:
             pitches = tuple(spec[1][1] for spec in (*qkv, *(joint[1:] if plan.prefix else ())))
             try:
                 plan.staging = tuple(
-                    prepare_staging((*parts, *prefix), pitches, (plan.rank * sum(trial.widths) + offset) * dim)
+                    prepare_staging((*parts, *prefix), pitches, (plan.rank * sum(widths) + offset) * dim)
                     for parts, prefix, offset in zip(plan.local_inputs, plan.prefix_inputs, plan.offsets, strict=True)
                 )
             except torch.AcceleratorError:
@@ -343,13 +363,7 @@ class HeadPolicy:
             except Exception as exc:
                 # The optional staging compiler has not issued peer work yet.
                 raise PreparationError(f"Could not compile local Ulysses staging: {exc}") from exc
-        timers = [(torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)) for _ in range(_SAMPLES)]
-        for event in (*plan.ev_attn, *plan.ev_in_done.values(), *plan.ev_out_done.values(), plan.ev_inputs):
-            event.record()
-        for start, end in timers:
-            start.record()
-            end.record()
-        return plan, timers
+        return plan
 
     def resolve_pending(self, component_key):
         """Read completed measurements without waiting on the GPU."""
@@ -381,18 +395,33 @@ class HeadPolicy:
                 for i, values in enumerate(zip(*rows, strict=True)):
                     choices[candidate_index(i)].append(values)
             samples = qualified_cycles(choices)
-            trial.selected = bool(choose(samples))
+            selected = bool(choose(samples))
+            logger.info(
+                "Ulysses head trial: Q=%s candidate=%s qualified_pairs=%d native_us=%s split_us=%s accepted=%s",
+                key[1][0][0],
+                trial.widths,
+                len(samples[0]),
+                statistics.median(samples[0]) if samples[0] else None,
+                statistics.median(samples[1]) if samples[1] else None,
+                selected,
+            )
+            trial.observations.clear()
+            if not selected and trial.fallback_plans and all(rows):
+                trial.plan = trial.fallback_plans.pop(0)
+                trial.widths = trial.plan.widths
+                trial.seen = 0
+                continue
+            trial.selected = selected
             self.generation += int(trial.selected)
             logger.info(
-                "Ulysses head overlap: Q=%s heads=%s local_query_tail=%d qualified_pairs=%d",
+                "Ulysses head overlap: Q=%s heads=%s local_query_tail=0 qualified_pairs=%d",
                 key[1][0][0],
                 trial.widths if trial.selected else (sum(trial.widths),),
-                trial.tail_rows if trial.selected else 0,
                 len(samples[0]),
             )
             self.pending.discard(key)
-            trial.observations.clear()
             trial.timers.clear()
+            trial.fallback_plans.clear()
             if not trial.selected:
                 trial.plan = None
 

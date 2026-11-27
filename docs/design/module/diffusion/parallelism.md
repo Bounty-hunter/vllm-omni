@@ -61,6 +61,12 @@ query rows. Join all peer writes before returning. A caller that consumes the re
 attention can borrow the workspace. Other adaptive callers receive an owned tensor. Read trial events only after they
 complete and agree at a component boundary. Graph preparation consumes frozen decisions.
 
+The experimental head-only policy first measures a small/large/small partition. Only if it fails
+the timing margin does it measure a two-group fallback. Both plans are prepared during layout
+discovery; a phase change reuses completed timing events and only swaps the prepared plan.
+Query rows keep their native order and are never subdivided. A winning phase or exhausted
+fallback freezes the decision and removes trial timing. Incomplete graph-time trials stay native.
+
 ## Safe-change guide
 
 Test topology validation, single-rank execution, affected parallel modes,

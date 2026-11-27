@@ -212,7 +212,7 @@ def test_auto_capture_uses_current_component_layout(monkeypatch):
     for length, split in ((512, False), (4096, True)):
         policy.begin_component(None, (), {"length": length})
         policy.component_layouts[policy.component_key] = (length,)
-        policy.layouts[length] = Trial((1, 7), 0, selected=split)
+        policy.layouts[length] = Trial((1, 7), selected=split)
     with frozen_graph_policy(nullcontext):
         for length, expected in ((4096, True), (512, False), (1024, False), (4096, True)):
             policy.begin_component(None, (), {"length": length})

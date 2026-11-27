@@ -8,13 +8,13 @@ from types import MethodType, SimpleNamespace
 import pytest
 import torch
 
+from vllm_omni.diffusion.attention.parallel.head_overlap.head_candidates import candidates, eligible
 from vllm_omni.diffusion.attention.parallel.head_overlap.head_policy import candidate_index, choose
-from vllm_omni.diffusion.attention.parallel.head_overlap.query_tail import candidate, eligible
 
 pytestmark = [pytest.mark.core_model, pytest.mark.cpu, pytest.mark.diffusion]
 
 
-def test_video_query_tail():
+def test_dense_video_eligibility():
     from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata, VideoTokenLayout
     from vllm_omni.diffusion.attention.backends.flash_attn import FlashAttentionBackend
 
@@ -49,10 +49,15 @@ def test_candidate_selection_and_fallback():
     assert [candidate_index(i) for i in range(8)] == [0, 1, 1, 0, 1, 0, 0, 1]
     for heads in (1, 5, 8, 10, 16):
         for rows in (512, 1024, 4096, 14040):
-            choices, tail = candidate(heads, rows, 4, 120)
-            assert choices[0] == (heads,)
+            choices = candidates(heads, rows, 120)
             assert len(choices) <= 2 and all(sum(parts) == heads and min(parts) > 0 for parts in choices)
-            assert 0 <= tail <= rows // 4
+            assert [len(parts) for parts in choices] == sorted((len(parts) for parts in choices), reverse=True)
+            for parts in choices:
+                if len(parts) == 3:
+                    assert parts[0] == parts[-1] <= parts[1]
+    assert candidates(8, 512, 120) == ()
+    assert candidates(8, 15360, 120) == ((1, 6, 1), (1, 7))
+    assert candidates(2, 15360, 120) == ((1, 1),)
 
 
 def test_mismatched_layer_order_skips_collective_preparation(monkeypatch):
@@ -67,7 +72,7 @@ def test_mismatched_layer_order_skips_collective_preparation(monkeypatch):
     monkeypatch.setattr(head_policy.dist, "all_gather_object", gather)
     policy = head_policy.HeadPolicy(None, 120)
     policy.component_key = "shape"
-    policy.discovered["layout"] = head_policy.Trial((3, 5), 0, example=("cuda", "pg"))
+    policy.discovered["layout"] = head_policy.Trial((3, 5), example=("cuda", "pg"))
     policy.discovery = [("first", "layout"), ("second", "layout")]
     policy.finish_component(None, (), None)
     assert policy.visits["shape"] == {}
@@ -97,7 +102,7 @@ def test_one_decision_from_slowest_rank(monkeypatch, peer_split_us, expected):
 
     policy = hp.HeadPolicy(None, 120)
     key = (2, (((1, 127, 16, 64),),))
-    trial = hp.Trial((3, 5), 0, seen=hp._UNTIMED + hp._SAMPLES)
+    trial = hp.Trial((3, 5), seen=hp._UNTIMED + hp._SAMPLES)
     policy.component_layouts["request"] = (key,)
     policy.layouts[key] = trial
     policy.pending.add(key)
@@ -119,3 +124,51 @@ def test_one_decision_from_slowest_rank(monkeypatch, peer_split_us, expected):
     assert trial.selected is expected and not policy.pending and not trial.observations
     policy.resolve_pending("request")
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize("triple_us,pair_us,expected", [(80, 70, (1, 6, 1)), (103, 85, (1, 7)), (103, 102, None)])
+def test_three_groups_before_two_without_new_resources(monkeypatch, triple_us, pair_us, expected):
+    from vllm_omni.diffusion.attention.parallel.head_overlap import head_policy as hp
+
+    key = (2, (((1, 127, 16, 64),),))
+    policy = hp.HeadPolicy(None, 120)
+    triple = SimpleNamespace(widths=(1, 6, 1))
+    pair = SimpleNamespace(widths=(1, 7))
+    timers = [object() for _ in range(hp._SAMPLES)]
+    trial = hp.Trial(triple.widths, plan=triple, fallback_plans=[pair], timers=timers)
+    policy.layouts[key] = trial
+    policy.component_layouts["request"] = (key,)
+    policy.pending.add(key)
+    monkeypatch.setattr(hp.dist, "get_world_size", lambda group: 2)
+    calls = []
+
+    def gather(peers, local, group):
+        calls.append(1)
+        peers[:] = [local, local]
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("Phase transition must not prepare resources or synchronize")
+
+    monkeypatch.setattr(hp.dist, "all_gather_object", gather)
+    monkeypatch.setattr(policy, "_prepare", unexpected)
+    monkeypatch.setattr(torch.accelerator, "synchronize", unexpected)
+    for cost in (triple_us, pair_us):
+        trial.seen = hp._UNTIMED + hp._SAMPLES
+        for i in range(hp._SAMPLES):
+            us = cost if hp.candidate_index(i) else 100.0
+            trial.observations[i] = (
+                SimpleNamespace(elapsed_time=lambda _, us=us: us / 1000),
+                SimpleNamespace(query=lambda: True),
+                True,
+            )
+        policy.resolve_pending("request")
+        if trial.selected is not None:
+            break
+        assert trial.plan is pair and trial.widths == (1, 7) and trial.seen == 0
+        assert trial.timers is timers and len(timers) == hp._SAMPLES
+        assert not trial.observations and key in policy.pending
+    assert (trial.widths if trial.selected else None) == expected
+    assert not policy.pending and not trial.timers and not trial.fallback_plans
+    assert len(calls) == (1 if expected == (1, 6, 1) else 2)
+    policy.resolve_pending("request")
+    assert len(calls) == (1 if expected == (1, 6, 1) else 2)

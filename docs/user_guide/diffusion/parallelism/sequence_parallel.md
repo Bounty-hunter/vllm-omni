@@ -259,7 +259,10 @@ On NPU, the flag retains the existing
 On a single SM90 node using dense, noncausal BF16 FA3, enable runtime selection with
 `--ulysses-degree 4 --ulysses-a2a-backend copy_engine --ulysses-overlap-chunks auto`.
 This also works with `Omni(..., ulysses_overlap_chunks="auto")`. The first real forwards for a layout
-prepare and time an uneven split against native packed-QKV CE. The worker logs the selected heads per rank
+prepare a small/large/small head split and a small/large fallback, without splitting query rows.
+Real layers first compare the three groups against native packed-QKV CE. If this does not clear the
+timing margin, later real layers compare the two-group fallback; no extra forwards are run.
+The worker logs each trial and the selected heads per rank
 and keeps one group when the split does not clear the timing margin. Unsupported attention stays native.
 With CUDA-graphed denoising, the default transport selects NCCL and skips head overlap.
 The initial eager request includes exploration. Measure it separately from steady-state latency.
@@ -268,7 +271,7 @@ The trial layers contribute their real outputs to the first request. Head groupi
 floating-point rounding, including for a layout that later selects native attention. Numerical equivalence is
 tested with tolerances. A replicated reference K/V prefix is supported when its joint query has zero rows
 (Qwen Image 2.1 decode). A nonempty joint query uses native Ulysses. Fixed and automatic splits share the CE
-transport. The automatic policy compares one candidate against the unsplit, configured native path.
+transport. Each phase compares one candidate against the unsplit, configured native path.
 
 ## Best Practices
 

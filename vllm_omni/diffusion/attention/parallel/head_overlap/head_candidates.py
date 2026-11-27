@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
-"""Early remote output from the last head group of dense, noncausal attention."""
+"""Conservative dense layouts and pure head partitions for real-layer trials."""
 
 import math
 
@@ -46,28 +46,23 @@ def eligible(kernel, metadata, distributed_rows):
     )
 
 
-def candidate(heads, rows, world, sms):
-    """Propose the smallest leading head group and a useful local Q tail.
+def candidates(heads, rows, sms):
+    """Try small/large/small heads first, then small/large, then stay native.
 
-    The 128-row SM90 wave estimate just bounds the real-prefix candidates.
-    Prefer the full local return. A half tail is useful near a wave boundary.
+    This SM90 estimate is only a candidate filter, not a measured launch grid.
+    Keep the smallest edge groups that do not add estimated compute waves.
+    Every candidate still has to beat native CE in real-layer measurements;
+    the estimate alone cannot establish that an edge hides enough transfer.
     """
 
-    def waves(length, width):
-        return math.ceil(math.ceil(length / 128) * width / sms)
+    def waves(width):
+        return math.ceil(math.ceil(rows / 128) * width / sms)
 
-    local = rows // world
-    head_only = ((heads,),)
-    for first in range(1, heads // 2 + 1):
-        last = heads - first
-        if waves(rows, first) + waves(rows, last) > waves(rows, heads):
-            continue
-        choices = ((heads,), (first, last))
-        if len(head_only) == 1:
-            head_only = choices
-        for tail in (local, local // 2):
-            if tail and waves(rows - tail, last) + waves(tail, last) <= waves(rows, last):
-                return choices, tail
-    # A useful split can leave only one wave in its second group. In that
-    # case ordinary head overlap can still win the real-layer comparison.
-    return head_only, 0
+    choices = []
+    for groups in (3, 2):
+        for edge in range(1, heads // groups + 1):
+            widths = (edge, heads - 2 * edge, edge) if groups == 3 else (edge, heads - edge)
+            if sum(waves(width) for width in widths) <= waves(heads):
+                choices.append(widths)
+                break
+    return tuple(choices)
