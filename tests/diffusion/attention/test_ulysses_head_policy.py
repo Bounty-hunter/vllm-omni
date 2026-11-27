@@ -50,17 +50,17 @@ def test_candidate_selection_and_fallback():
     for heads in (1, 5, 8, 10, 16):
         for rows in (512, 1024, 4096, 14040):
             choices = candidates(heads, rows, 120)
-            assert len(choices) <= 2 and all(sum(parts) == heads and min(parts) > 0 for parts in choices)
+            assert len(choices) <= 6 and all(sum(parts) == heads and min(parts) > 0 for parts in choices)
             assert [len(parts) for parts in choices] == sorted((len(parts) for parts in choices), reverse=True)
             for parts in choices:
                 if len(parts) == 3:
                     assert parts[0] == parts[-1] <= parts[1]
     assert candidates(8, 512, 120) == ()
-    assert candidates(8, 15360, 120) == ((1, 6, 1), (1, 7))
+    assert candidates(8, 15360, 120) == ((1, 6, 1), (2, 4, 2), (1, 7))
     assert candidates(2, 15360, 120) == ((1, 1),)
     # Qwen 1536^2: the three-group estimate adds one wave. It must reach
     # real-layer sampling rather than silently becoming a two-group-only test.
-    assert candidates(16, 9216, 132) == ((1, 14, 1), (5, 11))
+    assert candidates(16, 9216, 132) == ((1, 14, 1), (2, 12, 2), (3, 10, 3), (4, 8, 4), (5, 6, 5), (5, 11))
 
 
 def test_mismatched_layer_order_skips_collective_preparation(monkeypatch):
@@ -105,7 +105,7 @@ def test_one_decision_from_slowest_rank(monkeypatch, peer_split_us, expected):
 
     policy = hp.HeadPolicy(None, 120)
     key = (2, (((1, 127, 16, 64),),))
-    trial = hp.Trial((3, 5), seen=hp._UNTIMED + hp._SAMPLES)
+    trial = hp.Trial((3, 5), plan=SimpleNamespace(widths=(3, 5)), seen=hp._UNTIMED + hp._SAMPLES)
     policy.component_layouts["request"] = (key,)
     policy.layouts[key] = trial
     policy.pending.add(key)
@@ -175,3 +175,79 @@ def test_three_groups_before_two_without_new_resources(monkeypatch, triple_us, p
     assert len(calls) == (1 if expected == (1, 6, 1) else 2)
     policy.resolve_pending("request")
     assert len(calls) == (1 if expected == (1, 6, 1) else 2)
+
+
+@pytest.mark.parametrize(
+    "costs,expected,phases",
+    [
+        ([(90, 90), (80, 80), (70, 70), (65, 65), (60, 60), (50, 50)], (5, 6, 5), 5),
+        ([(80, 80), (95, 95), (70, 70), (90, 90), (85, 85), (50, 50)], (3, 10, 3), 5),
+        ([(80, 80), (79, 79), (70, 70), (69, 69), (60, 60), (50, 50)], (5, 6, 5), 5),
+        ([(110, 110), (109, 109), (80, 80), (90, 90), (95, 95), (50, 50)], (3, 10, 3), 5),
+        ([(110, 110), (109, 109), (108, 108), (107, 107), (106, 106), (80, 80)], (5, 11), 6),
+        ([(110, 110), (109, 109), (108, 108), (107, 107), (106, 106), (102, 102)], None, 6),
+        ([(80, 80), (95, 95), (90, 90), (50, 50), (40, 40), (30, 30)], (1, 14, 1), 3),
+        ([(80, 80), (70, 70), (90, 90), (50, 50), (40, 40), (30, 30)], (2, 12, 2), 3),
+        # The faster rank cannot keep promoting a candidate that regresses on its peer.
+        ([(80, 90), (60, 120), (60, 110), (50, 50), (40, 40), (30, 30)], (1, 14, 1), 3),
+    ],
+)
+def test_search_compares_incumbent_and_stops_after_regression(monkeypatch, costs, expected, phases):
+    from vllm_omni.diffusion.attention.parallel.head_overlap import head_policy as hp
+
+    key = (2, (((1, 4608, 32, 128),),))
+    widths = ((1, 14, 1), (2, 12, 2), (3, 10, 3), (4, 8, 4), (5, 6, 5), (5, 11))
+    monkeypatch.setattr(hp.dist, "get_world_size", lambda group: 2)
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("Search phases must not allocate resources or synchronize the device")
+
+    monkeypatch.setattr(hp.HeadPolicy, "_prepare", unexpected)
+    monkeypatch.setattr(torch.accelerator, "synchronize", unexpected)
+    outcomes = []
+    for rank in range(2):
+        policy = hp.HeadPolicy(None, 132)
+        plans = [SimpleNamespace(widths=w) for w in widths]
+        timers = [object() for _ in range(hp._SAMPLES)]
+        trial = hp.Trial(widths[0], plan=plans[0], fallback_plans=plans[1:], timers=timers)
+        policy.layouts[key] = trial
+        policy.component_layouts["request"] = (key,)
+        policy.pending.add(key)
+        calls = []
+        while policy.pending:
+            index = widths.index(trial.widths)
+            reference = costs[widths.index(trial.best_plan.widths)] if trial.best_plan else (100, 100)
+            reports = [
+                {
+                    key: [
+                        (costs[index][peer] if hp.candidate_index(i) else reference[peer], True)
+                        for i in range(hp._SAMPLES)
+                    ]
+                }
+                for peer in range(2)
+            ]
+
+            def gather(peers, local, group):
+                calls.append(1)
+                assert local == reports[rank]
+                peers[:] = reports
+
+            monkeypatch.setattr(hp.dist, "all_gather_object", gather)
+            trial.seen = hp._UNTIMED + hp._SAMPLES
+            for i, (us, queued) in enumerate(reports[rank][key]):
+                trial.observations[i] = (
+                    SimpleNamespace(elapsed_time=lambda _, us=us: us / 1000),
+                    SimpleNamespace(query=lambda: True),
+                    queued,
+                )
+            policy.resolve_pending("request")
+            assert not trial.observations
+            if policy.pending:
+                assert trial.timers is timers and len(timers) == hp._SAMPLES and trial.seen == 0
+            assert len(calls) <= len(widths)
+        outcomes.append(trial.widths if trial.selected else None)
+        assert outcomes[-1] == expected and len(calls) == phases
+        assert not trial.timers and not trial.fallback_plans and trial.best_plan is None
+        policy.resolve_pending("request")
+        assert len(calls) == phases
+    assert outcomes[0] == outcomes[1]

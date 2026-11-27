@@ -4,6 +4,7 @@
 
 import math
 import statistics
+import time
 from collections import Counter
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -17,7 +18,7 @@ from vllm.logger import init_logger
 from vllm_omni.diffusion.cuda_graph import kwargs_signature
 
 from ..ulysses_ce_overlap import CEOverlapUlysses, PreparationError, prepare_local
-from .head_candidates import candidates, eligible
+from .head_candidates import candidates, eligible, estimated_waves
 
 
 def canonical_strides(value):
@@ -118,6 +119,7 @@ class Trial:
     observations: dict = field(default_factory=dict)
     timers: list = field(default_factory=list)
     plan: CEOverlapUlysses | None = None
+    best_plan: CEOverlapUlysses | None = None
     fallback_plans: list = field(default_factory=list)
     seen: int = 0
     selected: bool | None = None
@@ -255,23 +257,23 @@ class HeadPolicy:
 
         kernel = layer._run_local_attention
 
-        def split():
+        def split(plan):
             metadata = replace(md, joint_query=None, joint_key=None, joint_value=None) if joint else md
-            out = trial.plan.run(
-                q, k, v, lambda a, b, c: kernel(a, b, c, metadata), joint_kv=joint[1:] if trial.plan.prefix else ()
+            out = plan.run(
+                q, k, v, lambda a, b, c: kernel(a, b, c, metadata), joint_kv=joint[1:] if plan.prefix else ()
             )
             return out if layer.borrow_ulysses_output else out.clone()
 
         if trial.selected:
-            return split()
+            return split(trial.plan)
         index = self.slots.pop(name, None)
         if index is None:
             return None
         start, end = trial.timers[index]
-        choice = candidate_index(index)
+        plan = trial.plan if candidate_index(index) else trial.best_plan
         start.record()
-        if choice:
-            result = split()
+        if plan is not None:
+            result = split(plan)
         else:
             qq, kk, vv, native_md, ctx = strategy.pre_attention(q, k, v, md)
             result = strategy.post_attention(kernel(qq, kk, vv, native_md), ctx)
@@ -306,6 +308,7 @@ class HeadPolicy:
                     continue
                 device, pg = trial.example
                 trial.example = ()
+                started = time.perf_counter()
                 try:
                     plans, trial.timers = prepare_local(lambda: self._prepare(key, trial, device, pg), self.group)
                 except PreparationError as exc:
@@ -315,13 +318,20 @@ class HeadPolicy:
                 for plan in plans:
                     plan.connect()
                 trial.plan, *trial.fallback_plans = plans
+                logger.info(
+                    "Ulysses head preparation: Q=%s candidates=%s prepare_agree_connect_ms=%.3f workspace_mib=%.3f",
+                    key[1][0][0],
+                    [plan.widths for plan in plans],
+                    (time.perf_counter() - started) * 1000,
+                    sum(plan.capacity for plan in plans) / 2**20,
+                )
                 self.pending.add(key)
             return
         self.resolve_pending(self.component_key)
 
     @staticmethod
     def _prepare(key, trial, device, pg):
-        # Prepare both phases before sampling; switching after a failed trial
+        # Prepare bounded candidates before sampling; switching between trials
         # only swaps plans and reuses completed events. No new forward, local
         # allocation, compilation or device synchronization at that boundary.
         plans = [HeadPolicy._prepare_plan(key, widths, device, pg) for widths in (trial.widths, *trial.alternatives)]
@@ -395,23 +405,53 @@ class HeadPolicy:
                 for i, values in enumerate(zip(*rows, strict=True)):
                     choices[candidate_index(i)].append(values)
             samples = qualified_cycles(choices)
-            selected = bool(choose(samples))
+            accepted = bool(choose(samples))
+            worse = bool(choose(samples[::-1]))
             logger.info(
-                "Ulysses head trial: Q=%s candidate=%s qualified_pairs=%d native_us=%s split_us=%s accepted=%s",
+                "Ulysses head trial: Q=%s reference=%s candidate=%s qualified_pairs=%d "
+                "reference_us=%s candidate_us=%s accepted=%s worse=%s",
                 key[1][0][0],
+                trial.best_plan.widths if trial.best_plan else (sum(trial.widths),),
                 trial.widths,
                 len(samples[0]),
                 statistics.median(samples[0]) if samples[0] else None,
                 statistics.median(samples[1]) if samples[1] else None,
-                selected,
+                accepted,
+                worse,
             )
             trial.observations.clear()
-            if not selected and trial.fallback_plans and all(rows):
+            if accepted:
+                trial.best_plan = trial.plan
+            stop = False
+            if trial.best_plan is not None and worse:
+                # A regression on a wave-count bump may precede a better
+                # boundary (e.g. 1/14/1 -> 2/12/2 -> 3/10/3). Give the next
+                # lower-wave candidate a real comparison before stopping.
+                groups = len(trial.widths)
+                length = key[0] * key[1][0][0][1]
+                cost = estimated_waves(trial.widths, length, self.sms)
+                stop = not any(
+                    len(plan.widths) == groups and estimated_waves(plan.widths, length, self.sms) < cost
+                    for plan in trial.fallback_plans
+                )
+            # Before the first win, a too-small edge does not rule out larger
+            # edges. Afterwards stop on a reliable regression, not a noisy tie.
+            # A winning three-group plan keeps priority over the two-group fallback.
+            advance = (
+                all(rows)
+                and not stop
+                and trial.fallback_plans
+                and (trial.best_plan is None or len(trial.fallback_plans[0].widths) == len(trial.best_plan.widths))
+            )
+            if advance:
                 trial.plan = trial.fallback_plans.pop(0)
                 trial.widths = trial.plan.widths
                 trial.seen = 0
                 continue
-            trial.selected = selected
+            trial.plan = trial.best_plan
+            trial.best_plan = None
+            trial.selected = trial.plan is not None
+            trial.widths = trial.plan.widths if trial.plan else (sum(trial.widths),)
             self.generation += int(trial.selected)
             logger.info(
                 "Ulysses head overlap: Q=%s heads=%s local_query_tail=0 qualified_pairs=%d",

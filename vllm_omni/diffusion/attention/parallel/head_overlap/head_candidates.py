@@ -46,31 +46,34 @@ def eligible(kernel, metadata, distributed_rows):
     )
 
 
+def estimated_waves(widths, rows, sms):
+    """SM90 candidate-ordering estimate, not an observed kernel launch grid."""
+    tiles = math.ceil(rows / 128)
+    return sum(math.ceil(tiles * width / sms) for width in widths)
+
+
 def candidates(heads, rows, sms):
     """Try small/large/small heads first, then small/large, then stay native.
 
     This SM90 estimate is only a candidate filter, not a measured launch grid.
-    Minimize estimated compute waves, then edge size. Allow one extra wave:
-    avoiding it entirely would reject useful overlap without measuring it.
+    Measure the first five symmetric partitions, including wave-count bumps.
+    This bounded experiment does not exclude a triple based on its wave cost:
+    extra compute may still buy more hidden communication.
     Every candidate still has to beat native CE in real-layer measurements;
     the estimate alone cannot establish that an edge hides enough transfer.
     """
 
-    def waves(width):
-        return math.ceil(math.ceil(rows / 128) * width / sms)
-
     choices = []
-    whole = waves(heads)
+    whole = estimated_waves((heads,), rows, sms)
     for groups in (3, 2):
         if heads < groups or whole < groups:
             continue
-        widths = min(
-            (
-                (edge, heads - 2 * edge, edge) if groups == 3 else (edge, heads - edge)
-                for edge in range(1, heads // groups + 1)
-            ),
-            key=lambda parts: (sum(waves(width) for width in parts), parts[0]),
-        )
-        if sum(waves(width) for width in widths) <= whole + 1:
-            choices.append(widths)
+        partitions = [
+            (edge, heads - 2 * edge, edge) if groups == 3 else (edge, heads - edge)
+            for edge in range(1, heads // groups + 1)
+        ]
+        if groups == 3:
+            choices.extend(partitions[:5])
+        else:
+            choices.append(min(partitions, key=lambda parts: estimated_waves(parts, rows, sms)))
     return tuple(choices)
