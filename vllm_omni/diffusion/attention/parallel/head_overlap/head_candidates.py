@@ -53,27 +53,12 @@ def estimated_waves(widths, rows, sms):
 
 
 def candidates(heads, rows, sms):
-    """Try small/large/small heads first, then small/large, then stay native.
+    """Rank all small-first pairs by estimated waves; measurements decide.
 
-    This SM90 estimate is only a candidate filter, not a measured launch grid.
-    Measure the first five symmetric partitions, including wave-count bumps.
-    This bounded experiment does not exclude a triple based on its wave cost:
-    extra compute may still buy more hidden communication.
-    Every candidate still has to beat native CE in real-layer measurements;
-    the estimate alone cannot establish that an edge hides enough transfer.
+    Bound the experiment to at most eight pairs. Larger head counts retain
+    native attention until a separately validated search budget is available.
     """
-
-    choices = []
-    whole = estimated_waves((heads,), rows, sms)
-    for groups in (3, 2):
-        if heads < groups or whole < groups:
-            continue
-        partitions = [
-            (edge, heads - 2 * edge, edge) if groups == 3 else (edge, heads - edge)
-            for edge in range(1, heads // groups + 1)
-        ]
-        if groups == 3:
-            choices.extend(partitions[:5])
-        else:
-            choices.append(min(partitions, key=lambda parts: estimated_waves(parts, rows, sms)))
-    return tuple(choices)
+    if heads < 2 or heads > 16 or estimated_waves((heads,), rows, sms) < 2:
+        return ()
+    pairs = [(small, heads - small) for small in range(1, heads // 2 + 1)]
+    return tuple(sorted(pairs, key=lambda parts: (estimated_waves(parts, rows, sms), parts[0])))

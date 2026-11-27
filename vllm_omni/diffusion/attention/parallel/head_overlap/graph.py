@@ -25,6 +25,12 @@ class AdaptiveDenoiseGraph(GraphedForward):
         policy = getattr(component, "_ulysses_head_policy", None)
         if policy is None:
             return super().__call__(variant=variant, keep_alive=keep_alive, pin=pin, **kwargs)
+        if getattr(policy, "request_scoped", False):
+            # This experiment relearns every request. Replaying a previous
+            # request's graph would bypass both sampling and the current choice.
+            result = self.module(**kwargs)
+            self.eager_calls += 1
+            return result
         # Real outputs from these invocations enter the denoising loop. Keep
         # one graph per resident input signature; capture never benchmarks.
         key = (kwargs_signature(variant), kwargs_signature(kwargs))

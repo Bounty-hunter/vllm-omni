@@ -104,3 +104,17 @@ def test_a2a_permute_teardown_releases_the_runners(fake_runtime, monkeypatch):
     a2a_permute.clear_a2a_permute_workspaces()
     assert not ulysses_ce_overlap._RUNNERS
     assert events == ["sync"]
+
+
+def test_partition_views_share_allocation_without_connect_or_sync(fake_runtime):
+    allocations, events = fake_runtime
+    runner = _configure((384, 32, 2))
+    before = list(events)
+    views = [runner.partition_view((h, 16 - h)) for h in range(1, 9)]
+    assert len(allocations) == 1 and events == before
+    for plan in views:
+        assert plan.alloc is runner.alloc and plan.handle is runner.handle
+        assert plan.t_in is runner.t_in and plan.ev_attn is runner.ev_attn
+        assert plan.output.data_ptr() == runner.output.data_ptr()
+        assert plan.out_off == runner.out_off
+    assert runner.widths == (8, 8)

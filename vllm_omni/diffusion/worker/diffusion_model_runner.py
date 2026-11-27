@@ -937,6 +937,8 @@ class DiffusionModelRunner(DiffusionStagePayloadMixin):
                 raise ValueError("Cannot execute model with empty prompt")
         if require_request_batch_support and not getattr(self.pipeline, "supports_request_batch", False):
             raise RuntimeError(f"{type(self.pipeline).__name__} does not support request-batch forward.")
+        from vllm_omni.diffusion.attention.parallel.head_overlap.head_policy import request_head_overlap
+
         service = od_config.diffusion_attention_schedule
         sampling_params = [req.sampling_params for req in reqs]
         attention_schedule = resolve_batch_attention_schedule(sampling_params, service)
@@ -1017,6 +1019,7 @@ class DiffusionModelRunner(DiffusionStagePayloadMixin):
                     in_diffusion_kv_memory_profile=in_diffusion_kv_memory_profile,
                 ),
                 paged_kv_context,
+                request_head_overlap(self.pipeline),
                 request_chunk_emitter(
                     reqs,
                     enabled=self.od_config.streaming_output,

@@ -18,7 +18,7 @@ from vllm.logger import init_logger
 from vllm_omni.diffusion.cuda_graph import kwargs_signature
 
 from ..ulysses_ce_overlap import CEOverlapUlysses, PreparationError, prepare_local
-from .head_candidates import candidates, eligible, estimated_waves
+from .head_candidates import candidates, eligible
 
 
 def canonical_strides(value):
@@ -33,18 +33,6 @@ def canonical_strides(value):
 
 def tensor_spec(value):
     return tuple(value.shape), canonical_strides(value), str(value.dtype), value.device.type
-
-
-def qualified_cycles(choices):
-    """Pair complete rotations, discarding a cycle if any rank/choice starves.
-
-    Filtering each choice independently would compare different layer
-    neighborhoods and reintroduce position/frequency bias.
-    """
-    count = min(len(rows) for rows in choices)
-    discard = 2 if count >= 10 else 1
-    valid = [index for index in range(discard, count) if all(row[1] for rows in choices for row in rows[index])]
-    return [[max(row[0] for row in rows[index]) for index in valid] for rows in choices]
 
 
 def choose(samples, *, minimum=6, relative_margin=0.015, absolute_margin_us=5.0):
@@ -67,17 +55,16 @@ def choose(samples, *, minimum=6, relative_margin=0.015, absolute_margin_us=5.0)
     return best
 
 
-def candidate_index(index):
-    # Repeat the original two-choice rotation in both directions.
-    cycle, position = divmod(index, 2)
-    return position ^ (cycle % 2) ^ ((cycle // 2) % 2)
+def candidate_index(index, count):
+    """Rotate and reverse complete native/candidate cycles across real layers."""
+    cycle, position = divmod(index, count)
+    position = (position + cycle // 2) % count
+    return count - 1 - position if cycle % 2 else position
 
 
-# Experiment defaults for a 32-layer denoiser: leave six visits untimed, then
-# sample twelve position-balanced pairs. The 80% win rate and median/MAD
-# margins prevent a single fast pair from enabling a split.
-_UNTIMED = 6
-_SAMPLES = 24
+# One complete rotation warms every choice; five measured rotations remain.
+# 16 heads require 54 real calls, leaving useful steps in short denoisers.
+_ROTATIONS = 6
 
 logger = init_logger(__name__)
 _OWNERS = WeakSet()
@@ -94,6 +81,8 @@ def clear():
         policy.discovered.clear()
         policy.visits.clear()
         policy.slots.clear()
+        policy.workspace = None
+        policy.prepared = None
 
 
 _PREPARING_GRAPH = ContextVar("ulysses_preparing_graph", default=False)
@@ -119,8 +108,10 @@ class Trial:
     observations: dict = field(default_factory=dict)
     timers: list = field(default_factory=list)
     plan: CEOverlapUlysses | None = None
-    best_plan: CEOverlapUlysses | None = None
-    fallback_plans: list = field(default_factory=list)
+    plans: tuple = ()
+    report: torch.Tensor | None = None
+    work: object = None
+    commit_at: int | None = None
     seen: int = 0
     selected: bool | None = None
 
@@ -128,9 +119,10 @@ class Trial:
 class HeadPolicy:
     """Owned by one DiT component and shared by its eligible Ulysses layers."""
 
-    def __init__(self, group, sms):
+    def __init__(self, group, sms, sample_group=None):
         _OWNERS.add(self)
         self.group = group
+        self.sample_group = sample_group if sample_group is not None else group
         self.sms = sms
         self.layouts = {}
         self.pending = set()
@@ -143,10 +135,47 @@ class HeadPolicy:
         self.routes = {}
         self.visits = {}
         self.slots = {}
+        self.step = 0
+        self.request_scoped = True
+        self.workspace = None
+        self.prepared = None
+        self.active = False
+
+    def begin_request(self):
+        """Forget all choices and samples; retain only reusable CE resources."""
+        self.active = True
+        self.layouts.clear()
+        self.pending.clear()
+        self.component_layouts.clear()
+        self.visits.clear()
+        self.routes.clear()
+        self.discovered.clear()
+        self.slots.clear()
+        self.discovery = None
+        self.step = 0
+        self.generation = 0
+
+    def end_request(self):
+        # A rank may have submitted an asynchronous reduction before its peer.
+        # Drain complete sample batches on every rank before another request;
+        # never leave an unmatched collective behind. Partial batches submit none.
+        self.resolve_pending(force=True)
+        for trial in self.layouts.values():
+            if trial.work is not None:
+                trial.work.wait()
+                trial.work = None
+        self.active = False
 
     def begin_component(self, module, args, kwargs):
         # Component inputs precede sequence sharding. All SP peers enter a new
         # shape's discovery pass even if a local core is ineligible.
+        if not self.active:
+            self.enabled_for_call = False
+            self.discovery = None
+            self.routes = {}
+            return
+        self.step += 1
+        self.resolve_pending(commit=True)
         self.component_key = kwargs_signature((args, kwargs))
         keys = self.component_layouts.get(self.component_key)
         frozen = _PREPARING_GRAPH.get() or torch.cuda.is_current_stream_capturing()
@@ -161,8 +190,8 @@ class HeadPolicy:
         self.slots = {}
         if self.pending and not frozen:
             for name, trial in self.routes.items():
-                if trial.selected is None and trial.seen < _UNTIMED + _SAMPLES:
-                    index = trial.seen - _UNTIMED
+                if trial.selected is None and trial.seen < len(trial.timers):
+                    index = trial.seen
                     trial.seen += 1
                     if index >= 0:
                         self.slots[name] = index
@@ -270,7 +299,8 @@ class HeadPolicy:
         if index is None:
             return None
         start, end = trial.timers[index]
-        plan = trial.plan if candidate_index(index) else trial.best_plan
+        choice = candidate_index(index, len(trial.plans) + 1)
+        plan = trial.plans[choice - 1] if choice else None
         start.record()
         if plan is not None:
             result = split(plan)
@@ -310,160 +340,170 @@ class HeadPolicy:
                 trial.example = ()
                 started = time.perf_counter()
                 try:
-                    plans, trial.timers = prepare_local(lambda: self._prepare(key, trial, device, pg), self.group)
+                    plans, trial.timers, reconnect = prepare_local(
+                        lambda: self._prepare(key, trial, device, pg), self.group
+                    )
                 except PreparationError as exc:
                     logger.warning("Keeping native Ulysses: %s", exc)
                     trial.selected = False
                     continue
+                if reconnect:
+                    self.workspace.connect()
                 for plan in plans:
-                    plan.connect()
-                trial.plan, *trial.fallback_plans = plans
+                    plan.handle = self.workspace.handle
+                    plan.peer_base = self.workspace.peer_base
+                trial.plans = tuple(plans)
+                trial.plan = plans[0]
+                self.prepared = key, trial.plans, trial.timers
                 logger.info(
                     "Ulysses head preparation: Q=%s candidates=%s prepare_agree_connect_ms=%.3f workspace_mib=%.3f",
                     key[1][0][0],
                     [plan.widths for plan in plans],
                     (time.perf_counter() - started) * 1000,
-                    sum(plan.capacity for plan in plans) / 2**20,
+                    self.workspace.capacity / 2**20,
                 )
                 self.pending.add(key)
             return
-        self.resolve_pending(self.component_key)
+        for key in self.pending:
+            trial = self.layouts[key]
+            if trial.seen == len(trial.timers) and trial.commit_at is None:
+                # Give GPU events and the CPU reduction one complete component
+                # to finish. Every rank commits at this same logical boundary.
+                trial.commit_at = self.step + 2
+        self.resolve_pending()
 
-    @staticmethod
-    def _prepare(key, trial, device, pg):
-        # Prepare bounded candidates before sampling; switching between trials
-        # only swaps plans and reuses completed events. No new forward, local
-        # allocation, compilation or device synchronization at that boundary.
-        plans = [HeadPolicy._prepare_plan(key, widths, device, pg) for widths in (trial.widths, *trial.alternatives)]
-        timers = [(torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)) for _ in range(_SAMPLES)]
-        for plan in plans:
-            for event in (*plan.ev_attn, *plan.ev_in_done.values(), *plan.ev_out_done.values(), plan.ev_inputs):
-                event.record()
-        for start, end in timers:
-            start.record()
-            end.record()
-        return plans, timers
-
-    @staticmethod
-    def _prepare_plan(key, widths, device, pg):
+    def _prepare(self, key, trial, device, pg):
+        if self.prepared is not None and self.prepared[0] == key:
+            return self.prepared[1], self.prepared[2], False
+        self.prepared = None
         _, qkv, joint, placement, *_ = key
         _, rows, heads, dim = qkv[0][0]
-        plan = CEOverlapUlysses(pg, device=device)
-        plan._configure(
+        if self.workspace is None:
+            self.workspace = CEOverlapUlysses(pg, device=device)
+        pool = self.workspace
+        pool._configure(
             rows,
             heads,
             dim,
-            widths,
+            trial.widths,
             torch.bfloat16,
             prefix=joint[1][0][1] if joint else 0,
             front=placement == "front",
             defer_rendezvous=True,
         )
-        if not plan.self_inputs:
+        plans = tuple(pool.partition_view(widths) for widths in (trial.widths, *trial.alternatives))
+        for plan in plans:
+            if plan.self_inputs:
+                continue
             from .staging import prepare_staging
 
             pitches = tuple(spec[1][1] for spec in (*qkv, *(joint[1:] if plan.prefix else ())))
             try:
                 plan.staging = tuple(
-                    prepare_staging((*parts, *prefix), pitches, (plan.rank * sum(widths) + offset) * dim)
+                    prepare_staging((*parts, *prefix), pitches, (plan.rank * sum(plan.widths) + offset) * dim)
                     for parts, prefix, offset in zip(plan.local_inputs, plan.prefix_inputs, plan.offsets, strict=True)
                 )
             except torch.AcceleratorError:
                 raise
             except Exception as exc:
-                # The optional staging compiler has not issued peer work yet.
                 raise PreparationError(f"Could not compile local Ulysses staging: {exc}") from exc
-        return plan
+        timers = [
+            (torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True))
+            for _ in range(_ROTATIONS * (len(plans) + 1))
+        ]
+        for event in (*pool.ev_attn, *pool.ev_in_done.values(), *pool.ev_out_done.values(), pool.ev_inputs):
+            event.record()
+        for start, end in timers:
+            start.record()
+            end.record()
+        return plans, timers, getattr(pool, "connected_alloc", None) is not pool.alloc
 
-    def resolve_pending(self, component_key):
-        """Read completed measurements without waiting on the GPU."""
-        keys = [key for key in self.component_layouts.get(component_key, ()) if key in self.pending]
-        if not keys:
-            return
-        reports = {}
-        for key in keys:
-            observations = self.layouts[key].observations
-            if self.layouts[key].seen >= _UNTIMED + _SAMPLES and len(observations) < _SAMPLES:
-                reports[key] = []  # A discovered layer changed layout or skipped a visit.
-            elif len(observations) == _SAMPLES and all(end.query() for _, end, _ in observations.values()):
-                reports[key] = [
-                    (start.elapsed_time(end) * 1000, queued)
-                    for start, end, queued in (observations[i] for i in range(_SAMPLES))
-                ]
-            else:
-                reports[key] = None
-        peers = [None] * dist.get_world_size(self.group)
-        dist.all_gather_object(peers, reports, group=self.group)
-        for key in keys:
-            trial = self.layouts[key]
-            rows = [peer[key] for peer in peers]
-            choices = [[], []]
-            if not any(row == [] for row in rows):
-                if any(row is None for row in rows):
-                    continue
-                # Every peer reports the same preassigned slot order.
-                for i, values in enumerate(zip(*rows, strict=True)):
-                    choices[candidate_index(i)].append(values)
-            samples = qualified_cycles(choices)
-            accepted = bool(choose(samples))
-            worse = bool(choose(samples[::-1]))
-            logger.info(
-                "Ulysses head trial: Q=%s reference=%s candidate=%s qualified_pairs=%d "
-                "reference_us=%s candidate_us=%s accepted=%s worse=%s",
-                key[1][0][0],
-                trial.best_plan.widths if trial.best_plan else (sum(trial.widths),),
-                trial.widths,
-                len(samples[0]),
-                statistics.median(samples[0]) if samples[0] else None,
-                statistics.median(samples[1]) if samples[1] else None,
-                accepted,
-                worse,
-            )
-            trial.observations.clear()
-            if accepted:
-                trial.best_plan = trial.plan
-            stop = False
-            if trial.best_plan is not None and worse:
-                # A regression on a wave-count bump may precede a better
-                # boundary (e.g. 1/14/1 -> 2/12/2 -> 3/10/3). Give the next
-                # lower-wave candidate a real comparison before stopping.
-                groups = len(trial.widths)
-                length = key[0] * key[1][0][0][1]
-                cost = estimated_waves(trial.widths, length, self.sms)
-                stop = not any(
-                    len(plan.widths) == groups and estimated_waves(plan.widths, length, self.sms) < cost
-                    for plan in trial.fallback_plans
-                )
-            # Before the first win, a too-small edge does not rule out larger
-            # edges. Afterwards stop on a reliable regression, not a noisy tie.
-            # A winning three-group plan keeps priority over the two-group fallback.
-            advance = (
-                all(rows)
-                and not stop
-                and trial.fallback_plans
-                and (trial.best_plan is None or len(trial.fallback_plans[0].widths) == len(trial.best_plan.widths))
-            )
-            if advance:
-                trial.plan = trial.fallback_plans.pop(0)
-                trial.widths = trial.plan.widths
-                trial.seen = 0
+    def resolve_pending(self, *, commit=False, force=False):
+        """One asynchronous MAX per sample batch, one deterministic commit.
+
+        Local event queries never initiate a per-step readiness collective.
+        A separate CPU group isolates delayed reports from layout preparation.
+        Submission follows discovery order even when event readiness differs.
+        """
+        for key, trial in self.layouts.items():
+            if key not in self.pending or trial.commit_at is None:
                 continue
-            trial.plan = trial.best_plan
-            trial.best_plan = None
-            trial.selected = trial.plan is not None
-            trial.widths = trial.plan.widths if trial.plan else (sum(trial.widths),)
+            due = commit and self.step >= trial.commit_at
+            if trial.report is None:
+                if not (force or due) and not all(end.query() for _, end, _ in trial.observations.values()):
+                    break
+                started = time.perf_counter()
+                if force or due:
+                    # Only the fixed commit/drain boundary can wait. Never wait
+                    # after a layer, and never switch just because one rank is ready.
+                    for _, end, _ in trial.observations.values():
+                        if not end.query():
+                            end.synchronize()
+                rows = []
+                for index in range(len(trial.timers)):
+                    observation = trial.observations.get(index)
+                    if observation is None:
+                        rows.append(float("inf"))
+                    else:
+                        begin, end, queued = observation
+                        rows.append(begin.elapsed_time(end) * 1000 if queued else float("inf"))
+                trial.report = torch.tensor(rows, dtype=torch.float64, device="cpu")
+                trial.work = dist.all_reduce(trial.report, op=dist.ReduceOp.MAX, group=self.sample_group, async_op=True)
+                logger.info(
+                    "Ulysses sample submission: step=%d values=%d host_ms=%.3f",
+                    self.step,
+                    len(rows),
+                    (time.perf_counter() - started) * 1000,
+                )
+            if not due:
+                continue
+            started = time.perf_counter()
+            trial.work.wait()
+            wait_ms = (time.perf_counter() - started) * 1000
+            count = len(trial.plans) + 1
+            samples = [[] for _ in range(count)]
+            rows = trial.report.tolist()
+            # Discard the first full rotation, including native. Invalidate a
+            # whole rotation if any choice/rank had an unqueued or missing call.
+            for cycle in range(1, _ROTATIONS):
+                values = rows[cycle * count : (cycle + 1) * count]
+                if all(math.isfinite(value) for value in values):
+                    for position, value in enumerate(values):
+                        samples[candidate_index(cycle * count + position, count)].append(value)
+            best = choose(samples, minimum=4)
+            trial.plan = trial.plans[best - 1] if best else None
+            trial.selected = bool(best)
+            trial.widths = trial.plan.widths if best else (sum(trial.widths),)
             self.generation += int(trial.selected)
             logger.info(
-                "Ulysses head overlap: Q=%s heads=%s local_query_tail=0 qualified_pairs=%d",
+                "Ulysses request decision: step=%d Q=%s heads=%s samples=%d "
+                "costs_us=%s commit_wait_ms=%.3f query_tail=0",
+                self.step,
                 key[1][0][0],
-                trial.widths if trial.selected else (sum(trial.widths),),
+                trial.widths,
                 len(samples[0]),
+                [statistics.median(values) if values else None for values in samples],
+                wait_ms,
             )
-            self.pending.discard(key)
-            trial.timers.clear()
-            trial.fallback_plans.clear()
-            if not trial.selected:
-                trial.plan = None
+            trial.work = None
+            trial.report = None
+            trial.observations.clear()
+            trial.timers = []  # Resource owner retains reusable events, not observations.
+            trial.plans = ()
+            self.pending.remove(key)
+
+
+@contextmanager
+def request_head_overlap(pipeline):
+    """Request-local decisions, shared workspace lifetime owned by the component."""
+    policies = getattr(pipeline, "_head_overlap_policies", ())
+    for policy in policies:
+        policy.begin_request()
+    try:
+        yield
+    finally:
+        for policy in policies:
+            policy.end_request()
 
 
 def configure_head_overlap(pipeline):
@@ -483,6 +523,7 @@ def configure_head_overlap(pipeline):
     if any(peer != signature for peer in peers) or props.major != 9 or backend != "fa3_fwd_interface":
         logger.info("Automatic Ulysses head overlap uses native attention on this GPU/backend")
         return
+    policies = []
     for name in getattr(pipeline, "_dit_modules", ("transformer", "transformer_2")):
         module = getattr(pipeline, name, None)
         if module is None:
@@ -491,10 +532,18 @@ def configure_head_overlap(pipeline):
         enabled = [(key, strategy) for key, strategy in strategies if getattr(strategy, "auto_head_overlap", False)]
         if not enabled:
             continue
-        policy = HeadPolicy(group, props.multi_processor_count)
+        sample_group = dist.new_group(
+            ranks=dist.get_process_group_ranks(group), backend="gloo", use_local_synchronization=True
+        )
+        policy = HeadPolicy(group, props.multi_processor_count, sample_group)
+        policies.append(policy)
         for layer_name, strategy in enabled:
             strategy.head_layer_name = layer_name
             strategy.head_policy = policy
         module._ulysses_head_policy = policy
         module.register_forward_pre_hook(policy.begin_component, with_kwargs=True)
         module.register_forward_hook(policy.finish_component)
+
+    pipeline._head_overlap_policies = tuple(policies)
+    if policies:
+        logger.info("Request-scoped head trials use eager DiT calls; decisions are relearned for every request")

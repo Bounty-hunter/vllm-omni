@@ -61,14 +61,27 @@ query rows. Join all peer writes before returning. A caller that consumes the re
 attention can borrow the workspace. Other adaptive callers receive an owned tensor. Read trial events only after they
 complete and agree at a component boundary. Graph preparation consumes frozen decisions.
 
-The experimental head-only policy prepares at most five small/large/small candidates and one
-two-group fallback during layout discovery. It measures increasingly large edges against the
-current incumbent, starting with native attention. A clear win updates the incumbent; a noisy
-tie keeps it and continues. A clear regression stops, except that a following lower estimated
-wave count gets a trial before stopping. Only if no triple wins is the pair tried. Phase changes
-reuse completed timing events and swap prepared plans, without allocation or extra forwards.
-Query rows keep their native order and are never subdivided. Finishing the search freezes the
-best plan and removes trial timing. Incomplete graph-time trials stay native.
+The request-scoped experiment tests small-first two-group partitions (up to eight,
+for at most sixteen rank-local heads). A wave estimate orders candidates but never
+selects the winner. Six rotating/reversed native-and-candidate cycles execute in
+real layers; the first rotation is discarded. All candidates share one symmetric
+allocation, peer mapping, streams and flags. Their packed views and staging
+launchers are prepared before measurement. The resource owner can reuse the last
+prepared geometry; it retains no winner or timing samples between requests.
+
+Sample collection performs no per-layer host synchronization and no per-step
+object collective. Completed events populate one CPU tensor, reduced with MAX
+asynchronously on a dedicated Gloo group. Every rank commits at the same fixed
+component boundary, allowing one full component after sampling for collection.
+That boundary waits if events or reduction are late; this cost is not claimed to
+be zero. Missing/starved observations invalidate the whole rotation. Insufficient
+confidence keeps native attention. Request teardown drains submitted batches;
+the next request clears all selection state, including KV-length-dependent choices.
+
+This prototype is activated only by full-request runner execution. Stepwise calls
+outside that scope remain native. Request-scoped automatic trials run eager rather
+than replaying graphs containing a previous request's choice. The tested Qwen
+configuration already uses eager execution. Query rows are never subdivided.
 
 ## Safe-change guide
 

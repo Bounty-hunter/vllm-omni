@@ -27,6 +27,7 @@ Flags (uint32, one producer and one consumer per slot) live at the start of each
 from __future__ import annotations
 
 import ctypes
+from copy import copy
 from collections.abc import Callable
 from functools import cache
 from itertools import accumulate
@@ -207,6 +208,21 @@ class CEOverlapUlysses:
     def connect(self):
         self.handle = symm_mem.rendezvous(self.alloc, self.group.group_name)
         self.peer_base = tuple(self.handle.buffer_ptrs)
+        self.connected_alloc = self.alloc
+
+    def partition_view(self, widths):
+        """Prepare another partition on the same allocation, streams and flags.
+
+        Views are used serially on the same compute stream. run()'s READY and
+        final joins protect reuse even when the next call has different widths.
+        All ranks must switch partitions at the same logical invocation.
+        """
+        if len(widths) > self.max_chunks or sum(widths) != self.h // self.n:
+            raise ValueError("A partition view must fit the existing workspace")
+        plan = copy(self)
+        plan.layout = None
+        plan._configure(self.s, self.h, self.d, widths, self.dtype, prefix=self.prefix, front=self.layout[6])
+        return plan
 
     def _slot(self, kind: str, writer: int, chunk: int = 0) -> int:
         n = self.n

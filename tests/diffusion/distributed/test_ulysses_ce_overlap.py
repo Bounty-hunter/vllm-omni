@@ -51,6 +51,7 @@ def _check_uneven(group, device, rank):
     # A recoverable OOM on just one rank is voted on before the symmetric
     # rendezvous. Both ranks can still use native collectives afterwards.
     policy = head_policy.HeadPolicy(group.cpu_group, 120)
+    policy.begin_request()
     strategy = SimpleNamespace(_sp_group=group, _ulysses_pg=group.ulysses_group, head_layer_name="self")
     layer = SimpleNamespace(
         causal=False,
@@ -61,13 +62,15 @@ def _check_uneven(group, device, rank):
     )
     layer._run_local_attention = MethodType(lambda self, q, k, v, md: _attention(q, k, v), layer)
 
+    original_prepare = policy._prepare
+
     def prepare(*args):
         if rank:
             raise torch.OutOfMemoryError("injected before rendezvous")
-        return head_policy.HeadPolicy._prepare(*args)
+        return original_prepare(*args)
 
     with (
-        patch.object(head_policy, "candidates", return_value=((1, 6, 1), (3, 5))),
+        patch.object(head_policy, "candidates", return_value=((1, 7), (3, 5))),
         patch.object(policy, "_prepare", prepare),
     ):
         policy.begin_component(None, (), {})
@@ -94,11 +97,18 @@ def _check_uneven(group, device, rank):
         qkv_spec = tuple(head_policy.tensor_spec(x) for x in inputs)
         joint_spec = tuple(head_policy.tensor_spec(x) for x in (q[:, :0], *prefix))
         key = (2, qkv_spec, joint_spec, "front" if front else "rear")
-        prepared, _ = policy._prepare(
-            key, head_policy.Trial((1, 6, 1), alternatives=((2, 4, 2), (3, 5))), device, group.ulysses_group
+        prepared, _, reconnect = policy._prepare(
+            key, head_policy.Trial((1, 7), alternatives=((2, 6), (3, 5), (4, 4))), device, group.ulysses_group
         )
+        if reconnect:
+            policy.workspace.connect()
         for plan in prepared:
-            plan.connect()
+            plan.handle = policy.workspace.handle
+            plan.peer_base = policy.workspace.peer_base
+        assert all(p.alloc is prepared[0].alloc and p.t_in is prepared[0].t_in for p in prepared)
+        # Alternating partitions reuse the same flags, streams and output slot.
+        # Repeat in reverse order to expose stale signals across view changes.
+        for plan in (*prepared, *reversed(prepared)):
             assert len(plan.staging) == len(plan.widths) and plan.tail == 0
             actual = plan.run(*inputs, _attention, joint_kv=prefix)
             torch.testing.assert_close(actual, expected, rtol=1e-2, atol=5e-3)
