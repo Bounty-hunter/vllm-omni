@@ -65,11 +65,38 @@ def test_short_trial_requires_three_consistent_gains():
     assert choose([[100] * 3, [96] * 3], minimum=3) == 0
 
 
+def test_packed_padding_preserves_document_contract():
+    from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata, PackedPaddingMetadata
+    from vllm_omni.diffusion.attention.backends.flash_attn import FlashAttentionBackend
+
+    owner = SimpleNamespace(causal=False, effective_attention=lambda: (None, FlashAttentionBackend, None))
+    kernel = MethodType(lambda self: None, owner)
+    cu = torch.tensor([0, 239, 256], dtype=torch.int32)
+    padding = PackedPaddingMetadata(239, 239, cu[:2], cu[:2])
+    extra = dict(cu_seqlens_q=cu, cu_seqlens_k=cu, max_seqlen_q=239, max_seqlen_k=239)
+    md = AttentionMetadata(packed_padding=padding, extra=extra)
+    assert eligible(kernel, md, 256)
+    assert eligible(kernel, replace(md, extra={**extra, "laser_input_scale": 8}), 256)
+    for wrong in (
+        replace(md, packed_padding=replace(padding, kv_length=238)),
+        replace(md, packed_padding=replace(padding, cu_seqlens_q=cu[:2].clone())),
+        replace(md, extra={**extra, "max_seqlen_q": 256}),
+        replace(md, extra={**extra, "cu_seqlens_k": cu.to(torch.int64)}),
+        replace(md, extra={**extra, "cu_seqlens_q": torch.tensor([0, 100, 239, 256], dtype=torch.int32)}),
+        replace(md, extra={**extra, "minimax_h3_reference_kv_post_parallel": object()}),
+        replace(md, extra={**extra, "gate_compress": torch.ones(1)}),
+        replace(md, extra={**extra, "kv_cache_dtype": "fp8"}),
+        replace(md, attn_mask=torch.ones(1, 256, dtype=torch.bool)),
+        replace(md, joint_key=torch.ones(1, 4, 2, 128)),
+    ):
+        assert not eligible(kernel, wrong, 256)
+
+
 def group_signature(prefix=4055):
     def spec(rows):
         return (1, rows, 32, 128), (0, 4096, 128, 1), "torch.bfloat16", "cuda"
 
-    return 2, (spec(4608),) * 3, (spec(0), spec(prefix), spec(prefix)), "front", None, 128**-0.5, True
+    return 2, (spec(4608),) * 3, (spec(0), spec(prefix), spec(prefix)), "front", None, 128**-0.5, True, None
 
 
 @pytest.mark.parametrize("peer_matches", [False, True])
@@ -149,10 +176,27 @@ def test_all_pairs_fit_one_component_and_commit_on_the_next(monkeypatch):
     policy.begin_component(None, (), {})
     assert "0" not in policy.slots  # A real, untimed native lead call.
     assert len(policy.slots) == trial.seen == 27
+    assert tuple(policy.slots) == tuple(str(i) for i in range(5, 32))
     for cycle in range(3):
         assert sorted(hp.candidate_index(i, 9) for i in range(cycle * 9, (cycle + 1) * 9)) == list(range(9))
     policy.finish_component(None, (), None)
     assert trial.commit_at == policy.step + 1
+
+
+@pytest.mark.parametrize("layers,timers,first", [(32, 15, 17), (50, 45, 5), (50, 24, 26), (3, 9, 1)])
+def test_unused_layers_supply_launch_lead_without_extra_calls(layers, timers, first):
+    from vllm_omni.diffusion.attention.parallel.head_overlap import head_policy as hp
+
+    policy = hp.HeadPolicy(None, 132)
+    trial = hp.Trial((1, 7), timers=[None] * timers)
+    policy.pending.add("layout")
+    policy.routes = {str(i): trial for i in range(layers)}
+    policy._assign_slots()
+    assert tuple(policy.slots) == tuple(str(i) for i in range(first, min(layers, first + timers)))
+    assert tuple(policy.slots.values()) == tuple(range(min(timers, layers - first)))
+    previous = trial.seen
+    policy._assign_slots()
+    assert trial.seen == min(timers, previous + layers)
 
 
 def test_mismatched_layer_order_skips_collective_preparation(monkeypatch):

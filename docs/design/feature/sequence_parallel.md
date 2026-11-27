@@ -103,6 +103,15 @@ Advanced UAA, unequal Q/K/V shapes (including GQA), gradients, and compressed
 gates retain their existing exchanges. An explicitly selected
 `--ulysses-a2a-backend` keeps precedence.
 
+The experimental automatic CE head-partition policy can retain producer-validated
+`[real, pad]` FlashAttention packing: partitioning heads leaves sequence coordinates
+and document boundaries unchanged. Each chunk passes the original cumulative
+lengths to the packed-varlen backend; it must not silently use dense attention.
+Its signature includes valid Q/KV lengths. Stateful post-parallel cache hooks,
+multi-document batches and compressed gates remain on the ordinary path.
+The two/four-rank numerical regression is
+`tests/diffusion/distributed/test_ulysses_packed_head_overlap.py`.
+
 Benchmark with the flag off and on using the same model, precision, topology,
 sequence shape, concurrency, and warmup. Larger messages and staging copies can
 offset the reduction in collective launches; fewer collectives alone do not

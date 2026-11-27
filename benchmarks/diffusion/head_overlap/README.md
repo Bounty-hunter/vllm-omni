@@ -10,10 +10,20 @@ one policy to each declared DiT component. An eligible native forward discovers 
 layers time native attention and one uneven split, including both exchanges and output ownership.
 The ranks agree on a choice at a component boundary and keep native attention when evidence is weak.
 
-The leading head group is chosen from an estimate of query tile waves. Where the estimate permits it,
-the final group returns remote output while its remaining local query rows attend to the complete K/V.
-New layouts during capture, compiled attention, incompatible metadata, and unsupported GPUs use native attention.
-The worker writes its chosen widths, local query tail and number of valid timing pairs to the normal log.
+This temporary experiment relearns the decision in every request; it retains only compiled kernels,
+workspace and the agreed homogeneous layer structure. All small-first two-way partitions (up to 32
+rank-local heads) are tried in three rotations. The query-wave estimate only orders those candidates;
+it is not an asserted kernel grid. There is no query-tail split. Spare real layers remain native before
+sampling so the host can build launch lead after preparation. Sampling still commits at the next
+component boundary, which may wait for device events and one asynchronous rank-MAX reduction.
+No probe forward is added, but first-use preparation and slow trial choices have real costs.
+
+Producer-validated `[real, pad]` FlashAttention layouts retain their original cumulative lengths and
+packed-varlen kernel when heads are partitioned. Masks, multi-document batches, sparse gates,
+reference-cache hooks and quantized KV remain outside this experiment. Numerical coverage includes
+`tests/diffusion/distributed/test_ulysses_packed_head_overlap.py` on two and four ranks. This is not a
+claim that every packed model has an end-to-end speedup. New layouts during capture, compiled attention,
+incompatible metadata, and unsupported GPUs use native attention.
 
 ## Run
 

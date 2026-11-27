@@ -267,6 +267,9 @@ class MiniMaxH3Attention(nn.Module):
             causal=False,
             # Packed rows reach the impl as [B, S, N, D].
             qkv_layout="BSND",
+            # The output projection consumes the attention view before any
+            # later attention call can reuse the Ulysses workspace.
+            borrow_ulysses_output=True,
             role=role,
             role_category=role_category,
             skip_sequence_parallel=skip_sequence_parallel,

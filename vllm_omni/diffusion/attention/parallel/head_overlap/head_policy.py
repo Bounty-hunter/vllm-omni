@@ -37,13 +37,22 @@ def tensor_spec(value):
 
 def layout_family(signature):
     """A dense layer group's structure, independent of Q/KV lengths and grid size."""
-    world, qkv, joint, placement, grid, scale, borrowed = signature
+    world, qkv, joint, placement, grid, scale, borrowed, packing = signature
 
     def family(spec):
         shape, strides, dtype, device = spec
         return (shape[0], *shape[2:]), strides, dtype, device
 
-    return world, tuple(map(family, qkv)), tuple(map(family, joint)), placement, grid is not None, scale, borrowed
+    return (
+        world,
+        tuple(map(family, qkv)),
+        tuple(map(family, joint)),
+        placement,
+        grid is not None,
+        scale,
+        borrowed,
+        packing is not None,
+    )
 
 
 def choose(samples, *, minimum=6, relative_margin=0.015, absolute_margin_us=5.0):
@@ -126,7 +135,7 @@ class Trial:
     report: torch.Tensor | None = None
     work: object = None
     commit_at: int | None = None
-    seen: int = -1  # One real native call before assigning the first timed slot.
+    seen: int = -1  # Unassigned: leave spare real layers native before sampling.
     selected: bool | None = None
 
 
@@ -211,12 +220,23 @@ class HeadPolicy:
     def _assign_slots(self, frozen=False):
         self.slots = {}
         if self.pending and not frozen:
+            visits = Counter(id(trial) for trial in self.routes.values())
+            lead = {}
+            for trial in self.routes.values():
+                if trial.selected is None and trial.seen < 0:
+                    # Preparation/agreement can drain the launch queue. Use
+                    # spare layers as lead, without adding calls or delaying
+                    # the commit beyond the next component boundary.
+                    lead[id(trial)] = max(1, visits[id(trial)] - len(trial.timers))
+                    trial.seen = 0
             for name, trial in self.routes.items():
+                if lead.get(id(trial), 0):
+                    lead[id(trial)] -= 1
+                    continue
                 if trial.selected is None and trial.seen < len(trial.timers):
                     index = trial.seen
                     trial.seen += 1
-                    if index >= 0:
-                        self.slots[name] = index
+                    self.slots[name] = index
 
     def try_run(self, strategy, layer, q, k, v, md):
         """First visit confirms a learned group; subsequent visits can sample now."""
@@ -300,6 +320,8 @@ class HeadPolicy:
         # A cached signature describes every participating Q/K/V layout, including the prefix KV.
         placement = md.joint_strategy if joint else None
         grid = md.video_layout.latent_grid if md is not None and md.video_layout else None
+        packed = md.packed_padding if md is not None else None
+        packing = (packed.q_length, packed.kv_length) if packed is not None else None
         if self.discovery is not None:
             signature = (
                 world,
@@ -309,6 +331,7 @@ class HeadPolicy:
                 grid,
                 layer.softmax_scale,
                 layer.borrow_ulysses_output,
+                packing,
             )
             trial = self.layouts.get(signature) or self.discovered.get(signature)
             if trial is None and len(self.layouts) + len(self.discovered) < 16:
@@ -327,11 +350,12 @@ class HeadPolicy:
         # All admitted tensors have batch one, dense heads, BF16 and the same
         # device. Validate the variable geometry without rebuilding/hashing the
         # discovery signature or recursively walking the metadata every layer.
-        _, input_specs, joint_specs, expected_placement, expected_grid, _, _ = trial.signature
+        _, input_specs, joint_specs, expected_placement, expected_grid, _, _, expected_packing = trial.signature
         if (
             q.shape != input_specs[0][0]
             or placement != expected_placement
             or grid != expected_grid
+            or packing != expected_packing
             or any(x.stride(1) != spec[1][1] for x, spec in zip((q, k, v), input_specs))
             or any(x.shape != spec[0] or x.stride(1) != spec[1][1] for x, spec in zip(joint, joint_specs))
         ):

@@ -4,6 +4,58 @@
 
 import math
 
+import torch
+
+_PACKED_FIELDS = frozenset(("cu_seqlens_q", "cu_seqlens_k", "max_seqlen_q", "max_seqlen_k"))
+# These are head-independent producer hints ignored by CUDA packed FlashAttention.
+# State-bearing reference-cache, gate, mask and quantization extras remain excluded.
+_PACKED_HINTS = frozenset(
+    (
+        "valid_kv_length",
+        "npu_attn_varlen",
+        "laser_input_scale",
+        "vsa_h3_tile_size",
+        "vsa_h3_ref_policy",
+        "vsa_h3_ref_keep_rate",
+        "vsa_h3_sparsity",
+    )
+)
+
+
+def _packed_padding_eligible(metadata, rows):
+    padding, extra = metadata.packed_padding, metadata.extra
+    if not _PACKED_FIELDS <= extra.keys() or extra.keys() - _PACKED_FIELDS - _PACKED_HINTS:
+        return False
+    if not (
+        type(padding.q_length) is int
+        and type(padding.kv_length) is int
+        and 0 < padding.q_length == padding.kv_length <= rows
+        and extra["max_seqlen_q"] == padding.q_length
+        and extra["max_seqlen_k"] == padding.kv_length
+        and extra.get("valid_kv_length", padding.kv_length) == padding.kv_length
+        and all(x is None for x in (metadata.joint_query, metadata.joint_key, metadata.joint_value))
+    ):
+        return False
+    # The producer supplies canonical [0, valid] views of the complete
+    # [real, pad] document boundaries. Heads are independent; retain the
+    # original cu_seqlens and varlen dispatcher for every partition.
+    for key, view in (("cu_seqlens_q", padding.cu_seqlens_q), ("cu_seqlens_k", padding.cu_seqlens_k)):
+        cu = extra[key]
+        if not (
+            isinstance(cu, torch.Tensor)
+            and isinstance(view, torch.Tensor)
+            and cu.ndim == view.ndim == 1
+            and cu.numel() == (2 if padding.q_length == rows else 3)
+            and view.numel() == 2
+            and cu.dtype == view.dtype == torch.int32
+            and cu.is_contiguous()
+            and view.is_contiguous()
+            and cu.device == view.device
+            and cu.data_ptr() == view.data_ptr()
+        ):
+            return False
+    return True
+
 
 def eligible(kernel, metadata, distributed_rows):
     owner = getattr(kernel, "__self__", None)
@@ -14,6 +66,19 @@ def eligible(kernel, metadata, distributed_rows):
         return False
     if metadata is None:
         return True
+    if any(
+        x is not None
+        for x in (
+            metadata.attn_mask,
+            metadata.joint_attn_mask,
+            metadata.full_attn_spans,
+            metadata.query_ranges,
+            metadata.cross_query_mask,
+        )
+    ):
+        return False
+    if metadata.packed_padding is not None:
+        return _packed_padding_eligible(metadata, distributed_rows)
     layout = metadata.video_layout
     if layout is None:
         if metadata.extra:
